@@ -12,8 +12,9 @@ object ComSetupFrm: TComSetupFrm
   ClientWidth = 310
   Font.Height = -11
   Font.Name = 'MS Sans Serif'
-  OnCreate = FormCreate
   Position = poMainFormCenter
+  LCLVersion = '4.4.0.0'
+  OnCreate = FormCreate
   object Button1: TButton
     Left = 104
     Height = 25
@@ -113,7 +114,52 @@ object ComSetupFrm: TComSetupFrm
       Caption = 'Flow control'
       ParentColor = False
     end
-    object ComComboBox1: TComboBox
+    object ComComboBox2: TComboBox
+      Left = 102
+      Height = 24
+      Top = 41
+      Width = 200
+      ItemHeight = 16
+      Style = csDropDownList
+      TabOrder = 0
+    end
+    object ComComboBox3: TComboBox
+      Left = 102
+      Height = 24
+      Top = 71
+      Width = 200
+      ItemHeight = 16
+      Style = csDropDownList
+      TabOrder = 1
+    end
+    object ComComboBox4: TComboBox
+      Left = 102
+      Height = 24
+      Top = 101
+      Width = 200
+      ItemHeight = 16
+      Style = csDropDownList
+      TabOrder = 2
+    end
+    object ComComboBox5: TComboBox
+      Left = 102
+      Height = 24
+      Top = 131
+      Width = 200
+      ItemHeight = 16
+      Style = csDropDownList
+      TabOrder = 3
+    end
+    object ComComboBox6: TComboBox
+      Left = 102
+      Height = 24
+      Top = 161
+      Width = 200
+      ItemHeight = 16
+      Style = csDropDownList
+      TabOrder = 4
+    end
+    object SerialSelector1: TSerialSelector
       Left = 102
       Height = 21
       Top = 11
@@ -126,52 +172,10 @@ object ComSetupFrm: TComSetupFrm
       Font.Quality = fqDraft
       Font.Style = [fsBold]
       ItemHeight = 13
+      ItemIndex = 0
+      Options = [ssoAppendFriendlyNames, ssoUseWMI, ssoHide_tty_usbserial, ssoAppendSerialNumber]
       ParentFont = False
-      TabOrder = 0
-    end
-    object ComComboBox2: TComboBox
-      Left = 102
-      Height = 24
-      Top = 41
-      Width = 200
-      ItemHeight = 16
-      Style = csDropDownList
-      TabOrder = 1
-    end
-    object ComComboBox3: TComboBox
-      Left = 102
-      Height = 24
-      Top = 71
-      Width = 200
-      ItemHeight = 16
-      Style = csDropDownList
-      TabOrder = 2
-    end
-    object ComComboBox4: TComboBox
-      Left = 102
-      Height = 24
-      Top = 101
-      Width = 200
-      ItemHeight = 16
-      Style = csDropDownList
-      TabOrder = 3
-    end
-    object ComComboBox5: TComboBox
-      Left = 102
-      Height = 24
-      Top = 131
-      Width = 200
-      ItemHeight = 16
-      Style = csDropDownList
-      TabOrder = 4
-    end
-    object ComComboBox6: TComboBox
-      Left = 102
-      Height = 24
-      Top = 161
-      Width = 200
-      ItemHeight = 16
-      Style = csDropDownList
+      ShowHint = True
       TabOrder = 5
     end
   end

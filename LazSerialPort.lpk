@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <CONFIG>
-  <Package Version="4">
+  <Package Version="5">
     <Name Value="LazSerialPort"/>
     <Type Value="RunAndDesignTime"/>
     <AddToProjectUsesSection Value="True"/>
@@ -25,14 +25,29 @@
   You should have received a Copy of the GNU Library General Public License
   along with This library; if not, Write to the Free Software Foundation,
   Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA. }"/>
-    <Version Minor="6"/>
-    <Files Count="1">
+    <Version Minor="7" Release="5"/>
+    <Files Count="3">
       <Item1>
         <Filename Value="lazserial.pas"/>
         <HasRegisterProc Value="True"/>
         <UnitName Value="LazSerial"/>
       </Item1>
+      <Item2>
+        <Filename Value="serialwatcher.pas"/>
+        <HasRegisterProc Value="True"/>
+        <UnitName Value="SerialWatcher"/>
+      </Item2>
+      <Item3>
+        <Filename Value="serialselector.pas"/>
+        <HasRegisterProc Value="True"/>
+        <UnitName Value="SerialSelector"/>
+      </Item3>
     </Files>
+    <CompatibilityMode Value="True"/>
+    <i18n>
+      <EnableI18N Value="True"/>
+      <OutDir Value="languages"/>
+    </i18n>
     <RequiredPkgs Count="3">
       <Item1>
         <PackageName Value="IDEIntf"/>

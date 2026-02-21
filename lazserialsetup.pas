@@ -15,7 +15,8 @@ interface
 
 uses
   LCLIntf, SysUtils, Classes, Graphics, Controls, Forms, Dialogs,
-  StdCtrls, ExtCtrls, Buttons, LResources,lazSerial;
+  StdCtrls, ExtCtrls, Buttons, LResources,lazSerial,
+  SerialSelector, LazSerialCommon;
 
 type
   // TLazSerial setup dialog
@@ -25,7 +26,7 @@ type
   TComSetupFrm = class(TForm)
     Button1: TButton;
     Button2: TButton;
-    ComComboBox1: TComboBox;
+    SerialSelector1:TSerialSelector;
     ComComboBox2: TComboBox;
     ComComboBox3: TComboBox;
     ComComboBox4: TComboBox;
@@ -45,7 +46,7 @@ type
     { Public declarations }
   end;
 
-procedure EditComPort(ComPort: TlazSerial);
+procedure EditComPort(ComPort: TlazSerial; Options : tSSOptionS = [ssoAppendFriendlyNames, ssoHide_tty_usbserial,ssoUseWMI,ssoAppendSerialNumber]);
 
 // conversion functions
 function StrToBaudRate(Str: string): TBaudRate;
@@ -75,7 +76,7 @@ const
 {$ELSE}      // MSWINDOWS
   BaudRateStrings: array[TBaudRate] of string = ('110', '300', '600',
     '1200', '2400', '4800', '9600', '14400', '19200', '38400', '56000', '57600',
-    '115200', '128000', '230400', '256000','460800', '921600');
+    '115200', '128000', '230400', '250000', '256000','460800', '921600');
 {$ENDIF}
   StopBitsStrings: array[TStopBits] of string = ('1', '1.5', '2');
   DataBitsStrings: array[TDataBits] of string = ('8', '7', '6', '5');
@@ -214,11 +215,12 @@ begin
   Result := FlowControlStrings[FlowControl];
 end;
 
-procedure EditComPort(ComPort: TLazSerial);
+procedure EditComPort(ComPort: TlazSerial; Options : tSSOptionS = [ssoAppendFriendlyNames, ssoHide_tty_usbserial,ssoUseWMI,ssoAppendSerialNumber]);
 begin
   with TComSetupFrm.Create(nil) do
   begin
-    ComComboBox1.Text := ComPort.Device;
+    SerialSelector1.Device :=  ComPort.Device;
+    SerialSelector1.Options := Options;
     ComComboBox2.Text :=  BaudRateToStr(ComPort.BaudRate);
     ComComboBox3.Text :=  DataBitsToStr(ComPort.DataBits);
     ComComBoBox4.Text :=  StopBitsToStr(ComPort.StopBits);
@@ -228,7 +230,7 @@ begin
  if ShowModal = mrOK then
     begin
       ComPort.Close;
-      ComPort.Device := ComComboBox1.Text;
+      ComPort.Device := SerialSelector1.Device;
       ComPort.BaudRate := StrToBaudRate(ComComboBox2.Text);
       ComPort.DataBits := StrToDataBits(ComComboBox3.Text);
       ComPort.StopBits := StrToStopBits(ComComboBox4.Text);
@@ -245,14 +247,14 @@ end;
 
 procedure TComSetupFrm.FormCreate(Sender: TObject);
 begin
-  ComComboBox1.Items.CommaText :=  GetSerialPortNames();
+  SerialSelector1.Items.CommaText := GetSerialPortNames();
+  SerialSelector1.ShowHint := true;
   StringArrayToList(ComComboBox2.Items,BaudRateStrings) ;
   StringArrayToList(ComComboBox3.Items,DataBitsStrings) ;
   StringArrayToList(ComComboBox4.Items,StopBitsStrings) ;
   StringArrayToList(ComComboBox5.Items,ParityBitsStrings) ;
   StringArrayToList(ComComboBox6.Items,FlowControlStrings) ;
 end;
-
 
 initialization
   {$i lazSerialSetup.lrs}

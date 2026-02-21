@@ -1,0 +1,15 @@
+msgid ""
+msgstr "Content-Type: text/plain; charset=UTF-8"
+
+#: serialselector.lngaddedports
+msgid "Added ports: "
+msgstr ""
+
+#: serialselector.lngnodevicesavailable
+msgid "No devices available"
+msgstr ""
+
+#: serialselector.lngremovedports
+msgid "Removed ports: "
+msgstr ""
+

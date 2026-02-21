@@ -1,0 +1,135 @@
+msgid ""
+msgstr "Content-Type: text/plain; charset=UTF-8"
+
+#: lazserialcommon.lngaddedports
+msgid "Added ports: "
+msgstr ""
+
+#: lazserialcommon.lngbluetoothserial
+msgid "Bluetooth Serial"
+msgstr ""
+
+#: lazserialcommon.lngbuiltinserial
+msgid "Built-in Serial"
+msgstr ""
+
+#: lazserialcommon.lnghpun2420mobilebroadbandmodulemodem
+msgid "HP un2420 Mobile Broadband Module Modem"
+msgstr ""
+
+#: lazserialcommon.lngmt65xx_preloader
+msgid "MT65xx Preloader"
+msgstr ""
+
+#: lazserialcommon.lngnodevicesavailable
+msgid "No devices available"
+msgstr ""
+
+#: lazserialcommon.lngremovedports
+msgid "Removed ports: "
+msgstr ""
+
+#: lazserialcommon.lngusbgwinstek
+msgid "USB GwInstek"
+msgstr ""
+
+#: lazserialcommon.lngusbserialarduino
+msgid "USB Arduino"
+msgstr ""
+
+#: lazserialcommon.lngusbserialarduinodue
+msgid "USB Arduino Due"
+msgstr ""
+
+#: lazserialcommon.lngusbserialarduinodue_programming_port
+msgid "USB Arduino Due Programming Port"
+msgstr ""
+
+#: lazserialcommon.lngusbserialarduinoisp
+msgid "USB Arduino ISP"
+msgstr ""
+
+#: lazserialcommon.lngusbserialarduinoleonardo
+msgid "USB Arduino Leonardo"
+msgstr ""
+
+#: lazserialcommon.lngusbserialarduinoleonardo_bootloader
+msgid "USB Arduino Leonardo Bootloader"
+msgstr ""
+
+#: lazserialcommon.lngusbserialarduinomega_2560
+msgid "USB Arduino Mega 2560"
+msgstr ""
+
+#: lazserialcommon.lngusbserialarduinomega_2560_r3
+msgid "USB Arduino Mega 2560 R3"
+msgstr ""
+
+#: lazserialcommon.lngusbserialarduinomega_adk
+msgid "USB Arduino Mega ADK"
+msgstr ""
+
+#: lazserialcommon.lngusbserialarduinomega_adk_r3
+msgid "USB Arduino Mega ADK R3"
+msgstr ""
+
+#: lazserialcommon.lngusbserialarduinoserial_adapter
+msgid "USB Arduino Serial Adapter"
+msgstr ""
+
+#: lazserialcommon.lngusbserialarduinoserial_r3
+msgid "USB Arduino Serial R3"
+msgstr ""
+
+#: lazserialcommon.lngusbserialarduinouno
+msgid "USB Arduino Uno"
+msgstr ""
+
+#: lazserialcommon.lngusbserialarduinouno_r3
+msgid "USB Arduino Uno R3"
+msgstr ""
+
+#: lazserialcommon.lngusbserialch340
+msgid "USB CH340"
+msgstr ""
+
+#: lazserialcommon.lngusbserialch341
+msgid "USB CH341"
+msgstr ""
+
+#: lazserialcommon.lngusbserialch343
+msgid "USB CH343"
+msgstr ""
+
+#: lazserialcommon.lngusbserialch34x
+msgid "USB CH34x"
+msgstr ""
+
+#: lazserialcommon.lngusbserialft232
+msgid "USB FT232"
+msgstr ""
+
+#: lazserialcommon.lngusbserialftdi
+msgid "USB FTDI"
+msgstr ""
+
+#: lazserialcommon.lngusbserialprolific
+msgid "USB Prolific"
+msgstr ""
+
+#: lazserialcommon.lngusbserialstm
+msgid "USB STM"
+msgstr ""
+
+#: lazserialcommon.lngusbserialunknown
+msgid "USB Serial (unknown)"
+msgstr ""
+
+#: lazserialcommon.lngusbsiliconlabs
+msgid "USB Silicon Labs"
+msgstr ""
+
+#: lazserialcommon.lngusbsiliconlabscp210x
+msgid "USB Silicon Labs CP210x"
+msgstr ""
+

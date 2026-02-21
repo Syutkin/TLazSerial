@@ -13,6 +13,7 @@ uses
 {$R *.res}
 
 begin
+  Application.Title:='';
   Application.Initialize;
   Application.CreateForm(TFMain, FMain);
   Application.Run;

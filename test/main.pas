@@ -326,8 +326,6 @@ begin
   EditDevice.Text := Serial.Device;
 end;
 
-
-
 procedure TFMain.BOpenClick(Sender: TObject);
 begin
   Serial.Device := EditDevice.Text;

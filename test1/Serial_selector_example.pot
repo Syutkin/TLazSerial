@@ -1,0 +1,85 @@
+msgid ""
+msgstr "Content-Type: text/plain; charset=UTF-8"
+
+#: tform1.caption
+msgid "TLazSerial Example"
+msgstr ""
+
+#: tform1.checkbox1.caption
+msgid "Append friendly names"
+msgstr ""
+
+#: tform1.checkbox2.caption
+msgid "Hide TTI"
+msgstr ""
+
+#: tform1.checkbox3.caption
+msgid "Show hint"
+msgstr ""
+
+#: tform1.chkserialnumber.caption
+msgid "Serial №"
+msgstr ""
+
+#: tform1.chkserialnumber.hint
+msgid ""
+"Append the Serial № to the friendly names.\n"
+"Serial devices rarely have serial numbers."
+msgstr ""
+
+#: tform1.chkusewmi.caption
+msgid "Use WMI"
+msgstr ""
+
+#: tform1.cmdconnect.caption
+msgctxt "tform1.cmdconnect.caption"
+msgid "Connect"
+msgstr ""
+
+#: tform1.cmdsend.caption
+msgid "Send"
+msgstr ""
+
+#: tform1.combobox1.hint
+msgid "This value is used if Custom baudrate is < 0"
+msgstr ""
+
+#: tform1.combobox1.text
+msgid "ComboBox1"
+msgstr ""
+
+#: tform1.label1.caption
+msgid "Baudrate"
+msgstr ""
+
+#: tform1.label2.caption
+msgid "Label2"
+msgstr ""
+
+#: tform1.lblcustombaudrate.caption
+msgid "Custom baudrate"
+msgstr ""
+
+#: tform1.spinedit1.hint
+msgid "Primary value, will be used if it is not negative."
+msgstr ""
+
+#: unit1.lngconnect
+msgctxt "unit1.lngconnect"
+msgid "Connect"
+msgstr ""
+
+#: unit1.lngdevicedisconnected
+#, object-pascal-format
+msgid "Device %s was removed while the connection was active."
+msgstr ""
+
+#: unit1.lngdisconnect
+msgid "Disconnect"
+msgstr ""
+
+#: unit1.lngerrorcannotconnect
+#, object-pascal-format
+msgid "Error: cannot connect to %s."
+msgstr ""
+

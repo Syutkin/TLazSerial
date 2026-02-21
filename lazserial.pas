@@ -57,10 +57,10 @@ uses
   cthreads,
 {$ENDIF}
 {$ELSE}
-  Windows, Classes, //registry,
+  Windows, Classes, ActiveX, Utilwmi, //registry,
 {$ENDIF}
   SysUtils, lazsynaser,  LResources, Forms, Controls, Graphics, Dialogs,
-  PropEdits;
+  PropEdits, SerialWatcher, LazSerialCommon;
 
 
 type
@@ -76,7 +76,7 @@ type
 {$ELSE}      // MSWINDOWS
    TBaudRate=(br___110,br___300, br___600, br__1200, br__2400, br__4800,
            br__9600,br_14400, br_19200, br_38400,br_56000, br_57600,
-           br115200,br128000, br230400,br256000, br460800, br921600);
+           br115200,br128000, br230400, br250000, br256000, br460800, br921600);
 {$ENDIF}
   TDataBits=(db8bits,db7bits,db6bits,db5bits);
   TParity=(pNone,pOdd,pEven,pMark,pSpace);
@@ -99,7 +99,7 @@ const
 {$ELSE}      // MSWINDOWS
     ConstsBaud: array[TBaudRate] of integer=
     (110, 300, 600, 1200, 2400, 4800, 9600, 14400, 19200, 38400, 56000, 57600,
-    115200, 128000, 230400, 256000, 460800, 921600 );
+    115200, 128000, 230400, 250000, 256000, 460800, 921600);
 {$ENDIF}
 
   ConstsBits: array[TDataBits] of integer=(8, 7 , 6, 5);
@@ -121,6 +121,19 @@ type
     property Terminated;
   end;
 
+  {$ifdef windows}
+  TUpdatePortsThread = class(TThread)
+    private
+
+    protected
+      procedure Execute; override;
+    public
+      Owner: TLazSerial;
+      Constructor Create(CreateSuspended : boolean);
+  end;
+  {$endif}
+
+
   { TLazSerial }
 
   TLazSerial = class(TComponent)
@@ -129,7 +142,10 @@ type
     FSynSer: TBlockSerial;
     FDevice: string;
 
+    FSerialWatcher : TSerialWatcher;
+
     FBaudRate: TBaudRate;
+    FCustomBaudRate : Integer;
     FDataBits: TDataBits;
     FParity: TParity;
     FStopBits: TStopBits;
@@ -140,16 +156,23 @@ type
 
     FOnRxData: TNotifyEvent;
     FOnStatus: TStatusEvent;
+    FOnRemoved: TNotifyEvent;
     ReadThread: TComPortReadThread;
+    {$ifdef windows}
+    FUpdatePortsThread : TUpdatePortsThread;{$endif}
 
     procedure DeviceOpen;
     procedure DeviceClose;
 
     procedure ComException(str: string);
+    procedure ComDisconnected(Sender: TObject);
+    procedure TriggerDisconnected;
+    function AppliedBaudrate: integer;
 
   protected
     procedure SetActive(state: boolean);
     procedure SetBaudRate(br: TBaudRate);
+    procedure SetCustomBaudrate(br: Integer);
     procedure SetDataBits(db: TDataBits);
     procedure SetParity(pr: TParity);
     procedure SetFlowControl(fc: TFlowControl);
@@ -162,7 +185,7 @@ type
     procedure Open;
     procedure Close;
     // show a port settings dialog form
-    procedure ShowSetupDialog;
+    procedure ShowSetupDialog (Options : tSSOptionS = [ssoAppendFriendlyNames, ssoHide_tty_usbserial,ssoUseWMI,ssoAppendSerialNumber]);
     // read data from port
     function DataAvailable: boolean;
     function ReadData: string;
@@ -187,8 +210,10 @@ type
 
   published
     property Active: boolean read FActive write SetActive;
-
+    // Will be overridden by CustomBaudRate if its value is ≥ 0.
     property BaudRate: TBaudRate read FBaudRate write SetBaudRate; // default br115200;
+    // If < 0 the value of BaudRate is used instead.
+    property CustomBaudRate: integer read FCustomBaudRate write SetCustomBaudrate; //default -1
     property DataBits: TDataBits read FDataBits write SetDataBits;
     property Parity: TParity read FParity write SetParity;
     property FlowControl: TFlowControl read FFlowControl write SetFlowControl;
@@ -200,6 +225,8 @@ type
 
     property OnRxData: TNotifyEvent read FOnRxData write FOnRxData;
     property OnStatus: TStatusEvent read FOnStatus write FOnStatus;
+    //Triggers an event if the device was removed during and ACTIVE connection. Linux and Windows only.
+    property OnRemoved : TNotifyEvent read FOnRemoved write FOnRemoved;
   end;
 
 procedure Register;
@@ -250,10 +277,13 @@ begin
   FHardflow:=false;
   FSoftflow:=false;
   FFlowControl:=fcNone;
+  FSerialWatcher := TSerialWatcher.Create(Self);
+  FSerialWatcher.OnComDisconnected := @ComDisconnected;
+  FCustomBaudRate := -1;
   {$IFDEF LINUX}
   FDevice:='/dev/ttyS0';
   {$ELSE}
-  FDevice:='COM1';
+  FDevice:='COM1'; //TODO: Set to the first available device, if a device is available
   {$ENDIF}
   FRcvLineCRLF := False;;
 //  FBaudRate:=br115200;
@@ -282,9 +312,16 @@ begin
   Active:=true;
 end;
 
-procedure TLazSerial.ShowSetupDialog;
+procedure TLazSerial.ShowSetupDialog (Options : tSSOptionS = [ssoAppendFriendlyNames, ssoHide_tty_usbserial,ssoUseWMI,ssoAppendSerialNumber]);
 begin
-  EditComPort(self);
+  EditComPort(self, Options);
+end;
+
+function TLazSerial.AppliedBaudrate: integer;
+begin
+  if (FCustomBaudRate < 0)
+    then Result := ConstsBaud[FBaudRate]
+    else Result := FCustomBaudRate;
 end;
 
 procedure TLazSerial.DeviceOpen;
@@ -292,8 +329,7 @@ begin
   FSynSer.Connect(FDevice);
   if FSynSer.Handle=INVALID_HANDLE_VALUE then
     raise Exception.Create('Could not open device '+ FSynSer.Device);
-
-  FSynSer.Config(ConstsBaud[FBaudRate],
+  FSynSer.Config(AppliedBaudrate,
                  ConstsBits[FDataBits],
                  ConstsParity[FParity],
                  ConstsStopBits[FStopBits],
@@ -332,17 +368,28 @@ end;
 procedure TLazSerial.SetBaudRate(br: TBaudRate);
 begin
   FBaudRate:=br;
+  if (FCustomBaudRate > -1) then exit;
   if FSynSer.Handle<>INVALID_HANDLE_VALUE then begin
     FSynSer.Config(ConstsBaud[FBaudRate], ConstsBits[FDataBits], ConstsParity[FParity],
                    ConstsStopBits[FStopBits], FSoftflow, FHardflow);
   end;
 end;
 
+procedure TLazSerial.SetCustomBaudrate(br: Integer);
+begin
+  if (FCustomBaudRate = br) then exit;
+  FCustomBaudRate := br;
+  if (FCustomBaudRate < 0)
+    then SetBaudRate(FBaudRate)
+    else FSynSer.Config(FCustomBaudRate, ConstsBits[FDataBits], ConstsParity[FParity],
+                   ConstsStopBits[FStopBits], FSoftflow, FHardflow);
+end;
+
 procedure TLazSerial.SetDataBits(db: TDataBits);
 begin
   FDataBits:=db;
   if FSynSer.Handle<>INVALID_HANDLE_VALUE then begin
-    FSynSer.Config(ConstsBaud[FBaudRate], ConstsBits[FDataBits], ConstsParity[FParity],
+    FSynSer.Config(AppliedBaudrate, ConstsBits[FDataBits], ConstsParity[FParity],
                    ConstsStopBits[FStopBits], FSoftflow, FHardflow);
   end;
 end;
@@ -361,7 +408,7 @@ begin
   end;
 
   if FSynSer.Handle<>INVALID_HANDLE_VALUE then begin
-    FSynSer.Config(ConstsBaud[FBaudRate], ConstsBits[FDataBits], ConstsParity[FParity],
+    FSynSer.Config(AppliedBaudrate, ConstsBits[FDataBits], ConstsParity[FParity],
                    ConstsStopBits[FStopBits], FSoftflow, FHardflow);
   end;
   FFlowControl:=fc;
@@ -382,7 +429,7 @@ procedure TLazSerial.SetParity(pr: TParity);
 begin
   FParity:=pr;
   if FSynSer.Handle<>INVALID_HANDLE_VALUE then begin
-    FSynSer.Config(ConstsBaud[FBaudRate], ConstsBits[FDataBits], ConstsParity[FParity],
+    FSynSer.Config(AppliedBaudrate, ConstsBits[FDataBits], ConstsParity[FParity],
                    ConstsStopBits[FStopBits], FSoftflow, FHardflow);
   end;
 end;
@@ -391,14 +438,10 @@ procedure TLazSerial.SetStopBits(sb: TStopBits);
 begin
   FStopBits:=sb;
   if FSynSer.Handle<>INVALID_HANDLE_VALUE then begin
-    FSynSer.Config(ConstsBaud[FBaudRate], ConstsBits[FDataBits], ConstsParity[FParity],
+    FSynSer.Config(AppliedBaudrate, ConstsBits[FDataBits], ConstsParity[FParity],
                    ConstsStopBits[FStopBits], FSoftflow, FHardflow);
   end;
 end;
-
-
-
-
 
 function TLazSerial.WriteBuffer(var buf; size: integer): integer;
 begin
@@ -463,7 +506,6 @@ begin
   FSynSer.RTS := OnOff;
 end;
 
-
 procedure TLazSerial.ComException(str: string);
 begin
   raise Exception.Create('ComPort error: '+str);
@@ -488,9 +530,58 @@ begin
   finally
     Terminate;
   end;
-
 end;
 
+//Begin: Handle disconnect detection
+procedure TLazSerial.TriggerDisconnected;
+var
+  Ports: TStringList;
+begin
+  if not Active then exit;
+  Ports := TStringList.Create;
+  Ports.CommaText := GetSerialPortNames{$ifdef windows}(True){$endif}; //Uses the WMI method in windows, registry reading is not reliable
+
+  if (Ports.IndexOf(FDevice) < 0) then
+  begin
+    Active := False;
+    if Assigned(FOnRemoved) then FOnRemoved(Self);
+  end; //if
+  Ports.Free;
+end;
+
+procedure TLazSerial.ComDisconnected(Sender: TObject);
+begin
+  {$ifdef windows}
+  FUpdatePortsThread := TUpdatePortsThread.Create(True); // This way it doesn't start automatically
+  FUpdatePortsThread.Owner := Self;
+  FUpdatePortsThread.Start;
+  {$else}
+  TriggerDisconnected;
+  {$endif}
+end;
+
+{TUpdatePortsThread}
+{$ifdef windows}
+constructor TUpdatePortsThread.Create(CreateSuspended : boolean);
+begin
+  inherited Create(CreateSuspended);
+  FreeOnTerminate := True;
+end;
+
+procedure TUpdatePortsThread.Execute;
+begin
+  try
+   CoInitialize(nil); //The app will crash without this
+   //The first call of GetWMIInfo is slow. The next call is done in TriggerDisconnected, but it is not slow
+   //Todo: maybe this is not reliable enough
+   GetWMIInfo('Win32_PnPEntity',['Caption','DeviceID'],'WHERE Caption LIKE ''%%(COM%%)''',30); //usually this does ot take more than 6 seconds, but 20 seconds are also observed
+   Synchronize(@Owner.TriggerDisconnected);
+  finally
+    Terminate;
+  end; //try
+end;
+{$endif} //windows
+//End: Handle disconnect detection
 
 procedure Register;
 begin

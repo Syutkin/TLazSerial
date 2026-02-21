@@ -112,12 +112,14 @@ uses
   {$IFNDEF FPC}
   Types,
   {$ENDIF}
+
 {$ELSE}
-  Windows, registry,
+  Windows, registry, utilwmi, contnrs, forms,
   {$IFDEF FPC}
   winver,
   {$ENDIF}
 {$ENDIF}
+{$ifdef linux}FileUtil,{$ENDIF}
   LazSynaFpc,
   Classes, SysUtils, LazSynaUtil;
 
@@ -125,6 +127,7 @@ const
   CR = #$0d;
   LF = #$0a;
   CRLF = CR + LF;
+  Tab = #9;
   cSerialChunk = 8192;
 
   LockfileDirectory = '/var/lock'; {HGJ}
@@ -171,6 +174,12 @@ const
   SB1andHalf = 1;
   {:stopbit value for 2 stopbits}
   SB2 = 2;
+
+  const OSPrefixes : array of string =
+  {$if defined (windows)}['COM'];
+  {$elseif defined(linux)}['/dev/ttyAM','/dev/rfcomm','/dev/ttyS','/dev/ttyUSB','/dev/ttyACM'];
+  {$elseif defined(darwin)}['/dev/tty.usbserial*', '/dev/cu.usbserial*', '/dev/tty.UC-232*', '/dev/cu.usbmodem*', '/dev/tty.usbmodem*', '/dev/cu.Bluetooth-Incoming-Port', '/dev/tty.Bluetooth-Incoming-Port'];
+  {$else}['/dev/ttyAM'];{$endif}
 
 {$IFNDEF MSWINDOWS}
 const
@@ -770,8 +779,19 @@ type
 {$ENDIF}
   end;
 
-{:Returns list of existing computer serial ports. Working properly only in Windows!}
-function GetSerialPortNames: string;
+
+{$ifdef windows}
+function GetSerialPortNames(const UseWMI: boolean = False): string; overload;
+function GetSerialPortNames(out DeviceDetails: string): string; overload;
+{$endif}
+{$ifNdef windows}
+  {$ifdef linux}
+  function GetSerialPortNames (Ver06: Boolean = False): string;
+//  {$endif}
+  {$else}
+  function GetSerialPortNames: string;
+{$endif}
+{$endif}
 
 implementation
 
@@ -877,7 +897,7 @@ begin
   if pos('COM', uppercase(Value)) = 1 then
     FComNr := StrToIntdef(copy(Value, 4, Length(Value) - 3), PortIsClosed + 1) - 1;
   if pos('/DEV/TTYS', uppercase(Value)) = 1 then
-    FComNr := StrToIntdef(copy(Value, 10, Length(Value) - 9), PortIsClosed - 1);
+    FComNr := StrToIntdef(copy(Value, 10, Length(Value) - 9), PortIsClosed);
 end;
 
 procedure TBlockSerial.SetBandwidth(Value: Integer);
@@ -1012,7 +1032,7 @@ begin
     Exit;
   SetCommMask(FHandle, 0);
   SetupComm(Fhandle, FRecvBuffer, 0);
-  CommTimeOuts.ReadIntervalTimeout := MAXWORD;
+  CommTimeOuts.ReadIntervalTimeout := MAXDWORD;
   CommTimeOuts.ReadTotalTimeoutMultiplier := 0;
   CommTimeOuts.ReadTotalTimeoutConstant := 0;
   CommTimeOuts.WriteTotalTimeoutMultiplier := 0;
@@ -2300,13 +2320,16 @@ begin
   //FPC forgot to add getsid.. :-(
   {$IFNDEF FPC}
   if Libc.getsid(ReadLockfile) = -1 then
+  {$ELSE}
+  // FPC has fpgetsid for many years... ;-)
+  if fpgetsid(ReadLockfile) = -1 then
+  {$ENDIF}
   begin //  Lockfile was left from former desaster
     DeleteFile(Filename); // error recovery
     CreateLockfile(MyPid);
     result := true;
     exit;
   end;
-  {$ENDIF}
   result := false // Sorry, port is owned by living PID and locked
 end;
 
@@ -2319,12 +2342,55 @@ end;
 {----------------------------------------------------------------}
 
 {$IFDEF MSWINDOWS}
-function GetSerialPortNames: string;
+
+procedure Delay(dt: DWORD);
+var
+  StartTick: DWORD;
+begin
+  StartTick := GetTickCount;
+  while (DWORD(GetTickCount - StartTick) < dt) and
+        (not Application.Terminated) do
+  begin
+    Application.ProcessMessages;
+    Sleep(1);
+  end;
+end;
+
+//Retrieves the list of the serial devices from Win32_PnPEntity. Slow, but the data is more reliable
+function GetSerialPortNamesPnPEntity (out DeviceDetails: string): string;
+var
+  PortName : string = '';
+  i: integer;
+  WMIResult : TFPObjectList;
+  ComPos : integer = 0;
+begin
+  Result := '';
+  DeviceDetails := '';
+  try
+    WMIResult := GetWMIInfo('Win32_PnPEntity',['Caption','DeviceID'],'WHERE Caption LIKE ''%%(COM%%)''',20); //20 seconds should be sufficient for windows to update the device list.
+    if (WMIResult.Count > 0) then
+      for i := 0 to WMIResult.Count - 1 do
+      begin
+        PortName := TStringList(WMIResult[i]).ValueFromIndex[0];
+        ComPos := Pos('(COM',uppercase(PortName));
+        PortName := Copy(PortName,ComPos+1,MaxInt);
+        PortName := LeftStr(PortName,Length(PortName)-1);
+        Result := Result + PortName + BoolToStr(i<WMIResult.count-1,',','');
+        DeviceDetails := DeviceDetails + PortName + Tab + TStringList(WMIResult[i]).ValueFromIndex[1] + BoolToStr(i<WMIResult.count-1,Cr,'');
+      end; //for i
+    WMIResult.Clear
+  except
+  end;
+end;
+
+//Retrieves the list of the serial ports from the registry. Faster, but the registry list is often wrong
+function GetSerialPortNamesRegistry: string;
 var
   reg: TRegistry;
   l, v: TStringList;
   n: integer;
 begin
+  //Reads the list of the ports from registry HKEY_LOCAL_MACHINE\HARDWARE\DEVICEMAP\SERIALCOMM. Not very reliable.
   l := TStringList.Create;
   v := TStringList.Create;
   reg := TRegistry.Create;
@@ -2348,26 +2414,50 @@ begin
     v.Free;
   end;
 end;
+
+function GetSerialPortNames(out DeviceDetails: string): string;  overload;
+begin
+  Result := GetSerialPortNamesPnPEntity(DeviceDetails);
+  if (Result <> '') then exit;
+  Result := GetSerialPortNamesRegistry;
+end;
+
+function GetSerialPortNames(const UseWMI: boolean = False): string;  overload;
+var
+  mDeviceID : string ='';
+begin
+  if (UseWMI = False)
+    then Result := GetSerialPortNamesRegistry
+    else Result := GetSerialPortNames(mDeviceID);
+end;
 {$ENDIF}
+
 {$IFNDEF MSWINDOWS}
 // Modif J.P   03/2013 - O1/2017 - 11/2022
+// Modif СМ630 2025
+//Gets the list of the serial devices in Unix. OnlyAccessible removes the unaccesible devices from the list, incl. those, which are already open.
+{$ifdef linux}function GetSerialPortNames06: string;
+{$else}
 function GetSerialPortNames: string;
+{$endif}
 var
   Index: Integer;
   Data: string;
   TmpPorts: String;
   flags : Longint;
   sr : TSearchRec;
+  PortIndex : integer = 0;
 // J.P  01/2017  new boolean parameter : special
-  procedure ScanForPorts( const ThisRootStr : string; special :  boolean); // added by PDF
+
+  procedure ScanForPorts(const ThisRootStr : string; special :  boolean); // added by PDF
   var theDevice : String;
   var FD : Cint;
 {$IFnDEF DARWIN}        // RPH - Added 14May2016
    var Ser : TSerialStruct;
 {$ENDIF}
   begin
-    if FindFirst( ThisRootStr, flags, sr) = 0 then
-    begin
+    if FindFirst(ThisRootStr, flags, sr) = 0 then
+    begin  //A file is found
       repeat
         if (sr.Attr and flags) = Sr.Attr then
         begin
@@ -2406,20 +2496,79 @@ begin
   try
     TmpPorts := '';
     flags := faAnyFile AND (NOT faDirectory);
-    ScanForPorts( '/dev/rfcomm*',true);
-    ScanForPorts( '/dev/ttyUSB*',true);
-    ScanForPorts( '/dev/ttyS*',false);
-    ScanForPorts('/dev/ttyACM*',true); 
-   {$IFDEF DARWIN}
-    ScanForPorts( '/dev/tty.usbserial*',false); // RPH 14May2016, for FTDI driver
-    ScanForPorts( '/dev/tty.UC-232*',false);    // RPH 15May2016, for Prolific driver
-   {$ELSE}
-     ScanForPorts( '/dev/ttyAM*',false); // for ARM board
+    {$if defined (linux)}
+    //Cannot use a loop, some are True, others- false
+    ScanForPorts('/dev/rfcomm*',true);
+    ScanForPorts('/dev/ttyUSB*',true);
+    ScanForPorts('/dev/ttyS*',false);
+    ScanForPorts('/dev/ttyACM*',true);
+    {$elseif defined (DARWIN)}
+    for PortIndex :=0 to high(OSPrefixes) do
+    begin
+      ScanForPorts(OSPrefixes[PortIndex],false);
+    end;
+    {$ELSE} //Todo: This is executed in Linux, is there sth. wrong with the ELSE?
+     ScanForPorts('/dev/ttyAM*',false); // for ARM board
    {$ENDIF}
   finally
     Result:=TmpPorts;
   end;
 end;
 {$ENDIF}
+
+
+{$ifdef linux}
+function GetInbuiltPorts: string;
+var
+  SerialDevs: TStringList;
+  i : integer;
+  F: TextFile;
+  TypeValue : string = '';
+begin
+  Result := '';
+  SerialDevs :=  TStringList.Create;
+  try
+    SerialDevs := FindAllDirectories('/sys/class/tty/', false);
+    if (SerialDevs.Count > 0) then
+      for i :=0 to SerialDevs.Count -1 do
+        if FileExists(SerialDevs.Strings[i] +  '/type') then
+        begin
+          AssignFile(F, SerialDevs.Strings[i] +  '/type');
+          Reset(F);
+          ReadLn(F, TypeValue);
+          CloseFile(F);
+          if (TypeValue = '4') then Result := Result +  BoolToStr(Result = '','','  ') + '/dev/' +ExtractFileName(SerialDevs.Strings[i]) ;
+        end; //if FileExists;
+  finally
+    SerialDevs.Free;
+  end;
+end;
+
+function GetSerialPortNames07: string;
+const
+  Prefixes = 'ttyAMA*;rfcomm*;ttyUSB*;ttyACM*';
+var
+  SerialDevs: TStringList;
+begin
+  SerialDevs :=  TStringList.Create;
+  SerialDevs.StrictDelimiter := True;
+  SerialDevs.Delimiter := ';';
+  Result := GetInbuiltPorts;
+  try
+    FindAllFiles(SerialDevs,'/dev',Prefixes,false,faAnyFile);
+    if (SerialDevs.Count >0) then Result := Result + BoolToStr(Result = '','','  ') + StringReplace(SerialDevs.DelimitedText,';','  ',[rfReplaceAll]);
+  finally
+    SerialDevs.Free;
+  end;
+end;
+
+function GetSerialPortNames (Ver06: Boolean = False): string;
+begin
+  if Ver06
+    then Result := GetSerialPortNames06
+    else Result := GetSerialPortNames07;
+end;
+{$endif}
+
 
 end.

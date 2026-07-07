@@ -3,7 +3,7 @@ unit LazSerialCommon;
 interface
 
 uses
-  LazSynaSer,
+  {LazSynaSer,}
   Classes, SysUtils, LazStringUtils, Registry, math, Dialogs, StrUtils
   {$ifNdef windows}, process {$endif};
 
@@ -11,9 +11,14 @@ resourcestring
   lngAddedPorts = 'Added ports: ';
   lngRemovedPorts = 'Removed ports: ';
   lngNoDevicesAvailable =  'No devices available';
+  lngErrorSign = #$E2 + #$9A + #$A0;
+  lngDuplicated = 'Duplicated';
+  lngOR = ' OR ';
+  lngSerNo = 'Ser№';
 
   lngBuiltInSerial =                        'Built-in Serial';
   lngBluetoothSerial =                      'Bluetooth Serial';
+  lngVirtualDevice =                        'Virtual device';
   lngUSBSerialUnknown =                     'USB Serial (unknown)';
   lngUSBSerialFTDI =                        'USB FTDI';
   lngUSBSerialFT232 =                       'USB FT232';
@@ -43,30 +48,54 @@ resourcestring
   lngHPun2420MobileBroadbandModuleModem =   'HP un2420 Mobile Broadband Module Modem';
   lngUSBGwInstek =                          'USB GwInstek';
 
+  //Flow Control
+  lngNone = 'None';
+  lngXonXoff_DTR = 'XonXoff w DTR';
+  lngRTS_CTS = 'RTS CTS';
+  lngXonXoff = 'XonXoff w/o DTR';
+  lngXonXoff_and_RTS_CTS = 'XonXoff RTS CTS';
+  lngDTR_DSR = 'DTR DSR';
+  lngXonXoff_and_DTR_DSR = 'XonXoff DTR DSR';
+  lngDTR = 'DTR';
+
+  //Parity
+  lngOdd = 'Odd';
+  lngEven = 'Even';
+  lngMark = 'Mark';
+  lngSpace = 'Space';
+
 type
   Integer1D = array of integer;
   String1D = array of string;
-  TSSOption  = (ssoAppendFriendlyNames, ssoUseWMI, ssoHide_tty_usbserial, ssoAppendSerialNumber);
+  TSSOption  = (ssoAppendFriendlyNames, ssoUseWMI, ssoHide_tty_usbserial, ssoAppendSerialNumber, ssoAppendErrorCode);
   TSSOptionS = set of tSSOption;
    tVIDPIDID = record
      VID_PID : string;
      ID : String; //TODO: Is this used ?
      EnumKeyName : String;
      SerialN : string;
+     ErrorCode : string;
    end;
    tVIDPIDID_1D = array of tVIDPIDID;
+   //TFlowControl=(fcNone,fcXonXoff,fcHardware); //ver ≤ 0.6
+   //In fcXonXoff is actually XonXoff_and_DTR. For legacy reasons this ambuguous name is kept. Note: usualy XonXoff goes with DTR
+   //fcHardware = RTS CTS
+   TFlowControl=(fcNone=0, fcXonXoff=1, fcHardware=2, fcXonXoff_no_DTR=3,fcXonXoff_and_RTS_CTS=4, fcDTR_DSR=5, fcXonXoff_and_DTR_DSR=6, fcDTR=7,
+                 fcXonXoff_and_DTR=1, fcRTS_CTS = 2);
 
 const
   Cr = #$0d;
   Lf = #$0a;
   CrLf = Cr + Lf;
+  Tab = #9;
+  cSerialChunk = 8192;
 
 procedure FindAddedPorts (const OldPorts: TStringList; const NewPorts: TStringList; out AddedPorts: TStringList);
 procedure FindRemovedPorts (const OldPorts: TStringList; const NewPorts: TStringList; out RemovedPorts: TStringList);
 procedure SortPorts(aDeviceList : tStringList);
-function GetFriendlyName (aDevice: string; AppendSerNum: Boolean = True{$ifdef windows}; Details: string=''{$endif}): string;
+function GetFriendlyName (aDevice: string; AppendSerNum: Boolean = True{$ifdef windows}; Details: string=''; AppendErrorCode : Boolean = True{$endif}): string;
 {$ifdef windows}
-function GetFriendlyNameDevId(Device: string; Details: string; AppendSerNum : Boolean) : string;
+function GetFriendlyNameDevID(Device: string; Details: string; AppendSerNum: boolean; AppendError : Boolean {= True}) : string;
 {$endif}
 function SearchStringList(aStringList: TStringList; SoughtString: string; CaseSensitive : Boolean = false): integer;
 {$IF FPC_FULLVERSION >= 30002}
@@ -107,6 +136,7 @@ begin
     'vid_03F0pid_251D' : exit (lngHPun2420MobileBroadbandModuleModem);
     'vid_0e8dpid_2000' : exit (lngMT65xx_Preloader);
     'btbt'             : exit (lngBluetoothSerial);
+    'port'             : exit (lngVirtualDevice);
   end;
   VID := lowercase(LeftStr(aVID_PID,pos('pid',lowercase(aVID_PID))-1));
   case  VID of
@@ -277,6 +307,7 @@ begin
   aVIDPIDID.ID := '';
   aVIDPIDID.EnumKeyName := '';
   aVIDPIDID.SerialN := '';
+  aVIDPIDID.ErrorCode := '0';
 end;
 
 //Get the VID, PID, etc. data for the serial device from HKEY_LOCAL_MACHINE\SYSTEM\ControlSet001\Control\COM Name Arbiter\Devices
@@ -345,40 +376,59 @@ begin
 end;
 
 //When Windows assigns the same COM number to more than one device, the friendly data is not retrieved properly. This should never happen, but Windows does it.
-function GetFriendlyNameDevID(Device: string; Details: string; AppendSerNum: boolean) : string;
+//AppendError - appends Error code is <> 0
+function GetFriendlyNameDevID(Device: string; Details: string; AppendSerNum: boolean; AppendError : Boolean {= True}) : string;
 var
   Registry : TRegistry;
   LineI : integer = 0;
   DetArray : array of string;
   DeviceID : string;
   SerialN: string = '';
+  Duplicated : Boolean = false;
+  ResultI : string = ''; //Result from te current loop
+  ItemDetails: String1D;
+  ErrorCode : string = '0';
 begin
   Result := '';
   if (Device = '') or (Details = '') then exit;
   DetArray := Details.Split([#13]);
   for LineI := 0 to high(DetArray) do
     begin
+      ResultI := '';
+      Duplicated := False;
+      if (Result <> '') then
+        Duplicated := True; //Windows has assigned the same name to multiple devices
       if DetArray[LineI].StartsWith(Device+Tab,true) then
       begin
-        DeviceID := Copy(DetArray[LineI],length(Device)+2,MaxInt);
-        SerialN := GetVID_PIDS_Serial(DeviceID).SerialN;
-        Result :=  VID_PID_ToString(GetVID_PIDS_Serial(DeviceID).VID_PID);
+        ItemDetails := DetArray[LineI].Split([Tab]);
+        if (Length(ItemDetails) > 0) then
+          DeviceID := ItemDetails[1]; // Copy(DetArray[LineI],length(Device)+2,MaxInt);
+        if (Length(ItemDetails) > 1) then
+          ErrorCode := ItemDetails[2];
 
-        if (Result = '') or (result = GetVID_PIDS_Serial(DeviceID).VID_PID) then
+        SerialN := GetVID_PIDS_Serial(DeviceID).SerialN;
+        ResultI := VID_PID_ToString(GetVID_PIDS_Serial(DeviceID).VID_PID); //Separate the multiple devices with Tab (#09)
+
+        if (ResultI = '') or (ResultI = GetVID_PIDS_Serial(DeviceID).VID_PID) then
         begin
           Registry := TRegistry.Create(KEY_READ);
           try
             Registry.RootKey := HKEY_LOCAL_MACHINE;
             if  Registry.OpenKey('SYSTEM\ControlSet001\Enum\' + DeviceId,false)  then
-              Result := Registry.ReadString('FriendlyName');
-              if Result.EndsWith(' ('+Device+')') then
-                Result := LeftStr(Result,length(Result)- length(' ('+Device+')'));
+              ResultI := Registry.ReadString('FriendlyName');
+              if ResultI.EndsWith(' ('+Device+')') then
+                ResultI := LeftStr(ResultI,length(ResultI)- length(' ('+Device+')'));
           finally
             Registry.Free;
           end; //try
         end; //if Result
-        if ((SerialN <> '') and (AppendSerNum = true)) then Result :=  Result + ' ' + SerialN;
+        if ((SerialN <> '') and (AppendSerNum = true))
+          then ResultI :=  ResultI + ' ' + lngSerNo + SerialN;
+        if (AppendError = True) and (ErrorCode <> '0')
+          then ResultI :=  ResultI + lngErrorSign + ErrorCode;
       end; //if detarray
+      if (ResultI <> '') then
+        Result := BoolToStr(Duplicated, Result + lngOr + ResultI + lngErrorSign + lngDuplicated,ResultI); //separate data for duplicated COM ports with TAB  (#09)
     end; //for lineI
 end;
 
@@ -642,7 +692,7 @@ end;
 
 //The head multiplatform routine, which decides which subroutine to use
 //function GetFriendlyName (aDevice: string; Details : string = ''): string;
-function GetFriendlyName (aDevice: string; AppendSerNum: Boolean = True{$ifdef windows}; Details: string=''{$endif}): string;
+function GetFriendlyName (aDevice: string; AppendSerNum: Boolean = True{$ifdef windows}; Details: string=''; AppendErrorCode : Boolean = True{$endif}): string;
 var
   Unique: boolean = false;
 begin
@@ -650,7 +700,7 @@ begin
   //This is the most reliable method, the ones below are in case it fails.
   if (Details <> '') then
     begin
-      Result := GetFriendlyNameDevID(aDevice, Details,AppendSerNum);
+      Result := GetFriendlyNameDevID(aDevice, Details,AppendSerNum,AppendErrorCode);
       if (Result <> '') then exit;
     end;
 

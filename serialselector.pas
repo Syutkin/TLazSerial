@@ -10,7 +10,7 @@ uses
   LazSynaSer, LCL, Graphics, math, Types, LCLTranslator, LazStringUtils, ExtCtrls,
   SerialWatcher, LazSerialCommon
   {$ifNdef darwin}, StrUtils{$endif}
-  {$ifdef windows}, registry, Messages, Windows, ActiveX, Utilwmi{$endif}
+  {$ifdef windows}, Windows, ActiveX{, Utilwmi, registry, Messages}{$endif}
   {$ifNdef linux}, process{$endif};
 
 type
@@ -116,6 +116,7 @@ type
       // AppendSerialNumber - Appends the serial number of the device to the friendly name. Serial devices rarely have serial numbers
       // Hide_tty_usbserial - (MacOS only) removes COM ports starting with tty.usbserial*, if duplicated by cu.usbserial*
       // UseWMI (windows only)- retrives the list of the serial devices from WMI (slower, but data is usually true) and uses registry if fails. If disabled, gets the list from the registry only (faster, but the data is often wrong).
+      // Apend error code - Appends error code to the friendly names if it is ≠ 0. Windows only.
       property Options : tSSOptions read FOptions write SetOptions;
       property ParentBidiMode;
       property ParentColor;
@@ -201,7 +202,7 @@ begin
   end;
 end;
 
-//TODO: Preserve the currently seleected port, if still present
+//TODO: Preserve the currently selected port, if still present
 procedure TSerialSelector.Refresh;
 begin
   {$ifdef windows}
@@ -221,6 +222,19 @@ begin
     if aDeviceList.Strings[i].StartsWith('/dev/tty') then aDeviceList.Delete(i);
 end;
 {$endif}
+
+//Check if the COM port is aready prsent (hapenns when windows assign the same COM port name to multipel devices)
+function IsPresent(ComPortName: string; FriendlyList: TStringList) : Boolean;
+var
+  i: integer;
+begin
+  Result := False;
+  if (FriendlyList.Count < 1) then exit;
+  for i:= 0 to FriendlyList.Count -1 do
+  begin
+    if FriendlyList.Strings[i].StartsWith(ComPortName + ' <') then exit (True);
+  end; //for
+end;
 
 procedure TSerialSelector.UpdatePorts;
 var
@@ -257,8 +271,9 @@ begin
   fDeviceListFriend.Clear;
   for i:= 0 to fDeviceList.Count -1 do
     begin
-      FriendlyName := GetFriendlyName(fDeviceList[i],ssoAppendSerialNumber in FOptions{$ifdef windows},DeviceIDs{$endif});
-      fDeviceListFriend.Append (fDeviceList[i] + BoolToStr(FriendlyName = '','',' <' + FriendlyName +'>'));
+      FriendlyName := GetFriendlyName(fDeviceList[i],ssoAppendSerialNumber in FOptions{$ifdef windows},DeviceIDs,ssoAppendErrorCode in FOptions{$endif});
+      if (IsPresent(fDeviceList[i],fDeviceListFriend) = false) then
+        fDeviceListFriend.Append (fDeviceList[i] + BoolToStr(FriendlyName = '','',' <' + FriendlyName +'>'));
     end;
 
   if (OldPorts.Count > 0)    then FindRemovedPorts(OldPorts, fDeviceList, RemovedPorts);
@@ -285,6 +300,7 @@ begin
   Text := Items.Strings[ItemIndex];
   if (FHintWindow <> nil) then
     UpdateHint;
+  SelLength := 0;
 end;
 
 procedure TSerialSelector.DoUpdateComPorts(Sender: TObject);
@@ -333,7 +349,7 @@ begin
   fDeviceListFriend := TStringList.Create;
   FAddedPorts := '';
   FRemovedPorts := '';
-  FOptions := [ssoAppendFriendlyNames,ssoUseWMI, ssoHide_tty_usbserial,ssoAppendSerialNumber];
+  FOptions := [ssoAppendFriendlyNames,ssoUseWMI, ssoHide_tty_usbserial,ssoAppendSerialNumber,ssoAppendErrorCode];
 
   FRefreshTimer := TTimer.Create(Self) ;
   FRefreshTimer.Enabled := True;
@@ -462,8 +478,10 @@ begin
    CoInitialize(nil); //The app will crash without this
    //The first call of GetWMIInfo is slow. The next call is done in TriggerDisconnected, but it is not slow
    //Todo: maybe this is not reliable enough
-   GetWMIInfo('Win32_PnPEntity',['Caption','DeviceID'],'WHERE Caption LIKE ''%%(COM%%)''',30); //usually this does not take more than 6 seconds, but 20 seconds are also observed
-   Synchronize(@Owner.UpdatePorts);
+   Owner.UpdatePorts; //usually this does not take more than 6 seconds, but 20 seconds are also observed
+   //Synchronize(@Owner.SelStart := 0);
+   Synchronize(@Application.ProcessMessages);
+  // Synchronize(@Owner.UpdatePorts);
   finally
     Terminate;
   end; //try

@@ -13,7 +13,7 @@ interface
 uses
   Classes, SysUtils, Forms, Controls, Graphics, Dialogs, StdCtrls,
   LCLTranslator, ExtCtrls, Spin, LCLType,
-  lazserialsetup, LazSerial,  SerialSelector, SerialWatcher;
+  lazserialsetup, LazSerial,  SerialSelector, SerialWatcher, LazSerialCommon, LazSynaSer;
 
 resourcestring
   lngConnect = 'Connect';
@@ -37,8 +37,8 @@ type
     Edit1: TEdit;
     Label1: TLabel;
     Label2: TLabel;
+    LazSerial1:TLazSerial;
     lblCustomBaudrate: TLabel;
-    LazSerial1: TLazSerial;
     Memo1: TMemo;
     SerialSelector1: TSerialSelector;
     SpinEdit1: TSpinEdit;
@@ -54,6 +54,7 @@ type
     procedure FormCreate(Sender: TObject);
     procedure LazSerial1Removed(Sender: TObject);
     procedure LazSerial1RxData(Sender: TObject);
+    procedure LazSerial1Status(Sender:TObject;Reason:THookSerialReason;const Value:string);
     procedure Timer1Timer(Sender: TObject);
   private
 
@@ -76,12 +77,10 @@ const
     '1200', '2400', '4800', '9600', '14400', '19200', '38400', '56000', '57600',
     '115200', '128000', '230400', '250000', '256000','460800', '921600');
 {$ENDIF}
-  StopBitsStrings: array[TStopBits] of string = ('1', '1.5', '2');
+{  StopBitsStrings: array[TStopBits] of string = ('1', '1.5', '2');
   DataBitsStrings: array[TDataBits] of string = ('8', '7', '6', '5');
-  ParityBitsStrings: array[TParity] of string = ('None', 'Odd', 'Even',
-    'Mark', 'Space');
-  FlowControlStrings: array[TFlowControl] of string = ('None',
-    'Software', 'HardWare');
+  ParityBitsStrings: array[TParity] of string = ('None', 'Odd', 'Even','Mark', 'Space');
+  FlowControlStrings: array[TFlowControl] of string = ('None', 'Software', 'HardWare');}
 
 var
   Form1: TForm1;
@@ -203,6 +202,11 @@ end;
 procedure TForm1.LazSerial1RxData(Sender: TObject);
 begin
   Memo1.Lines.Text := Memo1.Lines.Text + LazSerial1.ReadData;
+end;
+
+procedure TForm1.LazSerial1Status(Sender:TObject;Reason:THookSerialReason;const Value:string);
+begin
+
 end;
 
 procedure TForm1.Timer1Timer(Sender: TObject);

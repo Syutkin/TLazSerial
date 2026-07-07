@@ -114,22 +114,16 @@ uses
   {$ENDIF}
 
 {$ELSE}
-  Windows, registry, utilwmi, contnrs, forms,
+  Windows, registry, {utilwmi,} wmiutil, comobj, ActiveX, contnrs, forms,
   {$IFDEF FPC}
   winver,
   {$ENDIF}
 {$ENDIF}
 {$ifdef linux}FileUtil,{$ENDIF}
   LazSynaFpc,
-  Classes, SysUtils, LazSynaUtil;
+  Classes, SysUtils, LazSynaUtil, LazSerialCommon;
 
 const
-  CR = #$0d;
-  LF = #$0a;
-  CRLF = CR + LF;
-  Tab = #9;
-  cSerialChunk = 8192;
-
   LockfileDirectory = '/var/lock'; {HGJ}
   PortIsClosed = -1;               {HGJ}
   ErrAlreadyOwned = 9991;          {HGJ}
@@ -399,8 +393,8 @@ type
       @link(SB1andHalf) and @link(SB2).)
      @param(softflow Enable XON/XOFF handshake.)
      @param(hardflow Enable CTS/RTS handshake.)}
-    procedure Config(baud, bits: integer; parity: char; stop: integer;
-      softflow, hardflow: boolean); virtual;
+//    procedure Config(baud, bits: integer; parity: char; stop: integer; softflow, hardflow: boolean); virtual;
+    procedure Config(baud, bits: integer; parity: char; stop: integer; FlowControl : TFlowControl); virtual;
 
     {:Connects to the port indicated by comport. Comport can be used in Windows
      style (COM2), or in Linux style (/dev/ttyS1). When you use windows style
@@ -927,8 +921,7 @@ begin
   end;
 end;
 
-procedure TBlockSerial.Config(baud, bits: integer; parity: char; stop: integer;
-  softflow, hardflow: boolean);
+procedure TBlockSerial.Config(baud, bits: integer; parity: char; stop: integer; FlowControl : TFlowControl);
 begin
   FillChar(dcb, SizeOf(dcb), 0);
   GetCommState;
@@ -947,16 +940,23 @@ begin
   dcb.XoffChar := #19;
   dcb.XonLim := FRecvBuffer div 4;
   dcb.XoffLim := FRecvBuffer div 4;
+
+  //Set flw control
   dcb.Flags := dcb_Binary;
-  if softflow then
-    dcb.Flags := dcb.Flags or dcb_OutX or dcb_InX;
-  if hardflow then
-    dcb.Flags := dcb.Flags or dcb_OutxCtsFlow or dcb_RtsControlHandshake
-  else
-    dcb.Flags := dcb.Flags or dcb_RtsControlEnable;
-  dcb.Flags := dcb.Flags or dcb_DtrControlEnable;
-  if dcb.Parity > 0 then
+  case FlowControl of
+    fcDTR                 :       dcb.Flags := dcb.Flags or dcb_DtrControlEnable;
+    fcDTR_DSR             : begin dcb.Flags := dcb.Flags or dcb_DtrControlHandshake or dcb_OutxDsrFlow or dcb_RtsControlToggle; dcb.Flags := dcb.Flags and not dcb_RtsControlHandshake; end;
+    fcRTS_CTS             :       dcb.Flags := dcb.Flags or dcb_OutxCtsFlow or dcb_RtsControlHandshake; //aka Hardware
+    fcXonXoff_no_DTR      : begin dcb.Flags := dcb.Flags or dcb_OutX or dcb_InX; end;
+    fcXonXoff_and_DTR     : begin dcb.Flags := dcb.Flags or dcb_OutX or dcb_InX; dcb.Flags := dcb.Flags or dcb_DtrControlEnable; end; //SERIAL_AUTO_TRANSMIT and SERIAL_AUTO_RECEIVE cannot be enabled if dcb_DtrControlEnable = 0 in some legacy connections
+    fcXonXoff_and_RTS_CTS : begin dcb.Flags := dcb.Flags or dcb_OutX or dcb_InX; dcb.Flags := dcb.Flags or dcb_DtrControlEnable; dcb.Flags := dcb.Flags or dcb_OutxCtsFlow or dcb_RtsControlHandshake; end;
+    fcXonXoff_and_DTR_DSR : begin dcb.Flags := dcb.Flags or dcb_DtrControlHandshake or dcb_OutxDsrFlow or dcb_OutX or dcb_InX or dcb_RtsControlToggle; dcb.Flags := dcb.Flags and not dcb_RtsControlHandshake; end;
+    else                          dcb.Flags := dcb.Flags and not dcb_RtsControlEnable; //fcNone
+  end; //case
+
+  if (dcb.Parity > 0) then
     dcb.Flags := dcb.Flags or dcb_ParityCheck;
+
   SetCommState;
 end;
 
@@ -2357,17 +2357,19 @@ begin
 end;
 
 //Retrieves the list of the serial devices from Win32_PnPEntity. Slow, but the data is more reliable
+{//This function uses JurassicPork's WMI routines (utilwmi.pas)
 function GetSerialPortNamesPnPEntity (out DeviceDetails: string): string;
 var
   PortName : string = '';
   i: integer;
   WMIResult : TFPObjectList;
   ComPos : integer = 0;
+  ErrorCode : string = '';
 begin
   Result := '';
   DeviceDetails := '';
   try
-    WMIResult := GetWMIInfo('Win32_PnPEntity',['Caption','DeviceID'],'WHERE Caption LIKE ''%%(COM%%)''',20); //20 seconds should be sufficient for windows to update the device list.
+    WMIResult := GetWMIInfo('Win32_PnPEntity',['Caption','DeviceID','ConfigManagerErrorCode'],'WHERE Caption LIKE ''%%(COM%%)''',20); //20 seconds should be sufficient for windows to update the device list.
     if (WMIResult.Count > 0) then
       for i := 0 to WMIResult.Count - 1 do
       begin
@@ -2375,12 +2377,73 @@ begin
         ComPos := Pos('(COM',uppercase(PortName));
         PortName := Copy(PortName,ComPos+1,MaxInt);
         PortName := LeftStr(PortName,Length(PortName)-1);
-        Result := Result + PortName + BoolToStr(i<WMIResult.count-1,',','');
-        DeviceDetails := DeviceDetails + PortName + Tab + TStringList(WMIResult[i]).ValueFromIndex[1] + BoolToStr(i<WMIResult.count-1,Cr,'');
+        if (Pos('#',PortName) = 0) then
+        begin
+          Result := Result + PortName + BoolToStr(i<WMIResult.count-1,',','');
+          ErrorCode := TStringList(WMIResult[i]).ValueFromIndex[2];
+          DeviceDetails := DeviceDetails + PortName + Tab + TStringList(WMIResult[i]).ValueFromIndex[1] + Tab + ErrorCode + BoolToStr(i<WMIResult.count-1,Cr,'');
+        end;
       end; //for i
     WMIResult.Clear
   except
   end;
+end;            }
+
+
+//This function uses Marcov's WMI routines (wmiutil.pp)
+function GetSerialPortNamesPnPEntity (out DeviceDetails: string): string;
+const
+  WbemUser            = '';
+  WbemPassword        = '';
+  WbemComputer        = 'localhost';
+  wbemFlagForwardOnly = $00000020;
+var
+  FSWbemLocator : OLEVariant;
+  FWMIService   : OLEVariant;
+  FWbemObjectSet: OLEVariant;
+  obj           : OLEVariant;
+  listiter      : oEnumIterator;
+
+  PortName : string = '';
+  ComPos : integer = 0;
+  ErrorCode : string = '';
+begin
+  Result := '';
+  DeviceDetails := '';
+  try
+//    {$ifndef fpc}
+    CoInitialize(nil);
+  //  {$endif}
+
+    FSWbemLocator := CreateOleObject('WbemScripting.SWbemLocator');
+    FWMIService   := FSWbemLocator.ConnectServer(WbemComputer, 'root\CIMV2', WbemUser, WbemPassword);
+
+//  FWbemObjectSet := FWMIService.ExecQuery('SELECT * FROM Win32_PnPEntity','WQL',wbemFlagForwardOnly); //Gets the full device list
+//  FWbemObjectSet := FWMIService.ExecQuery('SELECT * FROM Win32_PnPEntity WHERE ConfigManagerErrorCode = 0 AND Caption LIKE "%(COM%"','WQL',wbemFlagForwardOnly); //Gets only the COM ports without errors
+//  FWbemObjectSet := FWMIService.ExecQuery('SELECT * FROM Win32_PnPEntity WHERE Caption LIKE "%(COM%"','WQL',wbemFlagForwardOnly); //Gets the list of ALL COM ports, incl. the ones followed by a non-digit
+    FWbemObjectSet := FWMIService.ExecQuery('SELECT * FROM Win32_PnPEntity WHERE Caption LIKE "%(COM[0-9]%)"','WQL',wbemFlagForwardOnly); //Gets the list of ALL COM ports
+
+    for obj in listiter.Enumerate(FWbemObjectset) do
+    begin
+      try
+        PortName := String(obj.Caption);
+        ComPos := Pos('(COM',uppercase(PortName));
+        PortName := Copy(PortName,ComPos+1,MaxInt);
+        PortName := LeftStr(PortName,Length(PortName)-1);
+        Result := Result + PortName + ',';
+        ErrorCode := String(obj.ConfigManagerErrorCode);
+        DeviceDetails := DeviceDetails + PortName + Tab + String(obj.DeviceID) + Tab + ErrorCode + Cr; //BoolToStr(i<WMIResult.count-1,Cr,'');
+      except
+
+      end;
+    end;  // for obj
+  finally
+   // {$ifndef fpc}
+    CoUninitialize;
+   // {$endif}
+  end;
+  if Result.EndsWith(',') then Delete(Result, Length(Result), 1);
+  if DeviceDetails.EndsWith(Cr) then Delete(DeviceDetails, Length(DeviceDetails), 1);
 end;
 
 //Retrieves the list of the serial ports from the registry. Faster, but the registry list is often wrong

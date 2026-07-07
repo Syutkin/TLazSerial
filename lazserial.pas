@@ -57,7 +57,7 @@ uses
   cthreads,
 {$ENDIF}
 {$ELSE}
-  Windows, Classes, ActiveX, Utilwmi, //registry,
+  Windows, Classes, ActiveX, //registry,
 {$ENDIF}
   SysUtils, lazsynaser,  LResources, Forms, Controls, Graphics, Dialogs,
   PropEdits, SerialWatcher, LazSerialCommon;
@@ -80,7 +80,7 @@ type
 {$ENDIF}
   TDataBits=(db8bits,db7bits,db6bits,db5bits);
   TParity=(pNone,pOdd,pEven,pMark,pSpace);
-  TFlowControl=(fcNone,fcXonXoff,fcHardware);
+  //TFlowControl moved to LazSerialCommon
   TStopBits=(sbOne,sbOneAndHalf,sbTwo);
 
   TModemSignal = (msRI,msCD,msCTS,msDSR);
@@ -150,7 +150,7 @@ type
     FParity: TParity;
     FStopBits: TStopBits;
     
-    FSoftflow, FHardflow: boolean;
+    //FSoftflow, FHardflow: boolean;
     FFlowControl: TFlowControl;
     FRcvLineCRLF : Boolean;
 
@@ -175,7 +175,7 @@ type
     procedure SetCustomBaudrate(br: Integer);
     procedure SetDataBits(db: TDataBits);
     procedure SetParity(pr: TParity);
-    procedure SetFlowControl(fc: TFlowControl);
+    procedure SetFlowControl(aFlowControl: TFlowControl);
     procedure SetStopBits(sb: TStopBits);
 
   public
@@ -216,6 +216,7 @@ type
     property CustomBaudRate: integer read FCustomBaudRate write SetCustomBaudrate; //default -1
     property DataBits: TDataBits read FDataBits write SetDataBits;
     property Parity: TParity read FParity write SetParity;
+    //fcHardware (legacy name) = fcRTS_CTS; fcXonXoff (legacy name) = fcXonXoff_and_DTR. The real XonXoff is named fcXonXoff_no_DTR
     property FlowControl: TFlowControl read FFlowControl write SetFlowControl;
     property StopBits: TStopBits read FStopBits write SetStopBits;
     
@@ -271,12 +272,12 @@ constructor TLazSerial.Create(AOwner: TComponent);
 begin
   inherited;
   //FHandle:=-1;
-  ReadThread:=nil;
-  FSynSer:=TBlockSerial.Create;
-  FSynSer.LinuxLock:=false;
-  FHardflow:=false;
-  FSoftflow:=false;
-  FFlowControl:=fcNone;
+  ReadThread := nil;
+  FSynSer := TBlockSerial.Create;
+  FSynSer.LinuxLock := false;
+  //FHardflow:=false;
+  //FSoftflow:=false;
+  FFlowControl := fcNone;
   FSerialWatcher := TSerialWatcher.Create(Self);
   FSerialWatcher.OnComDisconnected := @ComDisconnected;
   FCustomBaudRate := -1;
@@ -333,7 +334,7 @@ begin
                  ConstsBits[FDataBits],
                  ConstsParity[FParity],
                  ConstsStopBits[FStopBits],
-                 FSoftflow, FHardflow);
+                 FFlowControl);
 
   // Launch Thread
   ReadThread := TComPortReadThread.Create(true);
@@ -371,7 +372,7 @@ begin
   if (FCustomBaudRate > -1) then exit;
   if FSynSer.Handle<>INVALID_HANDLE_VALUE then begin
     FSynSer.Config(ConstsBaud[FBaudRate], ConstsBits[FDataBits], ConstsParity[FParity],
-                   ConstsStopBits[FStopBits], FSoftflow, FHardflow);
+                   ConstsStopBits[FStopBits], FFlowControl);
   end;
 end;
 
@@ -382,7 +383,7 @@ begin
   if (FCustomBaudRate < 0)
     then SetBaudRate(FBaudRate)
     else FSynSer.Config(FCustomBaudRate, ConstsBits[FDataBits], ConstsParity[FParity],
-                   ConstsStopBits[FStopBits], FSoftflow, FHardflow);
+                   ConstsStopBits[FStopBits], FFlowControl);
 end;
 
 procedure TLazSerial.SetDataBits(db: TDataBits);
@@ -390,29 +391,42 @@ begin
   FDataBits:=db;
   if FSynSer.Handle<>INVALID_HANDLE_VALUE then begin
     FSynSer.Config(AppliedBaudrate, ConstsBits[FDataBits], ConstsParity[FParity],
-                   ConstsStopBits[FStopBits], FSoftflow, FHardflow);
+                   ConstsStopBits[FStopBits], FFlowControl);
   end;
 end;
 
-procedure TLazSerial.SetFlowControl(fc: TFlowControl);
+{procedure TLazSerial.SetFlowControl_obsolete(fc: TFlowControl);
 begin
-  if fc=fcNone then begin
-    FSoftflow:=false;
-    FHardflow:=false;
-  end else if fc=fcXonXoff then begin
-    FSoftflow:=true;
-    FHardflow:=false;
-  end else if fc=fcHardware then begin
-    FSoftflow:=false;
-    FHardflow:=true;
+  case fc of
+    fcNone     : begin FSoftflow:=false; FHardflow:=false; end;
+    fcXonXoff  : begin FSoftflow:=true;  FHardflow:=false; end;
+    fcHardware : begin FSoftflow:=false; FHardflow:=true;  end;
   end;
+
+  {if (fc = fcNone) then begin
+    FSoftflow:=false; FHardflow:=false;
+  end else if (fc = fcXonXoff) then begin
+    FSoftflow:=true; FHardflow:=false;
+  end else if fc=fcHardware then begin
+    FSoftflow:=false; FHardflow:=true;
+  end;}
 
   if FSynSer.Handle<>INVALID_HANDLE_VALUE then begin
     FSynSer.Config(AppliedBaudrate, ConstsBits[FDataBits], ConstsParity[FParity],
                    ConstsStopBits[FStopBits], FSoftflow, FHardflow);
   end;
   FFlowControl:=fc;
+end;}
+
+procedure TLazSerial.SetFlowControl(aFlowControl: TFlowControl);
+begin
+  if (FFlowControl = aFlowControl) then exit;
+  if (FSynSer.Handle<>INVALID_HANDLE_VALUE) then
+    FSynSer.Config(AppliedBaudrate, ConstsBits[FDataBits], ConstsParity[FParity], ConstsStopBits[FStopBits], FFlowControl);
+
+  FFlowControl := aFlowControl;
 end;
+
 
 {
 procedure TLazSerial.SetFlowControl(fc: TFlowControl);
@@ -430,7 +444,7 @@ begin
   FParity:=pr;
   if FSynSer.Handle<>INVALID_HANDLE_VALUE then begin
     FSynSer.Config(AppliedBaudrate, ConstsBits[FDataBits], ConstsParity[FParity],
-                   ConstsStopBits[FStopBits], FSoftflow, FHardflow);
+                   ConstsStopBits[FStopBits], FFlowControl);
   end;
 end;
 
@@ -439,7 +453,7 @@ begin
   FStopBits:=sb;
   if FSynSer.Handle<>INVALID_HANDLE_VALUE then begin
     FSynSer.Config(AppliedBaudrate, ConstsBits[FDataBits], ConstsParity[FParity],
-                   ConstsStopBits[FStopBits], FSoftflow, FHardflow);
+                   ConstsStopBits[FStopBits], FFlowControl);
   end;
 end;
 
@@ -569,15 +583,17 @@ begin
 end;
 
 procedure TUpdatePortsThread.Execute;
+var
+  CoInitResult: HRESULT;
 begin
   try
-   CoInitialize(nil); //The app will crash without this
-   //The first call of GetWMIInfo is slow. The next call is done in TriggerDisconnected, but it is not slow
-   //Todo: maybe this is not reliable enough
-   GetWMIInfo('Win32_PnPEntity',['Caption','DeviceID'],'WHERE Caption LIKE ''%%(COM%%)''',30); //usually this does ot take more than 6 seconds, but 20 seconds are also observed
-   Synchronize(@Owner.TriggerDisconnected);
+   CoInitResult := CoInitialize(nil); //The app will crash without this
+   GetSerialPortNames{$ifdef windows}(True){$endif}; //The first call of GetWMIInfo is slow. The next call is done in TriggerDisconnected, but it is not so slow
+   Synchronize(@Owner.TriggerDisconnected);  //TODO: Call outside Sync
   finally
-    Terminate;
+    if Succeeded(CoInitResult) then
+      CoUninitialize;
+    //Terminate;
   end; //try
 end;
 {$endif} //windows
@@ -586,8 +602,7 @@ end;
 procedure Register;
 begin
   RegisterComponents('LazSerial', [TLazSerial]);
-  RegisterPropertyEditor(TypeInfo(boolean), TLazSerial,
-                        'Active', THiddenPropertyEditor);
+  RegisterPropertyEditor(TypeInfo(boolean), TLazSerial, 'Active', THiddenPropertyEditor);
 end;
 
 initialization

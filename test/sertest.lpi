@@ -7,6 +7,7 @@
         <LRSInOutputDirectory Value="False"/>
         <CompatibilityMode Value="True"/>
       </Flags>
+      <SessionStorage Value="InProjectDir"/>
       <UseXPManifest Value="True"/>
     </General>
     <VersionInfo>
@@ -40,13 +41,11 @@
         <PackageName Value="LCL"/>
       </Item2>
     </RequiredPackages>
-    <Units Count="27">
+    <Units Count="2">
       <Unit0>
         <Filename Value="sertest.lpr"/>
         <IsPartOfProject Value="True"/>
         <UnitName Value="SerTest"/>
-        <CursorPos X="9" Y="10"/>
-        <UsageCount Value="112"/>
       </Unit0>
       <Unit1>
         <Filename Value="main.pas"/>
@@ -55,314 +54,15 @@
         <HasResources Value="True"/>
         <ResourceBaseClass Value="Form"/>
         <UnitName Value="Main"/>
-        <TopLine Value="312"/>
-        <CursorPos X="25" Y="325"/>
-        <UsageCount Value="112"/>
-        <Loaded Value="True"/>
-        <LoadedDesigner Value="True"/>
       </Unit1>
-      <Unit2>
-        <Filename Value="/share/fpcsrc/rtl/netwlibc/libc.pp"/>
-        <TopLine Value="6416"/>
-        <CursorPos X="27" Y="6443"/>
-        <UsageCount Value="6"/>
-      </Unit2>
-      <Unit3>
-        <Filename Value="../sdposerial.pas"/>
-        <UnitName Value="SdpoSerial"/>
-        <TopLine Value="25"/>
-        <CursorPos X="9" Y="36"/>
-        <UsageCount Value="40"/>
-      </Unit3>
-      <Unit4>
-        <Filename Value="../../SdpoVideo1394/sdpovideo1394.pas"/>
-        <UnitName Value="SdpoVideo1394"/>
-        <UsageCount Value="6"/>
-        <Bookmarks Count="1">
-          <Item0 X="42" Y="641" ID="1"/>
-        </Bookmarks>
-      </Unit4>
-      <Unit5>
-        <Filename Value="/share/fpcsrc/rtl/objpas/classes/classesh.inc"/>
-        <TopLine Value="1189"/>
-        <CursorPos X="24" Y="1234"/>
-        <UsageCount Value="6"/>
-      </Unit5>
-      <Unit6>
-        <Filename Value="/share/fpcsrc/rtl/unix/tthread.inc"/>
-        <TopLine Value="217"/>
-        <CursorPos X="3" Y="254"/>
-        <UsageCount Value="6"/>
-      </Unit6>
-      <Unit7>
-        <Filename Value="../synaser.pas"/>
-        <EditorIndex Value="-1"/>
-        <TopLine Value="164"/>
-        <CursorPos X="3" Y="177"/>
-        <UsageCount Value="44"/>
-      </Unit7>
-      <Unit8>
-        <Filename Value="../synafpc.pas"/>
-        <TopLine Value="41"/>
-        <CursorPos X="16" Y="69"/>
-        <UsageCount Value="6"/>
-      </Unit8>
-      <Unit9>
-        <Filename Value="../../SdpoVideo4L2/sdpovideo4l2.pas"/>
-        <UnitName Value="SdpoVideo4L2"/>
-        <TopLine Value="469"/>
-        <CursorPos X="43" Y="470"/>
-        <UsageCount Value="6"/>
-      </Unit9>
-      <Unit10>
-        <Filename Value="../sdpoSerialSetup.pas"/>
-        <ComponentName Value="ComSetupFrm"/>
-        <HasResources Value="True"/>
-        <ResourceBaseClass Value="Form"/>
-        <TopLine Value="218"/>
-        <CursorPos X="10" Y="234"/>
-        <UsageCount Value="25"/>
-      </Unit10>
-      <Unit11>
-        <Filename Value="../sdpoSerialSetup.lfm"/>
-        <ComponentName Value="ComSetupFrm"/>
-        <HasResources Value="True"/>
-        <ResourceBaseClass Value="Form"/>
-        <TopLine Value="138"/>
-        <UsageCount Value="6"/>
-        <DefaultSyntaxHighlighter Value="LFM"/>
-      </Unit11>
-      <Unit12>
-        <Filename Value="../sdpoSerialSetup.lrs"/>
-        <UsageCount Value="6"/>
-      </Unit12>
-      <Unit13>
-        <Filename Value="../synautil.pas"/>
-        <UsageCount Value="11"/>
-      </Unit13>
-      <Unit14>
-        <Filename Value="main.lrs"/>
-        <TopLine Value="53"/>
-        <CursorPos Y="72"/>
-        <UsageCount Value="14"/>
-      </Unit14>
-      <Unit15>
-        <Filename Value="../../../cport/CPort.pas"/>
-        <CursorPos X="7" Y="11"/>
-        <UsageCount Value="8"/>
-      </Unit15>
-      <Unit16>
-        <Filename Value="../lazserial.pas"/>
-        <UnitName Value="LazSerial"/>
-        <IsVisibleTab Value="True"/>
-        <EditorIndex Value="1"/>
-        <TopLine Value="314"/>
-        <CursorPos X="28" Y="317"/>
-        <UsageCount Value="20"/>
-        <Loaded Value="True"/>
-      </Unit16>
-      <Unit17>
-        <Filename Value="../../aggpas/flash_rasterizer.dpr"/>
-        <TopLine Value="204"/>
-        <CursorPos X="3" Y="221"/>
-        <UsageCount Value="10"/>
-      </Unit17>
-      <Unit18>
-        <Filename Value="../lazserialsetup.pas"/>
-        <ComponentName Value="ComSetupFrm"/>
-        <HasResources Value="True"/>
-        <ResourceBaseClass Value="Form"/>
-        <EditorIndex Value="2"/>
-        <TopLine Value="37"/>
-        <CursorPos X="146" Y="49"/>
-        <UsageCount Value="14"/>
-        <Loaded Value="True"/>
-        <LoadedDesigner Value="True"/>
-      </Unit18>
-      <Unit19>
-        <Filename Value="../lazserialsetup.lfm"/>
-        <ComponentName Value="ComSetupFrm"/>
-        <HasResources Value="True"/>
-        <ResourceBaseClass Value="Form"/>
-        <EditorIndex Value="-1"/>
-        <UsageCount Value="13"/>
-        <DefaultSyntaxHighlighter Value="LFM"/>
-      </Unit19>
-      <Unit20>
-        <Filename Value="../lazSerialSetup.lrs"/>
-        <UsageCount Value="10"/>
-      </Unit20>
-      <Unit21>
-        <Filename Value="main.lfm"/>
-        <CursorPos X="64" Y="18"/>
-        <UsageCount Value="10"/>
-        <DefaultSyntaxHighlighter Value="LFM"/>
-      </Unit21>
-      <Unit22>
-        <Filename Value="../LazSerialPort.pas"/>
-        <EditorIndex Value="-1"/>
-        <UsageCount Value="13"/>
-      </Unit22>
-      <Unit23>
-        <Filename Value="../../../lcl/include/customform.inc"/>
-        <EditorIndex Value="6"/>
-        <TopLine Value="1631"/>
-        <CursorPos Y="1646"/>
-        <UsageCount Value="11"/>
-        <Loaded Value="True"/>
-      </Unit23>
-      <Unit24>
-        <Filename Value="../serialselector.pas"/>
-        <UnitName Value="SerialSelector"/>
-        <EditorIndex Value="3"/>
-        <CursorPos X="33" Y="11"/>
-        <UsageCount Value="11"/>
-        <Loaded Value="True"/>
-      </Unit24>
-      <Unit25>
-        <Filename Value="../serialwatcher.pas"/>
-        <UnitName Value="SerialWatcher"/>
-        <EditorIndex Value="5"/>
-        <TopLine Value="186"/>
-        <CursorPos X="17" Y="203"/>
-        <UsageCount Value="10"/>
-        <Loaded Value="True"/>
-      </Unit25>
-      <Unit26>
-        <Filename Value="../lazserialcommon.pas"/>
-        <UnitName Value="LazSerialCommon"/>
-        <EditorIndex Value="4"/>
-        <TopLine Value="34"/>
-        <CursorPos X="13" Y="50"/>
-        <UsageCount Value="10"/>
-        <Loaded Value="True"/>
-      </Unit26>
     </Units>
-    <JumpHistory Count="30" HistoryIndex="29">
-      <Position1>
-        <Filename Value="main.pas"/>
-        <Caret Line="323" Column="29" TopLine="312"/>
-      </Position1>
-      <Position2>
-        <Filename Value="main.pas"/>
-        <Caret Line="327" Column="25" TopLine="312"/>
-      </Position2>
-      <Position3>
-        <Filename Value="../lazserial.pas"/>
-        <Caret Line="188" Column="15" TopLine="172"/>
-      </Position3>
-      <Position4>
-        <Filename Value="../lazserial.pas"/>
-        <Caret Line="317" Column="6" TopLine="314"/>
-      </Position4>
-      <Position5>
-        <Filename Value="../lazserialsetup.pas"/>
-        <Caret Line="50" Column="11" TopLine="34"/>
-      </Position5>
-      <Position6>
-        <Filename Value="../lazserial.pas"/>
-        <Caret Line="317" Column="6" TopLine="314"/>
-      </Position6>
-      <Position7>
-        <Filename Value="../lazserialsetup.pas"/>
-        <Caret Line="50" Column="11" TopLine="34"/>
-      </Position7>
-      <Position8>
-        <Filename Value="../lazserialsetup.pas"/>
-        <Caret Line="234" Column="47" TopLine="219"/>
-      </Position8>
-      <Position9>
-        <Filename Value="main.pas"/>
-        <Caret Line="243" TopLine="228"/>
-      </Position9>
-      <Position10>
-        <Filename Value="main.pas"/>
-        <Caret Line="324" TopLine="312"/>
-      </Position10>
-      <Position11>
-        <Filename Value="main.pas"/>
-        <Caret Line="333" TopLine="312"/>
-      </Position11>
-      <Position12>
-        <Filename Value="../lazserialsetup.pas"/>
-        <Caret Line="42" TopLine="25"/>
-      </Position12>
-      <Position13>
-        <Filename Value="main.pas"/>
-        <Caret Line="333" TopLine="312"/>
-      </Position13>
-      <Position14>
-        <Filename Value="main.pas"/>
-        <Caret Line="326" TopLine="312"/>
-      </Position14>
-      <Position15>
-        <Filename Value="main.pas"/>
-        <Caret Line="328" TopLine="312"/>
-      </Position15>
-      <Position16>
-        <Filename Value="main.pas"/>
-        <Caret Line="326" TopLine="312"/>
-      </Position16>
-      <Position17>
-        <Filename Value="main.pas"/>
-        <Caret Line="331" TopLine="312"/>
-      </Position17>
-      <Position18>
-        <Filename Value="main.pas"/>
-        <Caret Line="322" Column="25" TopLine="312"/>
-      </Position18>
-      <Position19>
-        <Filename Value="main.pas"/>
-        <Caret Line="325" Column="24" TopLine="312"/>
-      </Position19>
-      <Position20>
-        <Filename Value="../lazserial.pas"/>
-        <Caret Line="188" Column="15" TopLine="173"/>
-      </Position20>
-      <Position21>
-        <Filename Value="../lazserial.pas"/>
-        <Caret Line="315" Column="25" TopLine="314"/>
-      </Position21>
-      <Position22>
-        <Filename Value="../serialselector.pas"/>
-        <Caret Line="229" Column="53" TopLine="220"/>
-      </Position22>
-      <Position23>
-        <Filename Value="../serialselector.pas"/>
-        <Caret Line="11" Column="33"/>
-      </Position23>
-      <Position24>
-        <Filename Value="../lazserialcommon.pas"/>
-        <Caret Line="50" Column="4" TopLine="34"/>
-      </Position24>
-      <Position25>
-        <Filename Value="../lazserial.pas"/>
-        <Caret Line="63" Column="44" TopLine="63"/>
-      </Position25>
-      <Position26>
-        <Filename Value="main.pas"/>
-        <Caret Line="325" Column="25" TopLine="312"/>
-      </Position26>
-      <Position27>
-        <Filename Value="../lazserial.pas"/>
-        <Caret Line="188" Column="58" TopLine="174"/>
-      </Position27>
-      <Position28>
-        <Filename Value="../lazserialsetup.pas"/>
-        <Caret Line="49" Column="146" TopLine="37"/>
-      </Position28>
-      <Position29>
-        <Filename Value="../lazserial.pas"/>
-        <Caret Line="315" Column="37" TopLine="299"/>
-      </Position29>
-      <Position30>
-        <Filename Value="../lazserial.pas"/>
-        <Caret Line="188" Column="30" TopLine="173"/>
-      </Position30>
-    </JumpHistory>
   </ProjectOptions>
   <CompilerOptions>
     <Version Value="11"/>
+    <SearchPaths>
+      <IncludeFiles Value="$(ProjOutDir)"/>
+      <UnitOutputDirectory Value="lib/$(TargetCPU)-$(TargetOS)"/>
+    </SearchPaths>
     <Parsing>
       <SyntaxOptions>
         <UseAnsiStrings Value="False"/>
@@ -381,22 +81,6 @@
     </Linking>
   </CompilerOptions>
   <Debugging>
-    <Watches Count="4">
-      <Item1>
-        <Expression Value="test"/>
-      </Item1>
-      <Item2>
-        <Expression Value="v.FLIST[0]^"/>
-        <DisplayFormat Struct="vdfStructFull"/>
-      </Item2>
-      <Item3>
-        <Expression Value="v.FLIST[1]^"/>
-      </Item3>
-      <Item4>
-        <Expression Value="Ser"/>
-        <DisplayFormat Struct="vdfStructFull"/>
-      </Item4>
-    </Watches>
     <Exceptions Count="3">
       <Item1>
         <Name Value="ECodetoolError"/>

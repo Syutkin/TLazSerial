@@ -1,6 +1,11 @@
-LazSerial v0.7.4
+LazSerial v0.7.8
+
+Versions ≤ 0.6 available on https://github.com/JurassicPork/TLazSerial
+Versions ≥ 0.7 available on https://github.com/CM630/TLazSerial
+
+
 Serial Port Component for Lazarus 
-by Jurassic Pork  03/2013 03/2022; some contributions from v0.7 on by other contributors
+by Jurassic Pork  03/2013 03/2022; some contributions from v0.7 on by others
 This library is Free software; you can rediStribute it and/or modify it
   under the terms of the GNU Library General Public License as published by
   the Free Software Foundation; either version 2 of the License, or (at your
@@ -54,7 +59,8 @@ you can send NMEA frames ( GGA GLL RMC) to the opened serial port
 In the memo you can see what is received from  the opened serial port.
 In the status bar you can see the status events.
 
-tested with windows 10 and Ubuntu 20.04  Lazarus 2.0.10
+Versions ≤ 0.6 tested with windows 10 and Ubuntu 20.04  Lazarus 2.0.10
+Versions ≥ 0.7 tested with windows (7; 10 and 11) and Mint Mate ??? on Lazarus 4.6. Some testing on VM.
                                        
 if you haven't serial ports in your PC you can use virtual ports :
 1 - WINDOWS 

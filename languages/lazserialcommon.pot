@@ -13,8 +13,32 @@ msgstr ""
 msgid "Built-in Serial"
 msgstr ""
 
+#: lazserialcommon.lngdtr
+msgid "DTR"
+msgstr ""
+
+#: lazserialcommon.lngdtr_dsr
+msgid "DTR DSR"
+msgstr ""
+
+#: lazserialcommon.lngduplicated
+msgid "Duplicated"
+msgstr ""
+
+#: lazserialcommon.lngerrorsign
+msgid "⚠"
+msgstr ""
+
+#: lazserialcommon.lngeven
+msgid "Even"
+msgstr ""
+
 #: lazserialcommon.lnghpun2420mobilebroadbandmodulemodem
 msgid "HP un2420 Mobile Broadband Module Modem"
+msgstr ""
+
+#: lazserialcommon.lngmark
+msgid "Mark"
 msgstr ""
 
 #: lazserialcommon.lngmt65xx_preloader
@@ -25,8 +49,32 @@ msgstr ""
 msgid "No devices available"
 msgstr ""
 
+#: lazserialcommon.lngnone
+msgid "None"
+msgstr ""
+
+#: lazserialcommon.lngodd
+msgid "Odd"
+msgstr ""
+
+#: lazserialcommon.lngor
+msgid " OR "
+msgstr ""
+
 #: lazserialcommon.lngremovedports
 msgid "Removed ports: "
+msgstr ""
+
+#: lazserialcommon.lngrts_cts
+msgid "RTS CTS"
+msgstr ""
+
+#: lazserialcommon.lngserno
+msgid "Ser№"
+msgstr ""
+
+#: lazserialcommon.lngspace
+msgid "Space"
 msgstr ""
 
 #: lazserialcommon.lngusbgwinstek
@@ -131,5 +179,27 @@ msgstr ""
 
 #: lazserialcommon.lngusbsiliconlabscp210x
 msgid "USB Silicon Labs CP210x"
+msgstr ""
+
+#: lazserialcommon.lngvirtualdevice
+msgid "Virtual device"
+msgstr ""
+
+#: lazserialcommon.lngxonxoff
+msgid "XonXoff w/o DTR"
+msgstr ""
+
+#: lazserialcommon.lngxonxoff_and_dtr_dsr
+msgctxt "lazserialcommon.lngxonxoff_and_dtr_dsr"
+msgid "XonXoff DTR DSR"
+msgstr ""
+
+#: lazserialcommon.lngxonxoff_and_rts_cts
+msgctxt "lazserialcommon.lngxonxoff_and_rts_cts"
+msgid "XonXoff RTS CTS"
+msgstr ""
+
+#: lazserialcommon.lngxonxoff_dtr
+msgid "XonXoff w DTR"
 msgstr ""
 

@@ -80,10 +80,9 @@ const
 {$ENDIF}
   StopBitsStrings: array[TStopBits] of string = ('1', '1.5', '2');
   DataBitsStrings: array[TDataBits] of string = ('8', '7', '6', '5');
-  ParityBitsStrings: array[TParity] of string = ('None', 'Odd', 'Even',
-    'Mark', 'Space');
-  FlowControlStrings: array[TFlowControl] of string = ('None',
-    'Software', 'HardWare');
+  ParityBitsStrings: array[TParity] of string = (lngNone, lngOdd, lngEven, lngMark, lngSpace);
+  FlowControlStrings: array[TFlowControl] of string = (lngNone, lngXonXoff_DTR,  lngRTS_CTS, lngXonXoff,         lngXonXoff_and_RTS_CTS,  lngDTR_DSR, lngXonXoff_and_DTR_DSR, lngDTR);
+ //                                                   fcNone=0, fcXonXoff=1,   fcHardware=2, fcXonXoff_no_DTR=3,fcXonXoff_and_RTS_CTS=4, fcDTR_DSR=5,fcXonXoff_and_DTR_DSR=6,fcDTR=7
 
 procedure StringArrayToList(AList: TStrings; const AStrings: array of string);
 var

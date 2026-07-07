@@ -6,13 +6,13 @@ object Form1: TForm1
   Caption = 'TLazSerial Example'
   ClientHeight = 334
   ClientWidth = 460
-  LCLVersion = '4.4.0.0'
+  LCLVersion = '4.8.0.0'
   OnCreate = FormCreate
   object CheckBox1: TCheckBox
     Left = 8
-    Height = 21
+    Height = 19
     Top = 40
-    Width = 168
+    Width = 141
     Caption = 'Append friendly names'
     Checked = True
     State = cbChecked
@@ -39,9 +39,9 @@ object Form1: TForm1
   end
   object CheckBox2: TCheckBox
     Left = 8
-    Height = 21
+    Height = 19
     Top = 64
-    Width = 76
+    Width = 63
     Caption = 'Hide TTI'
     Checked = True
     State = cbChecked
@@ -50,9 +50,9 @@ object Form1: TForm1
   end
   object CheckBox3: TCheckBox
     Left = 8
-    Height = 21
+    Height = 19
     Top = 112
-    Width = 84
+    Width = 71
     Caption = 'Show hint'
     TabOrder = 4
     OnChange = CheckBox3Change
@@ -62,7 +62,7 @@ object Form1: TForm1
     AnchorSideTop.Control = Memo1
     AnchorSideTop.Side = asrBottom
     Left = 10
-    Height = 31
+    Height = 28
     Top = 294
     Width = 368
     BorderSpacing.Top = 4
@@ -87,7 +87,7 @@ object Form1: TForm1
   end
   object SpinEdit1: TSpinEdit
     Left = 232
-    Height = 29
+    Height = 23
     Hint = 'Primary value, will be used if it is not negative.'
     Top = 88
     Width = 112
@@ -102,19 +102,19 @@ object Form1: TForm1
     AnchorSideLeft.Control = SpinEdit1
     AnchorSideBottom.Control = SpinEdit1
     Left = 232
-    Height = 19
-    Top = 69
-    Width = 106
+    Height = 15
+    Top = 73
+    Width = 92
     Anchors = [akLeft, akBottom]
     Caption = 'Custom baudrate'
   end
   object ComboBox1: TComboBox
     Left = 352
-    Height = 31
+    Height = 23
     Hint = 'This value is used if Custom baudrate is < 0'
     Top = 88
     Width = 100
-    ItemHeight = 0
+    ItemHeight = 15
     ParentShowHint = False
     ShowHint = True
     TabOrder = 8
@@ -124,17 +124,17 @@ object Form1: TForm1
     AnchorSideLeft.Control = ComboBox1
     AnchorSideBottom.Control = ComboBox1
     Left = 352
-    Height = 19
-    Top = 69
-    Width = 57
+    Height = 15
+    Top = 73
+    Width = 47
     Anchors = [akLeft, akBottom]
     Caption = 'Baudrate'
   end
   object chkUseWMI: TCheckBox
     Left = 8
-    Height = 21
+    Height = 19
     Top = 88
-    Width = 80
+    Width = 65
     Caption = 'Use WMI'
     Checked = True
     State = cbChecked
@@ -143,10 +143,10 @@ object Form1: TForm1
   end
   object chkSerialNumber: TCheckBox
     Left = 232
-    Height = 21
+    Height = 19
     Hint = 'Append the Serial № to the friendly names.'#13#10'Serial devices rarely have serial numbers.'
     Top = 40
-    Width = 75
+    Width = 62
     Caption = 'Serial №'
     Checked = True
     ParentShowHint = False
@@ -157,12 +157,12 @@ object Form1: TForm1
   end
   object SerialSelector1: TSerialSelector
     Left = 10
-    Height = 31
+    Height = 23
     Top = 8
     Width = 368
-    ItemHeight = 0
+    ItemHeight = 15
     ItemIndex = 0
-    Options = [ssoAppendFriendlyNames, ssoUseWMI, ssoHide_tty_usbserial, ssoAppendSerialNumber]
+    Options = [ssoAppendFriendlyNames, ssoUseWMI, ssoHide_tty_usbserial, ssoAppendSerialNumber, ssoAppendErrorCode]
     ShowHint = True
     TabOrder = 11
   end
@@ -170,19 +170,25 @@ object Form1: TForm1
     AnchorSideLeft.Control = SerialSelector1
     AnchorSideLeft.Side = asrBottom
     Left = 382
-    Height = 19
+    Height = 15
     Top = 16
-    Width = 41
+    Width = 34
     BorderSpacing.Left = 4
     Caption = 'Label2'
   end
+  object Timer1: TTimer
+    Interval = 100
+    OnTimer = Timer1Timer
+    Left = 96
+    Top = 80
+  end
   object LazSerial1: TLazSerial
     Active = False
-    BaudRate = br__9600
+    BaudRate = br___110
     CustomBaudRate = -1
     DataBits = db8bits
     Parity = pNone
-    FlowControl = fcNone
+    FlowControl = fcDTR
     StopBits = sbOne
     SynSer.Tag = 0
     SynSer.Handle = -1
@@ -198,14 +204,7 @@ object Form1: TForm1
     Device = 'COM1'
     RcvLineCRLF = False
     OnRxData = LazSerial1RxData
+    OnStatus = LazSerial1Status
     OnRemoved = LazSerial1Removed
-    Left = 176
-    Top = 88
-  end
-  object Timer1: TTimer
-    Interval = 100
-    OnTimer = Timer1Timer
-    Left = 96
-    Top = 80
   end
 end

@@ -13,7 +13,7 @@ object ComSetupFrm: TComSetupFrm
   Font.Height = -11
   Font.Name = 'MS Sans Serif'
   Position = poMainFormCenter
-  LCLVersion = '4.4.0.0'
+  LCLVersion = '4.6.0.0'
   OnCreate = FormCreate
   object Button1: TButton
     Left = 104

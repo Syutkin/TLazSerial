@@ -8,17 +8,17 @@ unit LazSerialPort;
 interface
 
 uses
-  LazSerial, SerialWatcher, SerialSelector, LazarusPackageIntf;
+  LazSerial, SerialWatcher, SerialSelector, LazSerialCommon, LazarusPackageIntf;
 
 implementation
 
 procedure Register;
 begin
-  RegisterUnit('LazSerial', @LazSerial.Register);
-  RegisterUnit('SerialWatcher', @SerialWatcher.Register);
-  RegisterUnit('SerialSelector', @SerialSelector.Register);
+  RegisterUnit('LazSerial',@LazSerial.Register);
+  RegisterUnit('SerialWatcher',@SerialWatcher.Register);
+  RegisterUnit('SerialSelector',@SerialSelector.Register);
 end;
 
 initialization
-  RegisterPackage('LazSerialPort', @Register);
+  RegisterPackage('LazSerialPort',@Register);
 end.

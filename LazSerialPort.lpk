@@ -4,7 +4,7 @@
     <Name Value="LazSerialPort"/>
     <Type Value="RunAndDesignTime"/>
     <AddToProjectUsesSection Value="True"/>
-    <Author Value="Jurassic Pork"/>
+    <Author Value="Jurassic Pork and others"/>
     <CompilerOptions>
       <Version Value="11"/>
       <SearchPaths>
@@ -25,8 +25,8 @@
   You should have received a Copy of the GNU Library General Public License
   along with This library; if not, Write to the Free Software Foundation,
   Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA. }"/>
-    <Version Minor="7" Release="5"/>
-    <Files Count="3">
+    <Version Minor="7" Release="8"/>
+    <Files Count="4">
       <Item1>
         <Filename Value="lazserial.pas"/>
         <HasRegisterProc Value="True"/>
@@ -42,6 +42,10 @@
         <HasRegisterProc Value="True"/>
         <UnitName Value="SerialSelector"/>
       </Item3>
+      <Item4>
+        <Filename Value="lazserialcommon.pas"/>
+        <UnitName Value="LazSerialCommon"/>
+      </Item4>
     </Files>
     <CompatibilityMode Value="True"/>
     <i18n>

@@ -426,7 +426,7 @@ object FMain: TFMain
     CustomBaudRate = -1
     DataBits = db8bits
     Parity = pNone
-    FlowControl = fcNone
+    FlowControl = fcHardware
     StopBits = sbOne
     SynSer.Tag = 0
     SynSer.Handle = -1

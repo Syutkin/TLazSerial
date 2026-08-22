@@ -335,9 +335,9 @@ type
     FAtTimeout: integer;
     FInterPacketTimeout: Boolean;
     FComNr: integer;
-    {$IFDEF UNIX}           // RPH - 14May2016, to support O_NonBlock for open
+    // Used only by the Unix implementation of Connect. Kept on every platform
+    // so forms containing SynSer.NonBlock remain cross-platform loadable.
     FNonBlock: Boolean;
-    {$ENDIF} 
 {$IFDEF MSWINDOWS}
     FPortAddr: Word;
     function CanEvent(Event: dword; Timeout: integer): boolean;
@@ -766,11 +766,10 @@ type
      If @False, then timeout is overall for whoole reading operation.}
     property InterPacketTimeout: Boolean read FInterPacketTimeout Write FInterPacketTimeout;
 
-{$IFDEF UNIX}           // RPH 14May2016, to support O_NonBlock for open
     {:If @true, then the call to open on Unix systems is non-blocking.
-     If @False (default), then the call to open can be blocked by CTS, DSR or Carrier.}
-    property NonBlock: Boolean read FNonBlock write FNonBlock;
-{$ENDIF}
+     If @False (default), then the call to open can be blocked by CTS, DSR or
+     Carrier. The value is retained but otherwise ignored on non-Unix systems.}
+    property NonBlock: Boolean read FNonBlock write FNonBlock default False;
   end;
 
 
@@ -815,9 +814,7 @@ begin
   FLastLF := False;
   FAtTimeout := 1000;
   FInterPacketTimeout := True;
-{$IFDEF UNIX}           // RPH 14May2016, to support O_NonBlock for open
   FNonBlock := False;
-{$ENDIF} 
 end;
 
 destructor TBlockSerial.Destroy;

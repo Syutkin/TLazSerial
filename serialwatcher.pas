@@ -237,11 +237,11 @@ constructor TSerialWatcher.Create (aOwner: TComponent);
 begin
   inherited;
   FTimer := TTimer.Create(Self);
+  FPrevDevs := TStringList.Create;
   {$ifdef windows}
   InitResources;
   FTimer.Interval := 3000; //tried with 500, was not long enough
   FTimer.Enabled := False;
-  FPrevDevs := TStringList.Create;
 //  if (AOwner <> nil) and not (csLoading in AOwner.ComponentState) and not (csDesigning in ComponentState) then
     FPrevDevs.DelimitedText := GetSerialPortNames(False{True});
   {$endif}
@@ -255,10 +255,10 @@ end;
 
 destructor TSerialWatcher.Destroy;
 begin
+  FPrevDevs.Free;
   {$ifdef windows}
   if FDevNotify <> nil then
     UnregisterDeviceNotification(FDevNotify);
-  FPrevDevs.Free;
   {$endif}
   {$IfDef linux}
   if Assigned(FTimer) then FTimer.Free;

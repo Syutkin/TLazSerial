@@ -5,7 +5,7 @@ unit SerialSelectorComponentTests;
 interface
 
 uses
-  Classes, SysUtils, TypInfo, FpcUnit, TestRegistry, StdCtrls,
+  Classes, SysUtils, SyncObjs, TypInfo, FpcUnit, TestRegistry, StdCtrls,
   LazSerialDevices, SerialSelector;
 
 type
@@ -18,6 +18,20 @@ type
     procedure SetSnapshot(const ADevices: array of TSerialDeviceInfo);
     function DisplayItem(const AIndex: Integer): string;
     function IsSorted: Boolean;
+  end;
+
+  TBackgroundTestSerialSelector = class(TSerialSelector)
+  private
+    FApplyCount: PInteger;
+    FLoadStarted: TEvent;
+  protected
+    procedure ApplyDevices(const ADevices: TSerialDeviceInfoArray); override;
+    function LoadDevices: TSerialDeviceInfoArray; override;
+    function UseBackgroundRefresh: Boolean; override;
+  public
+    function RefreshFinished: Boolean;
+    property ApplyCount: PInteger read FApplyCount write FApplyCount;
+    property LoadStarted: TEvent read FLoadStarted write FLoadStarted;
   end;
 
   TSerialSelectorComponentTests = class(TTestCase)
@@ -43,9 +57,41 @@ type
     procedure SelectorKeepsItemsUnsorted;
     procedure ObjectInspectorContractContainsDisplayProperties;
     procedure InternalListPropertiesAreNotPublished;
+    procedure BackgroundRefreshAppliesSnapshotOnMainThread;
+    procedure QueuedBackgroundRefreshDoesNotDeliverAfterDestroy;
+    procedure BackgroundRefreshDoesNotDeliverAfterDestroy;
   end;
 
 implementation
+
+procedure TBackgroundTestSerialSelector.ApplyDevices(
+  const ADevices: TSerialDeviceInfoArray
+);
+begin
+  if FApplyCount <> nil then
+    Inc(FApplyCount^);
+  inherited ApplyDevices(ADevices);
+end;
+
+function TBackgroundTestSerialSelector.LoadDevices: TSerialDeviceInfoArray;
+begin
+  if FLoadStarted <> nil then
+    FLoadStarted.SetEvent;
+  Sleep(50);
+  Result := nil;
+  SetLength(Result, 1);
+  Result[0].Device := 'COM1';
+end;
+
+function TBackgroundTestSerialSelector.UseBackgroundRefresh: Boolean;
+begin
+  Result := True;
+end;
+
+function TBackgroundTestSerialSelector.RefreshFinished: Boolean;
+begin
+  Result := BackgroundRefreshFinished;
+end;
 
 function TTestSerialSelector.LoadDevices: TSerialDeviceInfoArray;
 var
@@ -318,6 +364,101 @@ begin
   AssertNotPublished('DeviceList');
   AssertNotPublished('DeviceListFriend');
   AssertNotPublished('Options');
+end;
+
+procedure TSerialSelectorComponentTests.
+  BackgroundRefreshAppliesSnapshotOnMainThread;
+var
+  ApplyCount: Integer;
+  Deadline: QWord;
+  LoadStarted: TEvent;
+  Selector: TBackgroundTestSerialSelector;
+begin
+  ApplyCount := 0;
+  LoadStarted := TEvent.Create(nil, True, False, '');
+  Selector := TBackgroundTestSerialSelector.Create(nil);
+  try
+    Selector.ApplyCount := @ApplyCount;
+    Selector.LoadStarted := LoadStarted;
+    Selector.Refresh;
+    AssertEquals(
+      Ord(wrSignaled),
+      Ord(LoadStarted.WaitFor(1000))
+    );
+
+    Deadline := TThread.GetTickCount64 + 1000;
+    repeat
+      CheckSynchronize(10);
+    until (ApplyCount > 0) or (TThread.GetTickCount64 >= Deadline);
+
+    AssertEquals(1, ApplyCount);
+    AssertEquals(1, Selector.DeviceCount);
+    AssertEquals('COM1', Selector.Device);
+  finally
+    Selector.Free;
+    LoadStarted.Free;
+  end;
+end;
+
+procedure TSerialSelectorComponentTests.
+  QueuedBackgroundRefreshDoesNotDeliverAfterDestroy;
+var
+  ApplyCount: Integer;
+  Deadline: QWord;
+  LoadStarted: TEvent;
+  Selector: TBackgroundTestSerialSelector;
+begin
+  ApplyCount := 0;
+  LoadStarted := TEvent.Create(nil, True, False, '');
+  Selector := TBackgroundTestSerialSelector.Create(nil);
+  try
+    Selector.ApplyCount := @ApplyCount;
+    Selector.LoadStarted := LoadStarted;
+    Selector.Refresh;
+    AssertEquals(
+      Ord(wrSignaled),
+      Ord(LoadStarted.WaitFor(1000))
+    );
+
+    Deadline := TThread.GetTickCount64 + 1000;
+    while not Selector.RefreshFinished and
+      (TThread.GetTickCount64 < Deadline) do
+      Sleep(1);
+    AssertTrue(Selector.RefreshFinished);
+  finally
+    Selector.Free;
+    LoadStarted.Free;
+  end;
+
+  CheckSynchronize(100);
+  AssertEquals(0, ApplyCount);
+end;
+
+procedure TSerialSelectorComponentTests.
+  BackgroundRefreshDoesNotDeliverAfterDestroy;
+var
+  ApplyCount: Integer;
+  LoadStarted: TEvent;
+  Selector: TBackgroundTestSerialSelector;
+begin
+  ApplyCount := 0;
+  LoadStarted := TEvent.Create(nil, True, False, '');
+  Selector := TBackgroundTestSerialSelector.Create(nil);
+  try
+    Selector.ApplyCount := @ApplyCount;
+    Selector.LoadStarted := LoadStarted;
+    Selector.Refresh;
+    AssertEquals(
+      Ord(wrSignaled),
+      Ord(LoadStarted.WaitFor(1000))
+    );
+  finally
+    Selector.Free;
+    LoadStarted.Free;
+  end;
+
+  CheckSynchronize(100);
+  AssertEquals(0, ApplyCount);
 end;
 
 initialization

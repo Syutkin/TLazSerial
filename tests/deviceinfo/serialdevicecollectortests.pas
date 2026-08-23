@@ -21,6 +21,11 @@ type
     procedure CollectorPreservesDeviceWhenPropertiesAreEmpty;
     procedure CollectorContinuesAfterPropertyProviderException;
     procedure DeviceLookupUsesLinuxCaseSensitiveNames;
+    procedure WindowsCollectorDeduplicatesCaseInsensitivelyAndNaturalSorts;
+    procedure WindowsCollectorUsesRegistryFallback;
+    procedure WindowsCollectorUsesRegistryForInvalidWmiSnapshot;
+    procedure WindowsCollectorDoesNotReadRegistryWhenWmiHasPorts;
+    procedure WindowsCollectorFiltersAccessibleDevicesAfterEnumeration;
   end;
 
 implementation
@@ -55,6 +60,32 @@ type
       const ARaisesException: Boolean = False);
     property ReadCount: Integer read FReadCount;
     property AccessibilityCheckCount: Integer read FAccessibilityCheckCount;
+  end;
+
+  TFakeWindowsSerialDeviceCollector = class(TWindowsSerialDeviceCollector)
+  private
+    FAccessibleDevices: TStringList;
+    FAccessibilityCheckCount: Integer;
+    FRegistryDevices: TStringList;
+    FRegistryReadCount: Integer;
+    FWmiReadCount: Integer;
+    FWmiSnapshot: string;
+    FWmiSucceeds: Boolean;
+  protected
+    function CanOpenDevice(const ADevice: string): Boolean; override;
+    procedure EnumerateRegistryDeviceNames(ADevices: TStrings); override;
+    function ReadWmiSnapshot(out ASnapshot: string): Boolean; override;
+  public
+    constructor Create;
+    destructor Destroy; override;
+    procedure AddAccessibleDevice(const ADevice: string);
+    procedure AddRegistryDevice(const ADevice: string);
+    property AccessibilityCheckCount: Integer
+      read FAccessibilityCheckCount;
+    property RegistryReadCount: Integer read FRegistryReadCount;
+    property WmiReadCount: Integer read FWmiReadCount;
+    property WmiSnapshot: string read FWmiSnapshot write FWmiSnapshot;
+    property WmiSucceeds: Boolean read FWmiSucceeds write FWmiSucceeds;
   end;
 
 constructor TFakeLinuxSerialDeviceCollector.Create;
@@ -140,6 +171,61 @@ begin
     raise Exception.Create('Simulated property provider failure');
   AProperties := Response.Properties;
   Result := Response.Succeeds;
+end;
+
+constructor TFakeWindowsSerialDeviceCollector.Create;
+begin
+  inherited Create;
+  FAccessibleDevices := TStringList.Create;
+  FAccessibleDevices.CaseSensitive := False;
+  FRegistryDevices := TStringList.Create;
+  FWmiSucceeds := False;
+end;
+
+destructor TFakeWindowsSerialDeviceCollector.Destroy;
+begin
+  FRegistryDevices.Free;
+  FAccessibleDevices.Free;
+  inherited Destroy;
+end;
+
+procedure TFakeWindowsSerialDeviceCollector.AddAccessibleDevice(
+  const ADevice: string
+);
+begin
+  FAccessibleDevices.Add(ADevice);
+end;
+
+procedure TFakeWindowsSerialDeviceCollector.AddRegistryDevice(
+  const ADevice: string
+);
+begin
+  FRegistryDevices.Add(ADevice);
+end;
+
+function TFakeWindowsSerialDeviceCollector.CanOpenDevice(
+  const ADevice: string
+): Boolean;
+begin
+  Inc(FAccessibilityCheckCount);
+  Result := FAccessibleDevices.IndexOf(ADevice) >= 0;
+end;
+
+procedure TFakeWindowsSerialDeviceCollector.EnumerateRegistryDeviceNames(
+  ADevices: TStrings
+);
+begin
+  Inc(FRegistryReadCount);
+  ADevices.Assign(FRegistryDevices);
+end;
+
+function TFakeWindowsSerialDeviceCollector.ReadWmiSnapshot(
+  out ASnapshot: string
+): Boolean;
+begin
+  Inc(FWmiReadCount);
+  ASnapshot := FWmiSnapshot;
+  Result := FWmiSucceeds;
 end;
 
 procedure TSerialDeviceCollectorTests.LinuxPatternsMatchSupportedPortClasses;
@@ -335,6 +421,125 @@ begin
   AssertEquals(-1, IndexOfSerialDevice(Devices, '/dev/ttyusb0'));
   AssertTrue(ContainsSerialDevice(Devices, '/dev/ttyACM0'));
   AssertFalse(ContainsSerialDevice(Devices, '/dev/ttyACM1'));
+end;
+
+procedure TSerialDeviceCollectorTests.
+  WindowsCollectorDeduplicatesCaseInsensitivelyAndNaturalSorts;
+var
+  Collector: TFakeWindowsSerialDeviceCollector;
+  Devices: TSerialDeviceInfoArray;
+begin
+  Collector := TFakeWindowsSerialDeviceCollector.Create;
+  try
+    Collector.WmiSucceeds := True;
+    Collector.WmiSnapshot :=
+      'Caption=Tenth device (COM10)' + LineEnding + LineEnding +
+      'Caption=Second device (COM2)' + LineEnding + LineEnding +
+      'Caption=Duplicate device (com2)' + LineEnding;
+
+    Devices := Collector.Collect;
+
+    AssertEquals(2, Length(Devices));
+    AssertEquals('COM2', Devices[0].Device);
+    AssertEquals('Second device', Devices[0].Model);
+    AssertEquals('COM10', Devices[1].Device);
+    AssertEquals(0, Collector.RegistryReadCount);
+  finally
+    Collector.Free;
+  end;
+end;
+
+procedure TSerialDeviceCollectorTests.WindowsCollectorUsesRegistryFallback;
+var
+  Collector: TFakeWindowsSerialDeviceCollector;
+  Devices: TSerialDeviceInfoArray;
+begin
+  Collector := TFakeWindowsSerialDeviceCollector.Create;
+  try
+    Collector.AddRegistryDevice('COM10');
+    Collector.AddRegistryDevice('com2');
+    Collector.AddRegistryDevice('COM2');
+
+    Devices := Collector.Collect;
+
+    AssertEquals(2, Length(Devices));
+    AssertEquals('com2', Devices[0].Device);
+    AssertEquals('', Devices[0].Vendor);
+    AssertEquals('', Devices[0].Model);
+    AssertEquals('COM10', Devices[1].Device);
+    AssertEquals(1, Collector.WmiReadCount);
+    AssertEquals(1, Collector.RegistryReadCount);
+  finally
+    Collector.Free;
+  end;
+end;
+
+procedure TSerialDeviceCollectorTests.
+  WindowsCollectorUsesRegistryForInvalidWmiSnapshot;
+var
+  Collector: TFakeWindowsSerialDeviceCollector;
+  Devices: TSerialDeviceInfoArray;
+begin
+  Collector := TFakeWindowsSerialDeviceCollector.Create;
+  try
+    Collector.WmiSucceeds := True;
+    Collector.WmiSnapshot := 'Caption=Device without port';
+    Collector.AddRegistryDevice('COM4');
+
+    Devices := Collector.Collect;
+
+    AssertEquals(1, Length(Devices));
+    AssertEquals('COM4', Devices[0].Device);
+    AssertEquals(1, Collector.RegistryReadCount);
+  finally
+    Collector.Free;
+  end;
+end;
+
+procedure TSerialDeviceCollectorTests.
+  WindowsCollectorDoesNotReadRegistryWhenWmiHasPorts;
+var
+  Collector: TFakeWindowsSerialDeviceCollector;
+  Devices: TSerialDeviceInfoArray;
+begin
+  Collector := TFakeWindowsSerialDeviceCollector.Create;
+  try
+    Collector.WmiSucceeds := True;
+    Collector.WmiSnapshot := 'Caption=WMI device (COM3)';
+    Collector.AddRegistryDevice('COM8');
+
+    Devices := Collector.Collect;
+
+    AssertEquals(1, Length(Devices));
+    AssertEquals('COM3', Devices[0].Device);
+    AssertEquals(0, Collector.RegistryReadCount);
+  finally
+    Collector.Free;
+  end;
+end;
+
+procedure TSerialDeviceCollectorTests.
+  WindowsCollectorFiltersAccessibleDevicesAfterEnumeration;
+var
+  Collector: TFakeWindowsSerialDeviceCollector;
+  Devices: TSerialDeviceInfoArray;
+begin
+  Collector := TFakeWindowsSerialDeviceCollector.Create;
+  try
+    Collector.WmiSucceeds := True;
+    Collector.WmiSnapshot :=
+      'Caption=Unavailable device (COM2)' + LineEnding + LineEnding +
+      'Caption=Available device (COM3)' + LineEnding;
+    Collector.AddAccessibleDevice('com3');
+
+    Devices := Collector.Collect([sdeoAccessibleOnly]);
+
+    AssertEquals(1, Length(Devices));
+    AssertEquals('COM3', Devices[0].Device);
+    AssertEquals(2, Collector.AccessibilityCheckCount);
+  finally
+    Collector.Free;
+  end;
 end;
 
 initialization

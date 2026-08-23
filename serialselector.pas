@@ -7,7 +7,7 @@ interface
 
 uses
   Classes, SysUtils, LResources, Forms, Controls, StdCtrls, Graphics, Types,
-  ExtCtrls, SerialWatcher, LazSerialDevices;
+  ExtCtrls, SerialWatcher, LazSerialDevices, SerialDeviceRefresh;
 
 type
   TSerialSelector = class(TCustomComboBox)
@@ -24,6 +24,7 @@ type
     FShowFriendlyName: Boolean;
     FDisplayOptions: TSerialDeviceDisplayOptions;
     FRefreshTimer: TTimer;
+    FDeviceRefreshThread: TSerialDeviceRefreshThread;
     function GetDevice: string;
     function GetDeviceCount: Integer;
     function GetDeviceInfo(const AIndex: Integer): TSerialDeviceInfo;
@@ -41,7 +42,11 @@ type
     procedure UpdatePortChanges(const AOldDevices: TSerialDeviceInfoArray);
     property Items;
   protected
+    procedure ApplyDevices(const ADevices: TSerialDeviceInfoArray); virtual;
+    function BackgroundRefreshFinished: Boolean;
     function LoadDevices: TSerialDeviceInfoArray; virtual;
+    procedure StartBackgroundRefresh;
+    function UseBackgroundRefresh: Boolean; virtual;
     procedure Loaded; override;
   public
     constructor Create(AOwner: TComponent); override;
@@ -270,6 +275,16 @@ begin
 end;
 
 procedure TSerialSelector.Refresh;
+begin
+  if UseBackgroundRefresh then
+    StartBackgroundRefresh
+  else
+    ApplyDevices(LoadDevices);
+end;
+
+procedure TSerialSelector.ApplyDevices(
+  const ADevices: TSerialDeviceInfoArray
+);
 var
   OldDevices: TSerialDeviceInfoArray;
   SelectedDevice: string;
@@ -278,11 +293,43 @@ begin
   if SelectedDevice = '' then
     SelectedDevice := FRequestedDevice;
   OldDevices := CopyDevices(FDevices);
-  FDevices := LoadDevices;
+  FDevices := CopyDevices(ADevices);
   UpdatePortChanges(OldDevices);
   RebuildItems(SelectedDevice);
   if FHintWindow <> nil then
     UpdateHint;
+end;
+
+function TSerialSelector.UseBackgroundRefresh: Boolean;
+begin
+  {$IFDEF Windows}
+  Result := True;
+  {$ELSE}
+  Result := False;
+  {$ENDIF}
+end;
+
+function TSerialSelector.BackgroundRefreshFinished: Boolean;
+begin
+  Result := (FDeviceRefreshThread <> nil) and
+    FDeviceRefreshThread.Finished;
+end;
+
+procedure TSerialSelector.StartBackgroundRefresh;
+begin
+  if FDeviceRefreshThread <> nil then
+  begin
+    if not FDeviceRefreshThread.Finished or
+      FDeviceRefreshThread.Delivering then
+      Exit;
+    CancelSerialDeviceRefresh(FDeviceRefreshThread);
+  end;
+
+  FDeviceRefreshThread := TSerialDeviceRefreshThread.Create(
+    @LoadDevices,
+    @ApplyDevices
+  );
+  FDeviceRefreshThread.Start;
 end;
 
 procedure TSerialSelector.DoUpdateComPorts(Sender: TObject);
@@ -315,6 +362,7 @@ begin
   FDisplayOptions := DefaultSerialDeviceDisplayOptions;
   FShowHint := True;
   FHint := '';
+  FDeviceRefreshThread := nil;
 
   Sorted := False;
   ItemIndex := -1;
@@ -431,6 +479,9 @@ end;
 
 destructor TSerialSelector.Destroy;
 begin
+  FSerialWatcher.OnComConnected := nil;
+  FSerialWatcher.OnComDisconnected := nil;
+  CancelSerialDeviceRefresh(FDeviceRefreshThread);
   FreeAndNil(FHintWindow);
   inherited Destroy;
 end;

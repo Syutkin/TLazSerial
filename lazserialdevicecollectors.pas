@@ -20,6 +20,17 @@ type
     ): TSerialDeviceInfoArray;
   end;
 
+  TWindowsSerialDeviceCollector = class
+  protected
+    function CanOpenDevice(const ADevice: string): Boolean; virtual;
+    procedure EnumerateRegistryDeviceNames(ADevices: TStrings); virtual;
+    function ReadWmiSnapshot(out ASnapshot: string): Boolean; virtual;
+  public
+    function Collect(
+      const AOptions: TSerialDeviceEnumerationOptions = []
+    ): TSerialDeviceInfoArray;
+  end;
+
 function MatchesLinuxSerialDevicePattern(const ADevice: string): Boolean;
 function IsLinuxBuiltInSerialDevice(const ATypeValue: string;
   const ADeviceExists: Boolean): Boolean;
@@ -30,6 +41,9 @@ uses
   FileUtil, StrUtils, SysUtils, LazSerialDeviceParsers
   {$IFDEF Linux}
   , BaseUnix, Process
+  {$ENDIF}
+  {$IFDEF Windows}
+  , ActiveX, ComObj, Registry, Variants, Windows, WmiUtil
   {$ENDIF};
 
 const
@@ -99,6 +113,58 @@ begin
   NewIndex := Length(ADevices);
   SetLength(ADevices, NewIndex + 1);
   ADevices[NewIndex] := ADevice;
+end;
+
+function IndexOfWindowsDevice(
+  const ADevices: TSerialDeviceInfoArray;
+  const ADevice: string
+): Integer;
+var
+  I: Integer;
+begin
+  for I := Low(ADevices) to High(ADevices) do
+    if CompareText(ADevices[I].Device, ADevice) = 0 then
+      Exit(I);
+  Result := -1;
+end;
+
+procedure SortWindowsDevices(var ADevices: TSerialDeviceInfoArray);
+var
+  Current: TSerialDeviceInfo;
+  I: Integer;
+  J: Integer;
+begin
+  for I := Low(ADevices) + 1 to High(ADevices) do
+  begin
+    Current := ADevices[I];
+    J := I - 1;
+    while (J >= Low(ADevices)) and
+      (NaturalCompareText(ADevices[J].Device, Current.Device) > 0) do
+    begin
+      ADevices[J + 1] := ADevices[J];
+      Dec(J);
+    end;
+    ADevices[J + 1] := Current;
+  end;
+end;
+
+function NormalizeWindowsDevices(
+  const ADevices: TSerialDeviceInfoArray
+): TSerialDeviceInfoArray;
+var
+  Device: TSerialDeviceInfo;
+  I: Integer;
+begin
+  Result := nil;
+  for I := Low(ADevices) to High(ADevices) do
+  begin
+    Device := ADevices[I];
+    Device.Device := Trim(Device.Device);
+    if (Device.Device <> '') and
+      (IndexOfWindowsDevice(Result, Device.Device) < 0) then
+      AddDevice(Result, Device);
+  end;
+  SortWindowsDevices(Result);
 end;
 
 function TLinuxSerialDeviceCollector.Collect(
@@ -240,6 +306,230 @@ begin
     AProperties,
     [poStderrToOutput]
   ) and (Trim(AProperties) <> '');
+  {$ENDIF}
+end;
+
+function TWindowsSerialDeviceCollector.Collect(
+  const AOptions: TSerialDeviceEnumerationOptions
+): TSerialDeviceInfoArray;
+var
+  Device: TSerialDeviceInfo;
+  I: Integer;
+  RawDevices: TSerialDeviceInfoArray;
+  RegistryDeviceNames: TStringList;
+  Snapshot: string;
+begin
+  Result := nil;
+  RawDevices := nil;
+  Snapshot := '';
+  try
+    if ReadWmiSnapshot(Snapshot) then
+      RawDevices := ParseWindowsWmiSnapshot(Snapshot);
+  except
+    on E: Exception do
+      RawDevices := nil;
+  end;
+
+  if Length(RawDevices) = 0 then
+  begin
+    RegistryDeviceNames := TStringList.Create;
+    try
+      RegistryDeviceNames.CaseSensitive := False;
+      try
+        EnumerateRegistryDeviceNames(RegistryDeviceNames);
+      except
+        on E: Exception do
+          RegistryDeviceNames.Clear;
+      end;
+      for I := 0 to RegistryDeviceNames.Count - 1 do
+      begin
+        Device := Default(TSerialDeviceInfo);
+        Device.Device := RegistryDeviceNames[I];
+        AddDevice(RawDevices, Device);
+      end;
+    finally
+      RegistryDeviceNames.Free;
+    end;
+  end;
+
+  RawDevices := NormalizeWindowsDevices(RawDevices);
+  for I := Low(RawDevices) to High(RawDevices) do
+  begin
+    if (sdeoAccessibleOnly in AOptions) and
+      not CanOpenDevice(RawDevices[I].Device) then
+      Continue;
+    AddDevice(Result, RawDevices[I]);
+  end;
+end;
+
+function TWindowsSerialDeviceCollector.CanOpenDevice(
+  const ADevice: string
+): Boolean;
+{$IFDEF Windows}
+var
+  DeviceHandle: THandle;
+  DevicePath: string;
+{$ENDIF}
+begin
+  Result := False;
+  {$IFDEF Windows}
+  DevicePath := '\\.\' + ADevice;
+  DeviceHandle := CreateFile(
+    PChar(DevicePath),
+    GENERIC_READ or GENERIC_WRITE,
+    0,
+    nil,
+    OPEN_EXISTING,
+    FILE_ATTRIBUTE_NORMAL,
+    0
+  );
+  if DeviceHandle = INVALID_HANDLE_VALUE then
+    Exit;
+  CloseHandle(DeviceHandle);
+  Result := True;
+  {$ENDIF}
+end;
+
+procedure TWindowsSerialDeviceCollector.EnumerateRegistryDeviceNames(
+  ADevices: TStrings
+);
+{$IFDEF Windows}
+const
+  SerialCommKey = '\HARDWARE\DEVICEMAP\SERIALCOMM';
+var
+  I: Integer;
+  Registry: TRegistry;
+  ValueNames: TStringList;
+{$ENDIF}
+begin
+  ADevices.Clear;
+  {$IFDEF Windows}
+  Registry := TRegistry.Create(KEY_READ);
+  ValueNames := TStringList.Create;
+  try
+    Registry.RootKey := HKEY_LOCAL_MACHINE;
+    if not Registry.OpenKey(SerialCommKey, False) then
+      Exit;
+    Registry.GetValueNames(ValueNames);
+    for I := 0 to ValueNames.Count - 1 do
+      try
+        ADevices.Add(Registry.ReadString(ValueNames[I]));
+      except
+        on E: Exception do
+          Continue;
+      end;
+  finally
+    ValueNames.Free;
+    Registry.Free;
+  end;
+  {$ENDIF}
+end;
+
+{$IFDEF Windows}
+function SanitizeWmiSnapshotValue(const AValue: string): string;
+begin
+  Result := StringReplace(AValue, #13, ' ', [rfReplaceAll]);
+  Result := StringReplace(Result, #10, ' ', [rfReplaceAll]);
+end;
+
+procedure AppendWmiSnapshotProperty(
+  var ASnapshot: string;
+  const AName, AValue: string
+);
+begin
+  ASnapshot := ASnapshot + AName + '=' +
+    SanitizeWmiSnapshotValue(AValue) + LineEnding;
+end;
+{$ENDIF}
+
+function TWindowsSerialDeviceCollector.ReadWmiSnapshot(
+  out ASnapshot: string
+): Boolean;
+{$IFDEF Windows}
+const
+  WbemComputer = 'localhost';
+  WbemPassword = '';
+  WbemUser = '';
+  WbemFlagForwardOnly = $00000020;
+var
+  ComInitialization: HRESULT;
+  Iterator: OEnumIterator;
+  Locator: OleVariant;
+  ObjectSet: OleVariant;
+  Service: OleVariant;
+  WmiObject: OleVariant;
+{$ENDIF}
+begin
+  ASnapshot := '';
+  Result := False;
+  {$IFDEF Windows}
+  ComInitialization := CoInitialize(nil);
+  if Failed(ComInitialization) then
+    Exit;
+  try
+    try
+      Locator := CreateOleObject('WbemScripting.SWbemLocator');
+      Service := Locator.ConnectServer(
+        WbemComputer,
+        'root\CIMV2',
+        WbemUser,
+        WbemPassword
+      );
+      ObjectSet := Service.ExecQuery(
+        'SELECT Caption, Manufacturer, DeviceID, PNPDeviceID, ' +
+        'ConfigManagerErrorCode FROM Win32_PnPEntity ' +
+        'WHERE Caption LIKE "%(COM%)"',
+        'WQL',
+        WbemFlagForwardOnly
+      );
+
+      for WmiObject in Iterator.Enumerate(ObjectSet) do
+      begin
+        AppendWmiSnapshotProperty(
+          ASnapshot,
+          'Caption',
+          OleVariantToText(WmiObject.Caption)
+        );
+        AppendWmiSnapshotProperty(
+          ASnapshot,
+          'Manufacturer',
+          OleVariantToText(WmiObject.Manufacturer)
+        );
+        AppendWmiSnapshotProperty(
+          ASnapshot,
+          'DeviceID',
+          OleVariantToText(WmiObject.DeviceID)
+        );
+        AppendWmiSnapshotProperty(
+          ASnapshot,
+          'PNPDeviceID',
+          OleVariantToText(WmiObject.PNPDeviceID)
+        );
+        AppendWmiSnapshotProperty(
+          ASnapshot,
+          'ConfigManagerErrorCode',
+          OleVariantToText(WmiObject.ConfigManagerErrorCode)
+        );
+        ASnapshot := ASnapshot + LineEnding;
+      end;
+      Result := Trim(ASnapshot) <> '';
+    except
+      on E: Exception do
+      begin
+        ASnapshot := '';
+        Result := False;
+      end;
+    end;
+  finally
+    VarClear(Iterator.IterItem);
+    Iterator.OEnum := nil;
+    VarClear(Iterator.MainObj);
+    VarClear(WmiObject);
+    VarClear(ObjectSet);
+    VarClear(Service);
+    VarClear(Locator);
+    CoUninitialize;
+  end;
   {$ENDIF}
 end;
 

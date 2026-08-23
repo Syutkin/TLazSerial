@@ -84,6 +84,11 @@ function GetSerialDevices(
 {$IFDEF Linux}
 var
   Collector: TLinuxSerialDeviceCollector;
+{$ELSE}
+{$IFDEF Windows}
+var
+  Collector: TWindowsSerialDeviceCollector;
+{$ENDIF}
 {$ENDIF}
 begin
   {$IFDEF Linux}
@@ -94,7 +99,16 @@ begin
     Collector.Free;
   end;
   {$ELSE}
+  {$IFDEF Windows}
+  Collector := TWindowsSerialDeviceCollector.Create;
+  try
+    Result := Collector.Collect(AOptions);
+  finally
+    Collector.Free;
+  end;
+  {$ELSE}
   Result := nil;
+  {$ENDIF}
   {$ENDIF}
 end;
 

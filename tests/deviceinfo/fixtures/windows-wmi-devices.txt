@@ -1,0 +1,23 @@
+Caption=USB Serial CH343 (COM10)
+Manufacturer=QinHeng Electronics
+DeviceID=USB\VID_1A86&PID_55D3\5ABA019711
+PNPDeviceID=USB\VID_1A86&PID_55D3\5ABA019711
+ConfigManagerErrorCode=0
+
+Caption=Espressif USB JTAG/serial debug unit (com2)
+Manufacturer=Espressif Systems
+DeviceID=USB\VID_303A&PID_1001\123456
+PNPDeviceID=
+ConfigManagerErrorCode=0
+
+Caption=Composite USB serial interface (COM7)
+Manufacturer=Example Vendor
+DeviceID=USB\VID_1234&PID_ABCD&MI_00\6&2A9B7C1&0&0000
+PNPDeviceID=USB\VID_1234&PID_ABCD&MI_00\6&2A9B7C1&0&0000
+ConfigManagerErrorCode=22
+
+Caption=Device without a COM port
+Manufacturer=Ignored Vendor
+DeviceID=USB\VID_FFFF&PID_0001\IGNORED
+ConfigManagerErrorCode=0
+

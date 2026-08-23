@@ -9,17 +9,18 @@ interface
 
 uses
   LazSerial, SerialWatcher, SerialSelector, LazSerialCommon, LazSerialDevices,
-  LazSerialDeviceParsers, LazSerialDeviceCollectors, LazarusPackageIntf;
+  LazSerialDeviceParsers, LazSerialDeviceCollectors, SerialDeviceRefresh,
+  LazarusPackageIntf;
 
 implementation
 
 procedure Register;
 begin
-  RegisterUnit('LazSerial',@LazSerial.Register);
-  RegisterUnit('SerialWatcher',@SerialWatcher.Register);
-  RegisterUnit('SerialSelector',@SerialSelector.Register);
+  RegisterUnit('LazSerial', @LazSerial.Register);
+  RegisterUnit('SerialWatcher', @SerialWatcher.Register);
+  RegisterUnit('SerialSelector', @SerialSelector.Register);
 end;
 
 initialization
-  RegisterPackage('LazSerialPort',@Register);
+  RegisterPackage('LazSerialPort', @Register);
 end.

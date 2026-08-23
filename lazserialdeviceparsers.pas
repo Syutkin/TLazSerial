@@ -13,10 +13,18 @@ function ParseLinuxUdevProperties(
   const ADevice, AProperties: string
 ): TSerialDeviceInfo;
 
+function ParseWindowsPnpDeviceId(
+  const ADeviceId: string
+): TSerialDeviceInfo;
+
+function ParseWindowsWmiSnapshot(
+  const ASnapshot: string
+): TSerialDeviceInfoArray;
+
 implementation
 
 uses
-  Classes, SysUtils;
+  Classes, StrUtils, SysUtils;
 
 function HexDigitValue(const AValue: Char): Integer;
 begin
@@ -189,6 +197,192 @@ begin
     Result.PersistentId := FindPersistentId(Values.Values['DEVLINKS']);
   finally
     Values.Free;
+  end;
+end;
+
+function FindWindowsUsbId(const ADeviceId, ATag: string): string;
+var
+  Position: Integer;
+begin
+  Position := Pos(ATag, UpperCase(ADeviceId));
+  if Position = 0 then
+    Exit('');
+  Result := NormalizeUsbId(Copy(
+    ADeviceId,
+    Position + Length(ATag),
+    4
+  ));
+end;
+
+function ExtractWindowsSerialShort(const ADeviceId: string): string;
+var
+  Candidate: string;
+  HardwareId: string;
+  LastSeparator: Integer;
+  NextSeparator: Integer;
+  UpperDeviceId: string;
+begin
+  Result := '';
+  UpperDeviceId := UpperCase(ADeviceId);
+  if StartsStr('FTDIBUS\', UpperDeviceId) then
+  begin
+    HardwareId := Copy(ADeviceId, Length('FTDIBUS\') + 1, MaxInt);
+    NextSeparator := Pos('\', HardwareId);
+    if NextSeparator > 0 then
+      SetLength(HardwareId, NextSeparator - 1);
+    LastSeparator := RPos('+', HardwareId);
+    if LastSeparator = 0 then
+      Exit;
+    Candidate := Copy(HardwareId, LastSeparator + 1, MaxInt);
+    if EndsText('A', Candidate) then
+      Delete(Candidate, Length(Candidate), 1);
+    Exit(Trim(Candidate));
+  end;
+
+  LastSeparator := RPos('\', ADeviceId);
+  if LastSeparator = 0 then
+    Exit;
+  Candidate := Trim(Copy(ADeviceId, LastSeparator + 1, MaxInt));
+  if (Candidate = '') or (Pos('&', Candidate) > 0) then
+    Exit;
+  Result := Candidate;
+end;
+
+function ParseWindowsPnpDeviceId(
+  const ADeviceId: string
+): TSerialDeviceInfo;
+var
+  DeviceId: string;
+begin
+  Result := Default(TSerialDeviceInfo);
+  DeviceId := Trim(ADeviceId);
+  Result.PersistentId := DeviceId;
+  Result.VendorId := FindWindowsUsbId(DeviceId, 'VID_');
+  Result.ProductId := FindWindowsUsbId(DeviceId, 'PID_');
+  Result.SerialShort := ExtractWindowsSerialShort(DeviceId);
+end;
+
+function TryParseWindowsComCaption(
+  const ACaption: string;
+  out ADevice, AModel: string
+): Boolean;
+var
+  Caption: string;
+  I: Integer;
+  OpenParenthesis: Integer;
+  PortName: string;
+begin
+  ADevice := '';
+  AModel := '';
+  Caption := Trim(ACaption);
+  OpenParenthesis := RPos('(', Caption);
+  if (OpenParenthesis <= 0) or not EndsStr(')', Caption) then
+    Exit(False);
+
+  PortName := UpperCase(Copy(
+    Caption,
+    OpenParenthesis + 1,
+    Length(Caption) - OpenParenthesis - 1
+  ));
+  if (Length(PortName) < 4) or not StartsStr('COM', PortName) then
+    Exit(False);
+  for I := 4 to Length(PortName) do
+    if not (PortName[I] in ['0'..'9']) then
+      Exit(False);
+
+  ADevice := PortName;
+  AModel := Trim(Copy(Caption, 1, OpenParenthesis - 1));
+  Result := True;
+end;
+
+procedure AddSerialDevice(
+  var ADevices: TSerialDeviceInfoArray;
+  const ADevice: TSerialDeviceInfo
+);
+var
+  NewIndex: Integer;
+begin
+  NewIndex := Length(ADevices);
+  SetLength(ADevices, NewIndex + 1);
+  ADevices[NewIndex] := ADevice;
+end;
+
+function ParseWindowsWmiSnapshot(
+  const ASnapshot: string
+): TSerialDeviceInfoArray;
+var
+  EqualPosition: Integer;
+  I: Integer;
+  Key: string;
+  Lines: TStringList;
+  PnpDevice: TSerialDeviceInfo;
+  PnpDeviceId: string;
+  Values: TStringList;
+
+  procedure FlushRecord;
+  var
+    Device: TSerialDeviceInfo;
+  begin
+    if Values.Count = 0 then
+      Exit;
+
+    Device := Default(TSerialDeviceInfo);
+    if not TryParseWindowsComCaption(
+      Values.Values['Caption'],
+      Device.Device,
+      Device.Model
+    ) then
+    begin
+      Values.Clear;
+      Exit;
+    end;
+
+    Device.Vendor := Trim(Values.Values['Manufacturer']);
+    Device.ErrorCode := Trim(Values.Values['ConfigManagerErrorCode']);
+    PnpDeviceId := FirstNotEmpty(
+      Values,
+      ['PNPDeviceID', 'DeviceID']
+    );
+    PnpDevice := ParseWindowsPnpDeviceId(PnpDeviceId);
+    Device.VendorId := PnpDevice.VendorId;
+    Device.ProductId := PnpDevice.ProductId;
+    Device.SerialShort := PnpDevice.SerialShort;
+    Device.PersistentId := PnpDevice.PersistentId;
+    AddSerialDevice(Result, Device);
+    Values.Clear;
+  end;
+
+begin
+  Result := nil;
+  Lines := TStringList.Create;
+  Values := TStringList.Create;
+  try
+    Lines.Text := ASnapshot;
+    Values.NameValueSeparator := '=';
+    Values.CaseSensitive := False;
+    for I := 0 to Lines.Count - 1 do
+    begin
+      if Trim(Lines[I]) = '' then
+      begin
+        FlushRecord;
+        Continue;
+      end;
+
+      EqualPosition := Pos('=', Lines[I]);
+      if EqualPosition <= 1 then
+        Continue;
+      Key := Trim(Copy(Lines[I], 1, EqualPosition - 1));
+      if Key <> '' then
+        Values.Values[Key] := Trim(Copy(
+          Lines[I],
+          EqualPosition + 1,
+          MaxInt
+        ));
+    end;
+    FlushRecord;
+  finally
+    Values.Free;
+    Lines.Free;
   end;
 end;
 

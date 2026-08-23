@@ -14,6 +14,7 @@ type
     FSnapshot: TSerialDeviceInfoArray;
   protected
     function LoadDevices: TSerialDeviceInfoArray; override;
+    function UseBackgroundRefresh: Boolean; override;
   public
     procedure SetSnapshot(const ADevices: array of TSerialDeviceInfo);
     function DisplayItem(const AIndex: Integer): string;
@@ -27,7 +28,6 @@ type
   protected
     procedure ApplyDevices(const ADevices: TSerialDeviceInfoArray); override;
     function LoadDevices: TSerialDeviceInfoArray; override;
-    function UseBackgroundRefresh: Boolean; override;
   public
     function RefreshFinished: Boolean;
     property ApplyCount: PInteger read FApplyCount write FApplyCount;
@@ -83,11 +83,6 @@ begin
   Result[0].Device := 'COM1';
 end;
 
-function TBackgroundTestSerialSelector.UseBackgroundRefresh: Boolean;
-begin
-  Result := True;
-end;
-
 function TBackgroundTestSerialSelector.RefreshFinished: Boolean;
 begin
   Result := BackgroundRefreshFinished;
@@ -101,6 +96,11 @@ begin
   SetLength(Result, Length(FSnapshot));
   for I := Low(FSnapshot) to High(FSnapshot) do
     Result[I] := FSnapshot[I];
+end;
+
+function TTestSerialSelector.UseBackgroundRefresh: Boolean;
+begin
+  Result := False;
 end;
 
 procedure TTestSerialSelector.SetSnapshot(

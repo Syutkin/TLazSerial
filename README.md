@@ -20,7 +20,7 @@ legacy string-based device enumeration API; see [MIGRATION.md](MIGRATION.md).
 - structured cross-platform device enumeration and the visual
   `TSerialSelector` component;
 - automatic serial-device change detection used by `TSerialSelector` and
-  `TLazSerial`.
+  `TLazSerial`, with enumeration performed outside the GUI thread.
 
 ## Installation
 

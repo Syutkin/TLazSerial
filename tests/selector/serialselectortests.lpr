@@ -10,6 +10,7 @@ uses
   Interfaces,
   Forms,
   ConsoleTestRunner,
+  LazSerialLifecycleTests,
   SerialSelectorComponentTests,
   SerialWatcherComponentTests;
 

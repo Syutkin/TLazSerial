@@ -114,8 +114,12 @@ type
   public
     MustDie: boolean;
     Owner: TLazSerial;
+    StatusReason: THookSerialReason;
+    StatusSender: TObject;
+    StatusValue: string;
   protected
     procedure CallEvent;
+    procedure CallStatusEvent;
     procedure Execute; override;
   published
     property Terminated;
@@ -144,6 +148,7 @@ type
     FOnRxData: TNotifyEvent;
     FOnStatus: TStatusEvent;
     FOnRemoved: TNotifyEvent;
+    FClosing: Boolean;
     ReadThread: TComPortReadThread;
 
     procedure DeviceOpen;
@@ -151,6 +156,8 @@ type
 
     procedure ComException(str: string);
     procedure ComDisconnected(Sender: TObject);
+    procedure SynSerStatus(Sender: TObject; Reason: THookSerialReason;
+      const Value: string);
     procedure TriggerDisconnected;
     function AppliedBaudrate: integer;
 
@@ -229,27 +236,29 @@ end;
 
 procedure TLazSerial.DeviceClose;
 begin
-  // flush device
-  if FSynSer.Handle<>INVALID_HANDLE_VALUE then begin
-    FSynSer.Flush;
-    FSynSer.Purge;
-  end;
-  
-  // stop capture thread
-  if ReadThread<>nil then begin
-    ReadThread.FreeOnTerminate:=false;
-    ReadThread.MustDie:= true;
-    while not ReadThread.Terminated do begin
-      Application.ProcessMessages;
+  FClosing := True;
+  try
+    // Stop the reader before flushing or closing the handle it uses.
+    if ReadThread <> nil then
+    begin
+      ReadThread.FreeOnTerminate := False;
+      ReadThread.MustDie := True;
+      ReadThread.Terminate;
+      while not ReadThread.Finished do
+        CheckSynchronize(10);
+      ReadThread.WaitFor;
+      ReadThread.Free;
+      ReadThread := nil;
     end;
-    ReadThread.Free;
-    ReadThread:=nil;
-  end;
 
-  // close device
-  if FSynSer.Handle<>INVALID_HANDLE_VALUE then begin
-    FSynSer.Flush;
-    FSynSer.CloseSocket;
+    if FSynSer.Handle <> INVALID_HANDLE_VALUE then
+    begin
+      FSynSer.Flush;
+      FSynSer.Purge;
+      FSynSer.CloseSocket;
+    end;
+  finally
+    FClosing := False;
   end;
 end;
 
@@ -266,6 +275,7 @@ begin
   FSerialWatcher := TSerialWatcher.Create(Self);
   FSerialWatcher.OnComDisconnected := @ComDisconnected;
   FCustomBaudRate := -1;
+  FClosing := False;
   {$IFDEF LINUX}
   FDevice:='/dev/ttyS0';
   {$ELSE}
@@ -286,6 +296,8 @@ end;
 
 destructor TLazSerial.Destroy;
 begin
+  FSerialWatcher.OnComDisconnected := nil;
+  FSynSer.OnStatus := nil;
   Close;
   FSynSer.Free;
   inherited;
@@ -293,8 +305,6 @@ end;
 
 procedure TLazSerial.Open;
 begin
-    // Initialize OnStatus;
-  if Assigned(OnStatus) then SynSer.OnStatus := OnStatus;
   Active:=true;
 end;
 
@@ -312,6 +322,7 @@ end;
 
 procedure TLazSerial.DeviceOpen;
 begin
+  FSynSer.OnStatus := @SynSerStatus;
   FSynSer.Connect(FDevice);
   if FSynSer.Handle=INVALID_HANDLE_VALUE then
     raise Exception.Create('Could not open device '+ FSynSer.Device);
@@ -515,19 +526,42 @@ begin
   raise Exception.Create('ComPort error: '+str);
 end;
 
+procedure TLazSerial.SynSerStatus(Sender: TObject;
+  Reason: THookSerialReason; const Value: string);
+begin
+  if not Assigned(FOnStatus) then
+    Exit;
+  if (ReadThread <> nil) and
+    (GetCurrentThreadID = ReadThread.ThreadID) then
+  begin
+    ReadThread.StatusSender := Sender;
+    ReadThread.StatusReason := Reason;
+    ReadThread.StatusValue := Value;
+    ReadThread.Synchronize(@ReadThread.CallStatusEvent);
+  end
+  else
+    FOnStatus(Sender, Reason, Value);
+end;
+
 { TComPortReadThread }
 
 procedure TComPortReadThread.CallEvent;
 begin
-  if Assigned(Owner.FOnRxData) then begin
+  if not Owner.FClosing and Assigned(Owner.FOnRxData) then begin
     Owner.FOnRxData(Owner);
   end;
+end;
+
+procedure TComPortReadThread.CallStatusEvent;
+begin
+  if not Owner.FClosing and Assigned(Owner.FOnStatus) then
+    Owner.FOnStatus(StatusSender, StatusReason, StatusValue);
 end;
 
 procedure TComPortReadThread.Execute;
 begin
   try
-    while not MustDie do begin
+    while not Terminated and not MustDie do begin
       if Owner.FSynSer.CanReadEx(100) then
         Synchronize(@CallEvent);
     end;

@@ -10,15 +10,17 @@ uses
   Windows, JwaWinUser, JwaDbt,
   {$ENDIF}
   Classes, SysUtils, Controls, LCLIntf, ExtCtrls, LResources,
-  LazSerialDevices;
+  LazSerialDevices, SerialDeviceRefresh;
 
 type
   TSerialWatcher = class(TComponent)
   private
     FComConnected: TNotifyEvent;
     FComDisconnected: TNotifyEvent;
+    FDeviceRefreshThread: TSerialDeviceRefreshThread;
     FDevices: TSerialDeviceInfoArray;
     FInitialized: Boolean;
+    FRefreshOnLoaded: Boolean;
     FTimer: TTimer;
     {$IFDEF Windows}
     FDeviceNotification: HDEVNOTIFY;
@@ -27,15 +29,20 @@ type
     procedure WndProcNew(var Message: TMessage);
     {$ENDIF}
     procedure DoOnTimer(Sender: TObject);
+    procedure StartBackgroundRefresh;
   protected
+    procedure ApplyDevices(const ADevices: TSerialDeviceInfoArray); virtual;
     function LoadDevices: TSerialDeviceInfoArray; virtual;
     procedure Loaded; override;
     procedure PollDevices;
   public
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
+    procedure AdoptSnapshot(const ADevices: TSerialDeviceInfoArray);
     function ContainsDevice(const ADevice: string): Boolean;
     procedure Refresh;
+    property RefreshOnLoaded: Boolean
+      read FRefreshOnLoaded write FRefreshOnLoaded;
   published
     property OnComConnected: TNotifyEvent
       read FComConnected write FComConnected;
@@ -46,6 +53,18 @@ type
 procedure Register;
 
 implementation
+
+function CopyDevices(
+  const ADevices: TSerialDeviceInfoArray
+): TSerialDeviceInfoArray;
+var
+  I: Integer;
+begin
+  Result := nil;
+  SetLength(Result, Length(ADevices));
+  for I := Low(ADevices) to High(ADevices) do
+    Result[I] := ADevices[I];
+end;
 
 function SnapshotHasAddedDevices(
   const APrevious, ACurrent: TSerialDeviceInfoArray
@@ -78,64 +97,101 @@ end;
 
 procedure TSerialWatcher.Refresh;
 begin
-  FDevices := LoadDevices;
-  FInitialized := True;
+  StartBackgroundRefresh;
+end;
+
+procedure TSerialWatcher.ApplyDevices(
+  const ADevices: TSerialDeviceInfoArray
+);
+var
+  AddedDevices: Boolean;
+  RemovedDevices: Boolean;
+begin
+  if not FInitialized then
+  begin
+    FDevices := CopyDevices(ADevices);
+    FInitialized := True;
+  end
+  else
+  begin
+    AddedDevices := SnapshotHasAddedDevices(FDevices, ADevices);
+    RemovedDevices := SnapshotHasRemovedDevices(FDevices, ADevices);
+    FDevices := CopyDevices(ADevices);
+
+    if AddedDevices and Assigned(FComConnected) then
+      FComConnected(Self);
+    if RemovedDevices and Assigned(FComDisconnected) then
+      FComDisconnected(Self);
+  end;
+
+  {$IFNDEF Windows}
+  FTimer.Enabled := True;
+  {$ENDIF}
 end;
 
 procedure TSerialWatcher.PollDevices;
-var
-  AddedDevices: Boolean;
-  CurrentDevices: TSerialDeviceInfoArray;
-  RemovedDevices: Boolean;
 begin
-  CurrentDevices := LoadDevices;
-  if not FInitialized then
+  ApplyDevices(LoadDevices);
+end;
+
+procedure TSerialWatcher.AdoptSnapshot(
+  const ADevices: TSerialDeviceInfoArray
+);
+begin
+  FDevices := CopyDevices(ADevices);
+  FInitialized := True;
+  {$IFNDEF Windows}
+  FTimer.Enabled := True;
+  {$ENDIF}
+end;
+
+procedure TSerialWatcher.StartBackgroundRefresh;
+begin
+  if FDeviceRefreshThread <> nil then
   begin
-    FDevices := CurrentDevices;
-    FInitialized := True;
-    Exit;
+    if not FDeviceRefreshThread.Finished or
+      FDeviceRefreshThread.Delivering then
+      Exit;
+    CancelSerialDeviceRefresh(FDeviceRefreshThread);
   end;
 
-  AddedDevices := SnapshotHasAddedDevices(FDevices, CurrentDevices);
-  RemovedDevices := SnapshotHasRemovedDevices(FDevices, CurrentDevices);
-  FDevices := CurrentDevices;
-
-  if AddedDevices and Assigned(FComConnected) then
-    FComConnected(Self);
-  if RemovedDevices and Assigned(FComDisconnected) then
-    FComDisconnected(Self);
+  FTimer.Enabled := False;
+  FDeviceRefreshThread := TSerialDeviceRefreshThread.Create(
+    @LoadDevices,
+    @ApplyDevices
+  );
+  FDeviceRefreshThread.Start;
 end;
 
 procedure TSerialWatcher.DoOnTimer(Sender: TObject);
 begin
-  {$IFDEF Windows}
   FTimer.Enabled := False;
-  {$ENDIF}
-  PollDevices;
+  Refresh;
 end;
 
 constructor TSerialWatcher.Create(AOwner: TComponent);
 begin
   inherited Create(AOwner);
   FDevices := nil;
+  FDeviceRefreshThread := nil;
   FInitialized := False;
+  FRefreshOnLoaded := True;
 
   FTimer := TTimer.Create(Self);
   FTimer.OnTimer := @DoOnTimer;
+  FTimer.Enabled := False;
   {$IFDEF Windows}
   FTimer.Interval := 3000;
-  FTimer.Enabled := False;
   InitializeWindowsNotifications;
   {$ELSE}
   FTimer.Interval := 1000;
-  FTimer.Enabled := True;
   {$ENDIF}
 end;
 
 procedure TSerialWatcher.Loaded;
 begin
   inherited Loaded;
-  if not (csDesigning in ComponentState) then
+  if FRefreshOnLoaded and not (csDesigning in ComponentState) then
     Refresh;
 end;
 
@@ -146,6 +202,8 @@ end;
 
 destructor TSerialWatcher.Destroy;
 begin
+  FTimer.Enabled := False;
+  CancelSerialDeviceRefresh(FDeviceRefreshThread);
   {$IFDEF Windows}
   if FDeviceNotification <> 0 then
     UnregisterDeviceNotification(FDeviceNotification);

@@ -11,7 +11,7 @@
     <BuildModes Count="1">
       <Item1 Name="default" Default="True"/>
     </BuildModes>
-    <RequiredPackages Count="3">
+    <RequiredPackages Count="4">
       <Item1>
         <PackageName Value="FCL"/>
       </Item1>
@@ -21,8 +21,11 @@
       <Item3>
         <PackageName Value="LCL"/>
       </Item3>
+      <Item4>
+        <PackageName Value="IDEIntf"/>
+      </Item4>
     </RequiredPackages>
-    <Units Count="3">
+    <Units Count="4">
       <Unit0>
         <Filename Value="serialselectortests.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -37,6 +40,11 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="SerialWatcherComponentTests"/>
       </Unit2>
+      <Unit3>
+        <Filename Value="lazseriallifecycletests.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="LazSerialLifecycleTests"/>
+      </Unit3>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

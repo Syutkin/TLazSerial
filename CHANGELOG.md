@@ -15,7 +15,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Changed
 
 - `TSerialSelector` now uses one structured device snapshot.
+- Serial-device refresh now runs outside the GUI thread on every platform.
+- `TSerialSelector` shares its snapshot with its watcher instead of enumerating
+  devices twice.
 - Serial watcher, setup dialog and examples now use the structured API.
+
+### Fixed
+
+- Closing an active `TLazSerial` now stops its reader without processing
+  unrelated GUI messages or delivering late receive callbacks.
+- Serial status callbacks raised by the reader are now delivered on the main
+  thread, making them safe for LCL event handlers.
+- Repeated refresh requests no longer start overlapping device enumerations.
 
 ### Removed
 

@@ -294,6 +294,7 @@ begin
     SelectedDevice := FRequestedDevice;
   OldDevices := CopyDevices(FDevices);
   FDevices := CopyDevices(ADevices);
+  FSerialWatcher.AdoptSnapshot(FDevices);
   UpdatePortChanges(OldDevices);
   RebuildItems(SelectedDevice);
   if FHintWindow <> nil then
@@ -302,16 +303,12 @@ end;
 
 function TSerialSelector.UseBackgroundRefresh: Boolean;
 begin
-  {$IFDEF Windows}
   Result := True;
-  {$ELSE}
-  Result := False;
-  {$ENDIF}
 end;
 
 function TSerialSelector.BackgroundRefreshFinished: Boolean;
 begin
-  Result := (FDeviceRefreshThread <> nil) and
+  Result := (FDeviceRefreshThread = nil) or
     FDeviceRefreshThread.Finished;
 end;
 
@@ -378,6 +375,7 @@ begin
   OnMouseEnter := @DoMouseEnter;
   OnMouseLeave := @HideHint;
   FSerialWatcher := TSerialWatcher.Create(Self);
+  FSerialWatcher.RefreshOnLoaded := False;
   FSerialWatcher.OnComConnected := @DoUpdateComPorts;
   FSerialWatcher.OnComDisconnected := @DoUpdateComPorts;
 end;

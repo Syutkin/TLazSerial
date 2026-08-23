@@ -5,17 +5,33 @@ unit SerialWatcherComponentTests;
 interface
 
 uses
-  Classes, FpcUnit, TestRegistry, LazSerialDevices, SerialWatcher;
+  Classes, SysUtils, SyncObjs, FpcUnit, TestRegistry, LazSerialDevices,
+  SerialWatcher;
 
 type
   TTestSerialWatcher = class(TSerialWatcher)
   private
+    FLoadCount: Integer;
     FSnapshot: TSerialDeviceInfoArray;
   protected
     function LoadDevices: TSerialDeviceInfoArray; override;
   public
     procedure PollNow;
     procedure SetSnapshot(const ADevices: array of TSerialDeviceInfo);
+    property LoadCount: Integer read FLoadCount;
+  end;
+
+  TBackgroundTestSerialWatcher = class(TSerialWatcher)
+  private
+    FLoadCount: Integer;
+    FLoadStarted: TEvent;
+    FReleaseLoad: TEvent;
+  protected
+    function LoadDevices: TSerialDeviceInfoArray; override;
+  public
+    property LoadStarted: TEvent read FLoadStarted write FLoadStarted;
+    property LoadCount: Integer read FLoadCount;
+    property ReleaseLoad: TEvent read FReleaseLoad write FReleaseLoad;
   end;
 
   TSerialWatcherComponentTests = class(TTestCase)
@@ -36,14 +52,30 @@ type
     procedure PollIgnoresOrderAndMetadataChanges;
     procedure PollReportsReplacementAsRemoveAndAdd;
     procedure ContainsDeviceUsesCurrentSnapshot;
+    procedure AdoptSnapshotEstablishesBaselineWithoutLoading;
+    procedure RefreshLoadsDevicesInBackground;
+    procedure RepeatedRefreshDoesNotStartSecondLoad;
   end;
 
 implementation
+
+function TBackgroundTestSerialWatcher.LoadDevices: TSerialDeviceInfoArray;
+begin
+  Inc(FLoadCount);
+  if FLoadStarted <> nil then
+    FLoadStarted.SetEvent;
+  if FReleaseLoad <> nil then
+    FReleaseLoad.WaitFor(500);
+  Result := nil;
+  SetLength(Result, 1);
+  Result[0].Device := 'COM1';
+end;
 
 function TTestSerialWatcher.LoadDevices: TSerialDeviceInfoArray;
 var
   I: Integer;
 begin
+  Inc(FLoadCount);
   Result := nil;
   SetLength(Result, Length(FSnapshot));
   for I := Low(FSnapshot) to High(FSnapshot) do
@@ -105,7 +137,7 @@ begin
   DeviceA := CreateDevice('/dev/ttyACM0');
   FWatcher.SetSnapshot([DeviceA]);
 
-  FWatcher.Refresh;
+  FWatcher.PollNow;
 
   AssertEquals(0, FConnectedCount);
   AssertEquals(0, FDisconnectedCount);
@@ -120,7 +152,7 @@ begin
   DeviceA := CreateDevice('/dev/ttyACM0');
   DeviceB := CreateDevice('/dev/ttyUSB0');
   FWatcher.SetSnapshot([DeviceA]);
-  FWatcher.Refresh;
+  FWatcher.PollNow;
 
   FWatcher.SetSnapshot([DeviceA, DeviceB]);
   FWatcher.PollNow;
@@ -137,7 +169,7 @@ begin
   DeviceA := CreateDevice('/dev/ttyACM0');
   DeviceB := CreateDevice('/dev/ttyUSB0');
   FWatcher.SetSnapshot([DeviceA, DeviceB]);
-  FWatcher.Refresh;
+  FWatcher.PollNow;
 
   FWatcher.SetSnapshot([DeviceA]);
   FWatcher.PollNow;
@@ -154,7 +186,7 @@ begin
   DeviceA := CreateDevice('/dev/ttyACM0');
   DeviceB := CreateDevice('/dev/ttyUSB0');
   FWatcher.SetSnapshot([DeviceA, DeviceB]);
-  FWatcher.Refresh;
+  FWatcher.PollNow;
 
   DeviceA.Model := 'Updated model';
   FWatcher.SetSnapshot([DeviceB, DeviceA]);
@@ -172,7 +204,7 @@ begin
   DeviceA := CreateDevice('/dev/ttyACM0');
   DeviceB := CreateDevice('/dev/ttyUSB0');
   FWatcher.SetSnapshot([DeviceA]);
-  FWatcher.Refresh;
+  FWatcher.PollNow;
 
   FWatcher.SetSnapshot([DeviceB]);
   FWatcher.PollNow;
@@ -187,10 +219,102 @@ var
 begin
   DeviceA := CreateDevice('/dev/ttyACM0');
   FWatcher.SetSnapshot([DeviceA]);
-  FWatcher.Refresh;
+  FWatcher.PollNow;
 
   AssertTrue(FWatcher.ContainsDevice('/dev/ttyACM0'));
   AssertFalse(FWatcher.ContainsDevice('/dev/ttyUSB0'));
+end;
+
+procedure TSerialWatcherComponentTests.AdoptSnapshotEstablishesBaselineWithoutLoading;
+var
+  DeviceA: TSerialDeviceInfo;
+begin
+  DeviceA := CreateDevice('/dev/ttyACM0');
+
+  FWatcher.AdoptSnapshot([DeviceA]);
+
+  AssertEquals(0, FWatcher.LoadCount);
+  AssertTrue(FWatcher.ContainsDevice(DeviceA.Device));
+  AssertEquals(0, FConnectedCount);
+  AssertEquals(0, FDisconnectedCount);
+end;
+
+procedure TSerialWatcherComponentTests.RefreshLoadsDevicesInBackground;
+var
+  Deadline: QWord;
+  Elapsed: QWord;
+  LoadStarted: TEvent;
+  ReleaseLoad: TEvent;
+  StartedAt: QWord;
+  Watcher: TBackgroundTestSerialWatcher;
+begin
+  LoadStarted := TEvent.Create(nil, True, False, '');
+  ReleaseLoad := TEvent.Create(nil, True, False, '');
+  Watcher := TBackgroundTestSerialWatcher.Create(nil);
+  try
+    Watcher.LoadStarted := LoadStarted;
+    Watcher.ReleaseLoad := ReleaseLoad;
+
+    StartedAt := GetTickCount64;
+    Watcher.Refresh;
+    Elapsed := GetTickCount64 - StartedAt;
+
+    AssertTrue('Refresh must not wait for LoadDevices', Elapsed < 100);
+    AssertEquals(
+      Ord(wrSignaled),
+      Ord(LoadStarted.WaitFor(1000))
+    );
+    ReleaseLoad.SetEvent;
+
+    Deadline := GetTickCount64 + 1000;
+    repeat
+      CheckSynchronize(10);
+    until Watcher.ContainsDevice('COM1') or
+      (GetTickCount64 >= Deadline);
+    AssertTrue(Watcher.ContainsDevice('COM1'));
+  finally
+    ReleaseLoad.SetEvent;
+    Watcher.Free;
+    ReleaseLoad.Free;
+    LoadStarted.Free;
+  end;
+end;
+
+procedure TSerialWatcherComponentTests.RepeatedRefreshDoesNotStartSecondLoad;
+var
+  Deadline: QWord;
+  LoadStarted: TEvent;
+  ReleaseLoad: TEvent;
+  Watcher: TBackgroundTestSerialWatcher;
+begin
+  LoadStarted := TEvent.Create(nil, True, False, '');
+  ReleaseLoad := TEvent.Create(nil, True, False, '');
+  Watcher := TBackgroundTestSerialWatcher.Create(nil);
+  try
+    Watcher.LoadStarted := LoadStarted;
+    Watcher.ReleaseLoad := ReleaseLoad;
+
+    Watcher.Refresh;
+    AssertEquals(
+      Ord(wrSignaled),
+      Ord(LoadStarted.WaitFor(1000))
+    );
+    Watcher.Refresh;
+
+    AssertEquals(1, Watcher.LoadCount);
+    ReleaseLoad.SetEvent;
+    Deadline := GetTickCount64 + 1000;
+    repeat
+      CheckSynchronize(10);
+    until Watcher.ContainsDevice('COM1') or
+      (GetTickCount64 >= Deadline);
+    AssertTrue(Watcher.ContainsDevice('COM1'));
+  finally
+    ReleaseLoad.SetEvent;
+    Watcher.Free;
+    ReleaseLoad.Free;
+    LoadStarted.Free;
+  end;
 end;
 
 initialization

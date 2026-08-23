@@ -21,6 +21,10 @@ function ParseWindowsWmiSnapshot(
   const ASnapshot: string
 ): TSerialDeviceInfoArray;
 
+function ParseMacOSSystemProfilerDevice(
+  const ADevice, ASnapshot: string
+): TSerialDeviceInfo;
+
 implementation
 
 uses
@@ -383,6 +387,226 @@ begin
   finally
     Values.Free;
     Lines.Free;
+  end;
+end;
+
+type
+  TMacOSProfilerSection = record
+    LocationId: string;
+    Manufacturer: string;
+    Model: string;
+    ProductId: string;
+    SerialNumber: string;
+    VendorDescription: string;
+    VendorId: string;
+  end;
+
+  TMacOSProfilerSections = array of TMacOSProfilerSection;
+
+procedure AddMacOSProfilerSection(
+  var ASections: TMacOSProfilerSections;
+  const ASection: TMacOSProfilerSection
+);
+var
+  NewIndex: Integer;
+begin
+  NewIndex := Length(ASections);
+  SetLength(ASections, NewIndex + 1);
+  ASections[NewIndex] := ASection;
+end;
+
+function ExtractParenthesizedText(const AValue: string): string;
+var
+  CloseParenthesis: Integer;
+  OpenParenthesis: Integer;
+begin
+  Result := '';
+  OpenParenthesis := Pos('(', AValue);
+  CloseParenthesis := RPos(')', AValue);
+  if (OpenParenthesis > 0) and (CloseParenthesis > OpenParenthesis) then
+    Result := Trim(Copy(
+      AValue,
+      OpenParenthesis + 1,
+      CloseParenthesis - OpenParenthesis - 1
+    ));
+end;
+
+function ParseProfilerUsbId(const AValue: string): string;
+var
+  EndPosition: Integer;
+  Value: string;
+begin
+  Value := Trim(AValue);
+  EndPosition := Pos(' ', Value);
+  if EndPosition > 0 then
+    SetLength(Value, EndPosition - 1);
+  Result := NormalizeUsbId(Value);
+end;
+
+function ParseMacOSProfilerSections(
+  const ASnapshot: string
+): TMacOSProfilerSections;
+var
+  ColonPosition: Integer;
+  Current: TMacOSProfilerSection;
+  HasCurrent: Boolean;
+  I: Integer;
+  Key: string;
+  Lines: TStringList;
+  TrimmedLine: string;
+  Value: string;
+
+  procedure FlushCurrent;
+  begin
+    if HasCurrent then
+      AddMacOSProfilerSection(Result, Current);
+    Current := Default(TMacOSProfilerSection);
+    HasCurrent := False;
+  end;
+
+begin
+  Result := nil;
+  Current := Default(TMacOSProfilerSection);
+  HasCurrent := False;
+  Lines := TStringList.Create;
+  try
+    Lines.Text := ASnapshot;
+    for I := 0 to Lines.Count - 1 do
+    begin
+      TrimmedLine := Trim(Lines[I]);
+      if TrimmedLine = '' then
+        Continue;
+      ColonPosition := Pos(':', TrimmedLine);
+      if ColonPosition = Length(TrimmedLine) then
+      begin
+        FlushCurrent;
+        Current.Model := Trim(Copy(
+          TrimmedLine,
+          1,
+          ColonPosition - 1
+        ));
+        HasCurrent := True;
+        Continue;
+      end;
+      if (ColonPosition <= 1) or not HasCurrent then
+        Continue;
+
+      Key := LowerCase(Trim(Copy(
+        TrimmedLine,
+        1,
+        ColonPosition - 1
+      )));
+      Value := Trim(Copy(TrimmedLine, ColonPosition + 1, MaxInt));
+      case Key of
+        'manufacturer': Current.Manufacturer := Value;
+        'serial number': Current.SerialNumber := Value;
+        'location id': Current.LocationId := Value;
+        'product id': Current.ProductId := ParseProfilerUsbId(Value);
+        'vendor id':
+          begin
+            Current.VendorId := ParseProfilerUsbId(Value);
+            Current.VendorDescription := ExtractParenthesizedText(Value);
+          end;
+      end;
+    end;
+    FlushCurrent;
+  finally
+    Lines.Free;
+  end;
+end;
+
+function MacOSDeviceToken(const ADevice: string): string;
+const
+  UsbModem = 'usbmodem';
+  UsbSerial = 'usbserial';
+var
+  DeviceName: string;
+  Position: Integer;
+begin
+  DeviceName := ExtractFileName(Trim(ADevice));
+  Position := Pos(UsbSerial, LowerCase(DeviceName));
+  if Position > 0 then
+    Result := Copy(DeviceName, Position + Length(UsbSerial), MaxInt)
+  else
+  begin
+    Position := Pos(UsbModem, LowerCase(DeviceName));
+    if Position > 0 then
+      Result := Copy(DeviceName, Position + Length(UsbModem), MaxInt)
+    else
+    begin
+      Position := RPos('-', DeviceName);
+      if Position > 0 then
+        Result := Copy(DeviceName, Position + 1, MaxInt)
+      else
+        Result := Copy(DeviceName, RPos('.', DeviceName) + 1, MaxInt);
+    end;
+  end;
+
+  Result := Trim(Result);
+  while (Result <> '') and (Result[1] in ['-', '_', '.']) do
+    Delete(Result, 1, 1);
+end;
+
+function NormalizeMacOSLocationId(const AValue: string): string;
+var
+  EndPosition: Integer;
+begin
+  Result := LowerCase(Trim(AValue));
+  EndPosition := Pos(' ', Result);
+  if EndPosition > 0 then
+    SetLength(Result, EndPosition - 1);
+  if StartsStr('0x', Result) then
+    Delete(Result, 1, 2);
+end;
+
+function MacOSTokenMatches(const AToken, AValue: string): Boolean;
+var
+  Token: string;
+  Value: string;
+begin
+  Token := LowerCase(Trim(AToken));
+  Value := LowerCase(Trim(AValue));
+  Result := (Token <> '') and (Value <> '') and
+    ((Token = Value) or
+    ((Length(Value) >= 4) and (Pos(Value, Token) > 0)) or
+    ((Length(Token) >= 4) and (Pos(Token, Value) > 0)));
+end;
+
+function ParseMacOSSystemProfilerDevice(
+  const ADevice, ASnapshot: string
+): TSerialDeviceInfo;
+var
+  DeviceToken: string;
+  I: Integer;
+  LocationToken: string;
+  Sections: TMacOSProfilerSections;
+begin
+  Result := Default(TSerialDeviceInfo);
+  Result.Device := Trim(ADevice);
+  DeviceToken := MacOSDeviceToken(Result.Device);
+  if DeviceToken = '' then
+    Exit;
+
+  Sections := ParseMacOSProfilerSections(ASnapshot);
+  for I := Low(Sections) to High(Sections) do
+  begin
+    LocationToken := NormalizeMacOSLocationId(Sections[I].LocationId);
+    if not MacOSTokenMatches(DeviceToken, Sections[I].SerialNumber) and
+      not MacOSTokenMatches(DeviceToken, LocationToken) then
+      Continue;
+
+    Result.Vendor := Trim(Sections[I].Manufacturer);
+    if Result.Vendor = '' then
+      Result.Vendor := Trim(Sections[I].VendorDescription);
+    Result.Model := Trim(Sections[I].Model);
+    Result.SerialShort := Trim(Sections[I].SerialNumber);
+    Result.VendorId := Sections[I].VendorId;
+    Result.ProductId := Sections[I].ProductId;
+    if Result.SerialShort <> '' then
+      Result.PersistentId := Result.SerialShort
+    else
+      Result.PersistentId := Trim(Sections[I].LocationId);
+    Exit;
   end;
 end;
 

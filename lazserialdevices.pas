@@ -88,6 +88,16 @@ var
 {$IFDEF Windows}
 var
   Collector: TWindowsSerialDeviceCollector;
+{$ELSE}
+{$IFDEF Darwin}
+var
+  Collector: TMacOSSerialDeviceCollector;
+{$ELSE}
+{$IFDEF UNIX}
+var
+  Collector: TUnixSerialDeviceCollector;
+{$ENDIF}
+{$ENDIF}
 {$ENDIF}
 {$ENDIF}
 begin
@@ -107,7 +117,25 @@ begin
     Collector.Free;
   end;
   {$ELSE}
+  {$IFDEF Darwin}
+  Collector := TMacOSSerialDeviceCollector.Create;
+  try
+    Result := Collector.Collect(AOptions);
+  finally
+    Collector.Free;
+  end;
+  {$ELSE}
+  {$IFDEF UNIX}
+  Collector := TUnixSerialDeviceCollector.Create;
+  try
+    Result := Collector.Collect(AOptions);
+  finally
+    Collector.Free;
+  end;
+  {$ELSE}
   Result := nil;
+  {$ENDIF}
+  {$ENDIF}
   {$ENDIF}
   {$ENDIF}
 end;

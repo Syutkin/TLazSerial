@@ -31,6 +31,27 @@ type
     ): TSerialDeviceInfoArray;
   end;
 
+  TUnixSerialDeviceCollector = class
+  protected
+    function CanOpenDevice(const ADevice: string): Boolean; virtual;
+    procedure EnumerateDeviceNames(ADevices: TStrings); virtual;
+  public
+    function Collect(
+      const AOptions: TSerialDeviceEnumerationOptions = []
+    ): TSerialDeviceInfoArray; virtual;
+  end;
+
+  TMacOSSerialDeviceCollector = class(TUnixSerialDeviceCollector)
+  protected
+    procedure EnumerateDeviceNames(ADevices: TStrings); override;
+    function ReadSystemProfilerSnapshot(out ASnapshot: string): Boolean;
+      virtual;
+  public
+    function Collect(
+      const AOptions: TSerialDeviceEnumerationOptions = []
+    ): TSerialDeviceInfoArray; override;
+  end;
+
 function MatchesLinuxSerialDevicePattern(const ADevice: string): Boolean;
 function IsLinuxBuiltInSerialDevice(const ATypeValue: string;
   const ADeviceExists: Boolean): Boolean;
@@ -38,9 +59,9 @@ function IsLinuxBuiltInSerialDevice(const ATypeValue: string;
 implementation
 
 uses
-  FileUtil, StrUtils, SysUtils, LazSerialDeviceParsers
-  {$IFDEF Linux}
-  , BaseUnix, Process
+  FileUtil, Process, StrUtils, SysUtils, LazSerialDeviceParsers
+  {$IFDEF UNIX}
+  , BaseUnix
   {$ENDIF}
   {$IFDEF Windows}
   , ActiveX, ComObj, Registry, Variants, Windows, WmiUtil
@@ -531,6 +552,193 @@ begin
     CoUninitialize;
   end;
   {$ENDIF}
+end;
+
+function TUnixSerialDeviceCollector.CanOpenDevice(
+  const ADevice: string
+): Boolean;
+{$IFDEF UNIX}
+var
+  DeviceHandle: cint;
+{$ENDIF}
+begin
+  Result := False;
+  {$IFDEF UNIX}
+  DeviceHandle := fpOpen(
+    ADevice,
+    O_RdWr or O_NonBlock or O_NoCtty
+  );
+  if DeviceHandle < 0 then
+    Exit;
+  fpClose(DeviceHandle);
+  Result := True;
+  {$ENDIF}
+end;
+
+procedure TUnixSerialDeviceCollector.EnumerateDeviceNames(
+  ADevices: TStrings
+);
+begin
+  {$IFDEF UNIX}
+  FindAllFiles(ADevices, '/dev', 'ttyAM*', False, faAnyFile);
+  {$ENDIF}
+end;
+
+function TUnixSerialDeviceCollector.Collect(
+  const AOptions: TSerialDeviceEnumerationOptions
+): TSerialDeviceInfoArray;
+var
+  Device: TSerialDeviceInfo;
+  DeviceNames: TStringList;
+  I: Integer;
+  RawDeviceNames: TStringList;
+begin
+  Result := nil;
+  RawDeviceNames := TStringList.Create;
+  DeviceNames := TStringList.Create;
+  try
+    RawDeviceNames.CaseSensitive := True;
+    DeviceNames.CaseSensitive := True;
+    EnumerateDeviceNames(RawDeviceNames);
+    NormalizeDeviceNames(RawDeviceNames, DeviceNames);
+    for I := 0 to DeviceNames.Count - 1 do
+    begin
+      if (sdeoAccessibleOnly in AOptions) and
+        not CanOpenDevice(DeviceNames[I]) then
+        Continue;
+      Device := Default(TSerialDeviceInfo);
+      Device.Device := DeviceNames[I];
+      AddDevice(Result, Device);
+    end;
+  finally
+    DeviceNames.Free;
+    RawDeviceNames.Free;
+  end;
+end;
+
+function MacOSCuAlias(const ADevice: string): string;
+const
+  TtyPrefix = '/dev/tty.';
+begin
+  if StartsStr(TtyPrefix, ADevice) then
+    Result := '/dev/cu.' + Copy(ADevice, Length(TtyPrefix) + 1, MaxInt)
+  else
+    Result := '';
+end;
+
+procedure SelectCanonicalMacOSDeviceNames(
+  const ASource, ADestination: TStringList
+);
+var
+  CuAlias: string;
+  I: Integer;
+  NormalizedSource: TStringList;
+begin
+  NormalizedSource := TStringList.Create;
+  try
+    NormalizedSource.CaseSensitive := True;
+    NormalizeDeviceNames(ASource, NormalizedSource);
+    ADestination.Clear;
+    for I := 0 to NormalizedSource.Count - 1 do
+    begin
+      CuAlias := MacOSCuAlias(NormalizedSource[I]);
+      if (CuAlias <> '') and (NormalizedSource.IndexOf(CuAlias) >= 0) then
+        Continue;
+      ADestination.Add(NormalizedSource[I]);
+    end;
+    ADestination.CustomSort(@NaturalSortDeviceNames);
+  finally
+    NormalizedSource.Free;
+  end;
+end;
+
+procedure TMacOSSerialDeviceCollector.EnumerateDeviceNames(
+  ADevices: TStrings
+);
+begin
+  {$IFDEF Darwin}
+  FindAllFiles(ADevices, '/dev', 'cu.*', False, faAnyFile);
+  FindAllFiles(ADevices, '/dev', 'tty.*', False, faAnyFile);
+  {$ENDIF}
+end;
+
+function TMacOSSerialDeviceCollector.ReadSystemProfilerSnapshot(
+  out ASnapshot: string
+): Boolean;
+begin
+  ASnapshot := '';
+  Result := False;
+  {$IFDEF Darwin}
+  Result := RunCommand(
+    'system_profiler',
+    ['SPUSBDataType'],
+    ASnapshot,
+    [poStderrToOutput]
+  ) and (Trim(ASnapshot) <> '');
+  {$ENDIF}
+end;
+
+function TMacOSSerialDeviceCollector.Collect(
+  const AOptions: TSerialDeviceEnumerationOptions
+): TSerialDeviceInfoArray;
+var
+  CanonicalDeviceNames: TStringList;
+  Device: TSerialDeviceInfo;
+  I: Integer;
+  RawDeviceNames: TStringList;
+  SelectedDeviceNames: TStringList;
+  Snapshot: string;
+begin
+  Result := nil;
+  RawDeviceNames := TStringList.Create;
+  CanonicalDeviceNames := TStringList.Create;
+  SelectedDeviceNames := TStringList.Create;
+  try
+    RawDeviceNames.CaseSensitive := True;
+    CanonicalDeviceNames.CaseSensitive := True;
+    SelectedDeviceNames.CaseSensitive := True;
+    EnumerateDeviceNames(RawDeviceNames);
+    SelectCanonicalMacOSDeviceNames(
+      RawDeviceNames,
+      CanonicalDeviceNames
+    );
+
+    for I := 0 to CanonicalDeviceNames.Count - 1 do
+      if not (sdeoAccessibleOnly in AOptions) or
+        CanOpenDevice(CanonicalDeviceNames[I]) then
+        SelectedDeviceNames.Add(CanonicalDeviceNames[I]);
+
+    Snapshot := '';
+    if SelectedDeviceNames.Count > 0 then
+      try
+        if not ReadSystemProfilerSnapshot(Snapshot) then
+          Snapshot := '';
+      except
+        on E: Exception do
+          Snapshot := '';
+      end;
+
+    for I := 0 to SelectedDeviceNames.Count - 1 do
+    begin
+      Device := Default(TSerialDeviceInfo);
+      Device.Device := SelectedDeviceNames[I];
+      if Snapshot <> '' then
+        try
+          Device := ParseMacOSSystemProfilerDevice(
+            Device.Device,
+            Snapshot
+          );
+        except
+          on E: Exception do
+            Device.Device := SelectedDeviceNames[I];
+        end;
+      AddDevice(Result, Device);
+    end;
+  finally
+    SelectedDeviceNames.Free;
+    CanonicalDeviceNames.Free;
+    RawDeviceNames.Free;
+  end;
 end;
 
 end.

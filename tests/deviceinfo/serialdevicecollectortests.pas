@@ -10,6 +10,9 @@ uses
 
 type
   TSerialDeviceCollectorTests = class(TTestCase)
+  private
+    function FindFixture(const AFileName: string): string;
+    function LoadFixture(const AFileName: string): string;
   published
     procedure LinuxPatternsMatchSupportedPortClasses;
     procedure LinuxPatternsRejectUnsupportedPortClasses;
@@ -26,6 +29,9 @@ type
     procedure WindowsCollectorUsesRegistryForInvalidWmiSnapshot;
     procedure WindowsCollectorDoesNotReadRegistryWhenWmiHasPorts;
     procedure WindowsCollectorFiltersAccessibleDevicesAfterEnumeration;
+    procedure MacOSCollectorUsesOneSnapshotAndCanonicalAliases;
+    procedure MacOSCollectorPreservesDevicesWhenProfilerFails;
+    procedure UnixCollectorReturnsDeviceOnlySnapshot;
   end;
 
 implementation
@@ -86,6 +92,38 @@ type
     property WmiReadCount: Integer read FWmiReadCount;
     property WmiSnapshot: string read FWmiSnapshot write FWmiSnapshot;
     property WmiSucceeds: Boolean read FWmiSucceeds write FWmiSucceeds;
+  end;
+
+  TFakeMacOSSerialDeviceCollector = class(TMacOSSerialDeviceCollector)
+  private
+    FDevices: TStringList;
+    FProfilerReadCount: Integer;
+    FProfilerSnapshot: string;
+    FProfilerSucceeds: Boolean;
+  protected
+    procedure EnumerateDeviceNames(ADevices: TStrings); override;
+    function ReadSystemProfilerSnapshot(out ASnapshot: string): Boolean;
+      override;
+  public
+    constructor Create;
+    destructor Destroy; override;
+    procedure AddDevice(const ADevice: string);
+    property ProfilerReadCount: Integer read FProfilerReadCount;
+    property ProfilerSnapshot: string
+      read FProfilerSnapshot write FProfilerSnapshot;
+    property ProfilerSucceeds: Boolean
+      read FProfilerSucceeds write FProfilerSucceeds;
+  end;
+
+  TFakeUnixSerialDeviceCollector = class(TUnixSerialDeviceCollector)
+  private
+    FDevices: TStringList;
+  protected
+    procedure EnumerateDeviceNames(ADevices: TStrings); override;
+  public
+    constructor Create;
+    destructor Destroy; override;
+    procedure AddDevice(const ADevice: string);
   end;
 
 constructor TFakeLinuxSerialDeviceCollector.Create;
@@ -226,6 +264,99 @@ begin
   Inc(FWmiReadCount);
   ASnapshot := FWmiSnapshot;
   Result := FWmiSucceeds;
+end;
+
+constructor TFakeMacOSSerialDeviceCollector.Create;
+begin
+  inherited Create;
+  FDevices := TStringList.Create;
+  FProfilerSucceeds := False;
+end;
+
+destructor TFakeMacOSSerialDeviceCollector.Destroy;
+begin
+  FDevices.Free;
+  inherited Destroy;
+end;
+
+procedure TFakeMacOSSerialDeviceCollector.AddDevice(const ADevice: string);
+begin
+  FDevices.Add(ADevice);
+end;
+
+procedure TFakeMacOSSerialDeviceCollector.EnumerateDeviceNames(
+  ADevices: TStrings
+);
+begin
+  ADevices.Assign(FDevices);
+end;
+
+function TFakeMacOSSerialDeviceCollector.ReadSystemProfilerSnapshot(
+  out ASnapshot: string
+): Boolean;
+begin
+  Inc(FProfilerReadCount);
+  ASnapshot := FProfilerSnapshot;
+  Result := FProfilerSucceeds;
+end;
+
+constructor TFakeUnixSerialDeviceCollector.Create;
+begin
+  inherited Create;
+  FDevices := TStringList.Create;
+end;
+
+destructor TFakeUnixSerialDeviceCollector.Destroy;
+begin
+  FDevices.Free;
+  inherited Destroy;
+end;
+
+procedure TFakeUnixSerialDeviceCollector.AddDevice(const ADevice: string);
+begin
+  FDevices.Add(ADevice);
+end;
+
+procedure TFakeUnixSerialDeviceCollector.EnumerateDeviceNames(
+  ADevices: TStrings
+);
+begin
+  ADevices.Assign(FDevices);
+end;
+
+function TSerialDeviceCollectorTests.FindFixture(
+  const AFileName: string
+): string;
+var
+  Candidate: string;
+  Directory: string;
+  I: Integer;
+begin
+  Directory := ExcludeTrailingPathDelimiter(ExtractFilePath(ParamStr(0)));
+  for I := 0 to 8 do
+  begin
+    Candidate := IncludeTrailingPathDelimiter(Directory) +
+      'fixtures' + DirectorySeparator + AFileName;
+    if FileExists(Candidate) then
+      Exit(Candidate);
+    Directory := ExtractFileDir(Directory);
+  end;
+  raise Exception.CreateFmt('Could not find test fixture %s', [AFileName]);
+end;
+
+function TSerialDeviceCollectorTests.LoadFixture(
+  const AFileName: string
+): string;
+var
+  Lines: TStringList;
+begin
+  Lines := TStringList.Create;
+  try
+    Lines.LoadFromFile(FindFixture(AFileName));
+    Result := Lines.Text;
+  finally
+    Lines.Free;
+  end;
 end;
 
 procedure TSerialDeviceCollectorTests.LinuxPatternsMatchSupportedPortClasses;
@@ -537,6 +668,83 @@ begin
     AssertEquals(1, Length(Devices));
     AssertEquals('COM3', Devices[0].Device);
     AssertEquals(2, Collector.AccessibilityCheckCount);
+  finally
+    Collector.Free;
+  end;
+end;
+
+procedure TSerialDeviceCollectorTests.
+  MacOSCollectorUsesOneSnapshotAndCanonicalAliases;
+var
+  Collector: TFakeMacOSSerialDeviceCollector;
+  Devices: TSerialDeviceInfoArray;
+begin
+  Collector := TFakeMacOSSerialDeviceCollector.Create;
+  try
+    Collector.AddDevice('/dev/tty.usbserial-ESP123456');
+    Collector.AddDevice('/dev/cu.usbserial-ESP123456');
+    Collector.AddDevice('/dev/tty.usbserial-ONLYTTY');
+    Collector.AddDevice('/dev/cu.usbmodem-00200000');
+    Collector.ProfilerSucceeds := True;
+    Collector.ProfilerSnapshot := LoadFixture('macos-system-profiler.txt');
+
+    Devices := Collector.Collect;
+
+    AssertEquals(3, Length(Devices));
+    AssertEquals('/dev/cu.usbmodem-00200000', Devices[0].Device);
+    AssertEquals('USB Modem', Devices[0].Model);
+    AssertEquals('/dev/cu.usbserial-ESP123456', Devices[1].Device);
+    AssertEquals('USB JTAG/serial debug unit', Devices[1].Model);
+    AssertEquals('/dev/tty.usbserial-ONLYTTY', Devices[2].Device);
+    AssertEquals('', Devices[2].Model);
+    AssertEquals(1, Collector.ProfilerReadCount);
+  finally
+    Collector.Free;
+  end;
+end;
+
+procedure TSerialDeviceCollectorTests.
+  MacOSCollectorPreservesDevicesWhenProfilerFails;
+var
+  Collector: TFakeMacOSSerialDeviceCollector;
+  Devices: TSerialDeviceInfoArray;
+begin
+  Collector := TFakeMacOSSerialDeviceCollector.Create;
+  try
+    Collector.AddDevice('/dev/cu.usbserial-UNKNOWN');
+
+    Devices := Collector.Collect;
+
+    AssertEquals(1, Length(Devices));
+    AssertEquals('/dev/cu.usbserial-UNKNOWN', Devices[0].Device);
+    AssertEquals('', Devices[0].Vendor);
+    AssertEquals('', Devices[0].Model);
+    AssertEquals('', Devices[0].PersistentId);
+    AssertEquals(1, Collector.ProfilerReadCount);
+  finally
+    Collector.Free;
+  end;
+end;
+
+procedure TSerialDeviceCollectorTests.UnixCollectorReturnsDeviceOnlySnapshot;
+var
+  Collector: TFakeUnixSerialDeviceCollector;
+  Devices: TSerialDeviceInfoArray;
+begin
+  Collector := TFakeUnixSerialDeviceCollector.Create;
+  try
+    Collector.AddDevice('/dev/ttyAM10');
+    Collector.AddDevice('/dev/ttyAM2');
+    Collector.AddDevice('/dev/ttyAM2');
+    Collector.AddDevice('');
+
+    Devices := Collector.Collect;
+
+    AssertEquals(2, Length(Devices));
+    AssertEquals('/dev/ttyAM2', Devices[0].Device);
+    AssertEquals('', Devices[0].Vendor);
+    AssertEquals('', Devices[0].Model);
+    AssertEquals('/dev/ttyAM10', Devices[1].Device);
   finally
     Collector.Free;
   end;

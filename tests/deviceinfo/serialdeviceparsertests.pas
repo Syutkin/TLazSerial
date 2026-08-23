@@ -27,6 +27,10 @@ type
     procedure ParseWindowsPnpIdHandlesFtdiBusFormat;
     procedure ParseWindowsWmiSnapshotExtractsStructuredDevices;
     procedure ParseWindowsWmiSnapshotSkipsInvalidCaptions;
+    procedure ParseMacOSProfilerMatchesSerialNumber;
+    procedure ParseMacOSProfilerUsesVendorIdDescriptionFallback;
+    procedure ParseMacOSProfilerMatchesNormalizedLocationId;
+    procedure ParseMacOSProfilerKeepsUnmatchedDevice;
   end;
 
 implementation
@@ -262,6 +266,81 @@ begin
   AssertEquals(1, Length(Devices));
   AssertEquals('COM4', Devices[0].Device);
   AssertEquals('Valid port', Devices[0].Model);
+end;
+
+procedure TSerialDeviceParserTests.ParseMacOSProfilerMatchesSerialNumber;
+var
+  DeviceInfo: TSerialDeviceInfo;
+begin
+  DeviceInfo := ParseMacOSSystemProfilerDevice(
+    '/dev/cu.usbserial-ESP123456',
+    LoadFixture('macos-system-profiler.txt')
+  );
+
+  AssertEquals('/dev/cu.usbserial-ESP123456', DeviceInfo.Device);
+  AssertEquals('Espressif Systems', DeviceInfo.Vendor);
+  AssertEquals('USB JTAG/serial debug unit', DeviceInfo.Model);
+  AssertEquals('ESP123456', DeviceInfo.SerialShort);
+  AssertEquals('303a', DeviceInfo.VendorId);
+  AssertEquals('1001', DeviceInfo.ProductId);
+  AssertEquals('ESP123456', DeviceInfo.PersistentId);
+  AssertEquals('', DeviceInfo.ErrorCode);
+end;
+
+procedure TSerialDeviceParserTests.
+  ParseMacOSProfilerUsesVendorIdDescriptionFallback;
+var
+  DeviceInfo: TSerialDeviceInfo;
+begin
+  DeviceInfo := ParseMacOSSystemProfilerDevice(
+    '/dev/cu.usbserial-FTABC123',
+    LoadFixture('macos-system-profiler.txt')
+  );
+
+  AssertEquals(
+    'Future Technology Devices International Limited',
+    DeviceInfo.Vendor
+  );
+  AssertEquals('FT232R USB UART', DeviceInfo.Model);
+  AssertEquals('FTABC123', DeviceInfo.SerialShort);
+  AssertEquals('0403', DeviceInfo.VendorId);
+  AssertEquals('6001', DeviceInfo.ProductId);
+end;
+
+procedure TSerialDeviceParserTests.
+  ParseMacOSProfilerMatchesNormalizedLocationId;
+var
+  DeviceInfo: TSerialDeviceInfo;
+begin
+  DeviceInfo := ParseMacOSSystemProfilerDevice(
+    '/dev/cu.usbmodem-00200000',
+    LoadFixture('macos-system-profiler.txt')
+  );
+
+  AssertEquals('STMicroelectronics', DeviceInfo.Vendor);
+  AssertEquals('USB Modem', DeviceInfo.Model);
+  AssertEquals('', DeviceInfo.SerialShort);
+  AssertEquals('0483', DeviceInfo.VendorId);
+  AssertEquals('5740', DeviceInfo.ProductId);
+  AssertEquals('0x00200000 / 3', DeviceInfo.PersistentId);
+end;
+
+procedure TSerialDeviceParserTests.ParseMacOSProfilerKeepsUnmatchedDevice;
+var
+  DeviceInfo: TSerialDeviceInfo;
+begin
+  DeviceInfo := ParseMacOSSystemProfilerDevice(
+    '/dev/cu.Bluetooth-Incoming-Port',
+    LoadFixture('macos-system-profiler.txt')
+  );
+
+  AssertEquals('/dev/cu.Bluetooth-Incoming-Port', DeviceInfo.Device);
+  AssertEquals('', DeviceInfo.Vendor);
+  AssertEquals('', DeviceInfo.Model);
+  AssertEquals('', DeviceInfo.SerialShort);
+  AssertEquals('', DeviceInfo.VendorId);
+  AssertEquals('', DeviceInfo.ProductId);
+  AssertEquals('', DeviceInfo.PersistentId);
 end;
 
 initialization

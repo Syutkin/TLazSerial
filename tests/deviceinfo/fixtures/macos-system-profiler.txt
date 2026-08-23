@@ -1,0 +1,29 @@
+USB:
+
+    USB 3.1 Bus:
+
+      Host Controller Driver: AppleUSBXHCIPCI
+
+        USB JTAG/serial debug unit:
+
+          Product ID: 0x1001
+          Vendor ID: 0x303a (Espressif Incorporated)
+          Version: 1.01
+          Serial Number: ESP123456
+          Manufacturer: Espressif Systems
+          Location ID: 0x00100000 / 1
+
+        FT232R USB UART:
+
+          Product ID: 0x6001
+          Vendor ID: 0x0403 (Future Technology Devices International Limited)
+          Serial Number: FTABC123
+          Location ID: 0x00110000 / 2
+
+        USB Modem:
+
+          Product ID: 0x5740
+          Vendor ID: 0x0483 (STMicroelectronics)
+          Manufacturer: STMicroelectronics
+          Location ID: 0x00200000 / 3
+

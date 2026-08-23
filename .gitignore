@@ -53,5 +53,8 @@ Temporary Items
 /examples/serial-gps/lib/
 /examples/serial-selector/lib/
 /examples/serial-selector/serialselectorexample
+/examples/serial-selector/backup/
+/examples/serial-selector/link*.res
+/examples/serial-selector/ppas.sh
 /tests/deviceinfo/.test_build/
 /tests/selector/.test_build/

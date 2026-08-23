@@ -13,6 +13,14 @@ msgstr ""
 msgid "Show hint"
 msgstr ""
 
+#: tform1.chkerrorcode.caption
+msgid "Error code"
+msgstr ""
+
+#: tform1.chkmodel.caption
+msgid "Model"
+msgstr ""
+
 #: tform1.chkserialnumber.caption
 msgid "Serial №"
 msgstr ""
@@ -21,6 +29,10 @@ msgstr ""
 msgid ""
 "Append the Serial № to the friendly names.\n"
 "Serial devices rarely have serial numbers."
+msgstr ""
+
+#: tform1.chkvendor.caption
+msgid "Vendor"
 msgstr ""
 
 #: tform1.cmdconnect.caption
@@ -42,10 +54,6 @@ msgstr ""
 
 #: tform1.label1.caption
 msgid "Baudrate"
-msgstr ""
-
-#: tform1.label2.caption
-msgid "Label2"
 msgstr ""
 
 #: tform1.lblcustombaudrate.caption
@@ -74,3 +82,4 @@ msgstr ""
 #, object-pascal-format
 msgid "Error: cannot connect to %s."
 msgstr ""
+

@@ -12,7 +12,7 @@ interface
 
 uses
   Classes, SysUtils, Forms, Controls, Graphics, Dialogs, StdCtrls,
-  LCLTranslator, ExtCtrls, Spin, LCLType,
+  LCLTranslator, Spin, LCLType,
   LazSerialSetup, LazSerial, LazSynaSer, SerialSelector, LazSerialDevices;
 
 resourcestring
@@ -26,7 +26,10 @@ type
   { TForm1 }
 
   TForm1 = class(TForm)
+    chkErrorCode: TCheckBox;
+    chkModel: TCheckBox;
     chkSerialNumber: TCheckBox;
+    chkVendor: TCheckBox;
     cmdConnect: TButton;
     cmdSend: TButton;
     CheckBox1: TCheckBox;
@@ -34,14 +37,12 @@ type
     ComboBox1: TComboBox;
     Edit1: TEdit;
     Label1: TLabel;
-    Label2: TLabel;
     LazSerial1:TLazSerial;
     lblCustomBaudrate: TLabel;
     Memo1: TMemo;
     SerialSelector1: TSerialSelector;
     SpinEdit1: TSpinEdit;
-    Timer1: TTimer;
-    procedure chkSerialNumberChange(Sender: TObject);
+    procedure chkDisplayOptionChange(Sender: TObject);
     procedure cmdConnectClick(Sender: TObject);
     procedure cmdSendClick(Sender: TObject);
     procedure CheckBox1Change(Sender: TObject);
@@ -51,7 +52,6 @@ type
     procedure LazSerial1Removed(Sender: TObject);
     procedure LazSerial1RxData(Sender: TObject);
     procedure LazSerial1Status(Sender:TObject;Reason:THookSerialReason;const Value:string);
-    procedure Timer1Timer(Sender: TObject);
   private
 
   public
@@ -123,18 +123,25 @@ end;
 procedure TForm1.CheckBox1Change(Sender: TObject);
 begin
   SerialSelector1.ShowFriendlyName := CheckBox1.Checked;
+  chkVendor.Enabled := CheckBox1.Checked;
+  chkModel.Enabled := CheckBox1.Checked;
   chkSerialNumber.Enabled := CheckBox1.Checked;
+  chkErrorCode.Enabled := CheckBox1.Checked;
 end;
 
-procedure TForm1.chkSerialNumberChange(Sender: TObject);
+procedure TForm1.chkDisplayOptionChange(Sender: TObject);
 var
   Options: TSerialDeviceDisplayOptions;
 begin
-  Options := SerialSelector1.DisplayOptions;
+  Options := [];
+  if chkVendor.Checked then
+    Include(Options, sddoVendor);
+  if chkModel.Checked then
+    Include(Options, sddoModel);
   if chkSerialNumber.Checked then
-    Include(Options, sddoSerialShort)
-  else
-    Exclude(Options, sddoSerialShort);
+    Include(Options, sddoSerialShort);
+  if chkErrorCode.Checked then
+    Include(Options, sddoErrorCode);
   SerialSelector1.DisplayOptions := Options;
 end;
 
@@ -159,6 +166,11 @@ end;
 procedure TForm1.FormCreate(Sender: TObject);
 begin
   CheckBox3.Checked  := SerialSelector1.ShowHint;
+  chkVendor.Checked := sddoVendor in SerialSelector1.DisplayOptions;
+  chkModel.Checked := sddoModel in SerialSelector1.DisplayOptions;
+  chkSerialNumber.Checked := sddoSerialShort in
+    SerialSelector1.DisplayOptions;
+  chkErrorCode.Checked := sddoErrorCode in SerialSelector1.DisplayOptions;
   StringArrayToList(ComboBox1.Items,BaudRateStrings) ;
   //Set baudrate to 9 600
   {$ifdef linux}ComboBox1.ItemIndex := 13;
@@ -181,11 +193,6 @@ end;
 procedure TForm1.LazSerial1Status(Sender:TObject;Reason:THookSerialReason;const Value:string);
 begin
 
-end;
-
-procedure TForm1.Timer1Timer(Sender: TObject);
-begin
-  Label2.Caption := IntToStr(GetTickCount64); //Displays if the app is hanging
 end;
 
 end.

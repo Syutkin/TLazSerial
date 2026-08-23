@@ -11,5 +11,7 @@
 {"hash":146508837,"name":"tform1.label1.caption","sourcebytes":[66,97,117,100,114,97,116,101],"value":"Baudrate"},
 {"hash":203316222,"name":"tform1.chkserialnumber.hint","sourcebytes":[65,112,112,101,110,100,32,116,104,101,32,83,101,114,105,97,108,32,226,132,150,32,116,111,32,116,104,101,32,102,114,105,101,110,100,108,121,32,110,97,109,101,115,46,13,10,83,101,114,105,97,108,32,100,101,118,105,99,101,115,32,114,97,114,101,108,121,32,104,97,118,101,32,115,101,114,105,97,108,32,110,117,109,98,101,114,115,46],"value":"Append the Serial \u2116 to the friendly names.\r\nSerial devices rarely have serial numbers."},
 {"hash":259749462,"name":"tform1.chkserialnumber.caption","sourcebytes":[83,101,114,105,97,108,32,226,132,150],"value":"Serial \u2116"},
-{"hash":86477810,"name":"tform1.label2.caption","sourcebytes":[76,97,98,101,108,50],"value":"Label2"}
+{"hash":97274722,"name":"tform1.chkvendor.caption","sourcebytes":[86,101,110,100,111,114],"value":"Vendor"},
+{"hash":5528252,"name":"tform1.chkmodel.caption","sourcebytes":[77,111,100,101,108],"value":"Model"},
+{"hash":105016373,"name":"tform1.chkerrorcode.caption","sourcebytes":[69,114,114,111,114,32,99,111,100,101],"value":"Error code"}
 ]}

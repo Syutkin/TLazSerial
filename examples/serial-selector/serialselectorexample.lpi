@@ -30,10 +30,11 @@
     </RunParams>
     <RequiredPackages>
       <Item>
-        <PackageName Value="LazSerialPort"/>
+        <PackageName Value="LCL"/>
       </Item>
       <Item>
-        <PackageName Value="LCL"/>
+        <PackageName Value="LazSerialPort"/>
+        <MinVersion Minor="8" Valid="True"/>
       </Item>
     </RequiredPackages>
     <Units>

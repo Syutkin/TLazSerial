@@ -26,7 +26,7 @@
   along with This library; if not, Write to the Free Software Foundation,
   Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA. }"/>
     <Version Minor="7" Release="8" Build="2"/>
-    <Files Count="5">
+    <Files Count="6">
       <Item1>
         <Filename Value="lazserial.pas"/>
         <HasRegisterProc Value="True"/>
@@ -50,6 +50,10 @@
         <Filename Value="lazserialdevices.pas"/>
         <UnitName Value="LazSerialDevices"/>
       </Item5>
+      <Item6>
+        <Filename Value="lazserialdeviceparsers.pas"/>
+        <UnitName Value="LazSerialDeviceParsers"/>
+      </Item6>
     </Files>
     <CompatibilityMode Value="True"/>
     <i18n>

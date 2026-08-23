@@ -7,7 +7,8 @@ uses
   CThreads,
   {$ENDIF}
   ConsoleTestRunner,
-  SerialDeviceFormatTests;
+  SerialDeviceFormatTests,
+  SerialDeviceParserTests;
 
 var
   Runner: TTestRunner;

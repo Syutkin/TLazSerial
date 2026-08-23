@@ -9,7 +9,7 @@ interface
 
 uses
   LazSerial, SerialWatcher, SerialSelector, LazSerialCommon, LazSerialDevices,
-  LazarusPackageIntf;
+  LazSerialDeviceParsers, LazarusPackageIntf;
 
 implementation
 

@@ -1,0 +1,8 @@
+NOT_A_PROPERTY
+=missing-key
+ID_VENDOR_ENC=Broken\xZZVendor
+ID_MODEL_ENC=Broken\x2
+ID_VENDOR_ID=0x12345
+ID_MODEL_ID=GGGG
+ID_USB_SERIAL_SHORT=
+DEVLINKS=relative-device /dev/serial/by-path/pci-malformed /dev/serial/by-id/usb-valid

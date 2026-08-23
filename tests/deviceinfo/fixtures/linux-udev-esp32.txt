@@ -1,0 +1,10 @@
+DEVPATH=/devices/pci0000:00/usb1/1-1/1-1:1.0/tty/ttyACM0
+DEVNAME=/dev/ttyACM0
+ID_VENDOR=Espressif
+ID_VENDOR_ENC=Espressif\x20Systems
+ID_MODEL=USB_JTAG_serial_debug_unit
+ID_MODEL_ENC=USB\x20JTAG\x2fserial\x20debug\x20unit
+ID_VENDOR_ID=303A
+ID_MODEL_ID=1001
+ID_SERIAL_SHORT=123456
+DEVLINKS=/dev/serial/by-path/pci-0000:00:14.0-usb-0:1:1.0 /dev/serial/by-id/usb-Espressif_USB_JTAG_serial_debug_unit_123456-if00 /dev/serial/by-id/usb-second

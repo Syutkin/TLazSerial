@@ -57,7 +57,7 @@ uses
   cthreads,
 {$ENDIF}
 {$ELSE}
-  Windows, Classes, ActiveX, //registry,
+  Windows, Classes,
 {$ENDIF}
   SysUtils, lazsynaser,  LResources, Forms, Controls, Graphics, Dialogs,
   PropEdits, SerialWatcher, LazSerialCommon;
@@ -121,19 +121,6 @@ type
     property Terminated;
   end;
 
-  {$ifdef windows}
-  TUpdatePortsThread = class(TThread)
-    private
-
-    protected
-      procedure Execute; override;
-    public
-      Owner: TLazSerial;
-      Constructor Create(CreateSuspended : boolean);
-  end;
-  {$endif}
-
-
   { TLazSerial }
 
   TLazSerial = class(TComponent)
@@ -158,8 +145,6 @@ type
     FOnStatus: TStatusEvent;
     FOnRemoved: TNotifyEvent;
     ReadThread: TComPortReadThread;
-    {$ifdef windows}
-    FUpdatePortsThread : TUpdatePortsThread;{$endif}
 
     procedure DeviceOpen;
     procedure DeviceClose;
@@ -185,7 +170,7 @@ type
     procedure Open;
     procedure Close;
     // show a port settings dialog form
-    procedure ShowSetupDialog (Options : tSSOptionS = [ssoAppendFriendlyNames, ssoHide_tty_usbserial,ssoUseWMI,ssoAppendSerialNumber]);
+    procedure ShowSetupDialog;
     // read data from port
     function DataAvailable: boolean;
     function ReadData: string;
@@ -226,7 +211,7 @@ type
 
     property OnRxData: TNotifyEvent read FOnRxData write FOnRxData;
     property OnStatus: TStatusEvent read FOnStatus write FOnStatus;
-    //Triggers an event if the device was removed during and ACTIVE connection. Linux and Windows only.
+    // Triggers if the device is removed during an active connection.
     property OnRemoved : TNotifyEvent read FOnRemoved write FOnRemoved;
   end;
 
@@ -313,9 +298,9 @@ begin
   Active:=true;
 end;
 
-procedure TLazSerial.ShowSetupDialog (Options : tSSOptionS = [ssoAppendFriendlyNames, ssoHide_tty_usbserial,ssoUseWMI,ssoAppendSerialNumber]);
+procedure TLazSerial.ShowSetupDialog;
 begin
-  EditComPort(self, Options);
+  EditComPort(Self);
 end;
 
 function TLazSerial.AppliedBaudrate: integer;
@@ -360,8 +345,13 @@ procedure TLazSerial.SetActive(state: boolean);
 begin
   if state=FActive then exit;
 
-  if state then DeviceOpen
-  else DeviceClose;
+  if state then
+  begin
+    FSerialWatcher.Refresh;
+    DeviceOpen;
+  end
+  else
+    DeviceClose;
 
   FActive:=state;
 end;
@@ -548,55 +538,19 @@ end;
 
 //Begin: Handle disconnect detection
 procedure TLazSerial.TriggerDisconnected;
-var
-  Ports: TStringList;
 begin
-  if not Active then exit;
-  Ports := TStringList.Create;
-  Ports.CommaText := GetSerialPortNames{$ifdef windows}(True){$endif}; //Uses the WMI method in windows, registry reading is not reliable
-
-  if (Ports.IndexOf(FDevice) < 0) then
+  if Active and not FSerialWatcher.ContainsDevice(FDevice) then
   begin
     Active := False;
-    if Assigned(FOnRemoved) then FOnRemoved(Self);
-  end; //if
-  Ports.Free;
+    if Assigned(FOnRemoved) then
+      FOnRemoved(Self);
+  end;
 end;
 
 procedure TLazSerial.ComDisconnected(Sender: TObject);
 begin
-  {$ifdef windows}
-  FUpdatePortsThread := TUpdatePortsThread.Create(True); // This way it doesn't start automatically
-  FUpdatePortsThread.Owner := Self;
-  FUpdatePortsThread.Start;
-  {$else}
   TriggerDisconnected;
-  {$endif}
 end;
-
-{TUpdatePortsThread}
-{$ifdef windows}
-constructor TUpdatePortsThread.Create(CreateSuspended : boolean);
-begin
-  inherited Create(CreateSuspended);
-  FreeOnTerminate := True;
-end;
-
-procedure TUpdatePortsThread.Execute;
-var
-  CoInitResult: HRESULT;
-begin
-  try
-   CoInitResult := CoInitialize(nil); //The app will crash without this
-   GetSerialPortNames{$ifdef windows}(True){$endif}; //The first call of GetWMIInfo is slow. The next call is done in TriggerDisconnected, but it is not so slow
-   Synchronize(@Owner.TriggerDisconnected);  //TODO: Call outside Sync
-  finally
-    if Succeeded(CoInitResult) then
-      CoUninitialize;
-    //Terminate;
-  end; //try
-end;
-{$endif} //windows
 //End: Handle disconnect detection
 
 procedure Register;

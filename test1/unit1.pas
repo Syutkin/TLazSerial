@@ -13,7 +13,7 @@ interface
 uses
   Classes, SysUtils, Forms, Controls, Graphics, Dialogs, StdCtrls,
   LCLTranslator, ExtCtrls, Spin, LCLType,
-  lazserialsetup, LazSerial,  SerialSelector, SerialWatcher, LazSerialCommon, LazSynaSer;
+  LazSerialSetup, LazSerial, LazSynaSer, SerialSelector, LazSerialDevices;
 
 resourcestring
   lngConnect = 'Connect';
@@ -27,11 +27,9 @@ type
 
   TForm1 = class(TForm)
     chkSerialNumber: TCheckBox;
-    chkUseWMI: TCheckBox;
     cmdConnect: TButton;
     cmdSend: TButton;
     CheckBox1: TCheckBox;
-    CheckBox2: TCheckBox;
     CheckBox3: TCheckBox;
     ComboBox1: TComboBox;
     Edit1: TEdit;
@@ -44,11 +42,9 @@ type
     SpinEdit1: TSpinEdit;
     Timer1: TTimer;
     procedure chkSerialNumberChange(Sender: TObject);
-    procedure chkUseWMIChange(Sender: TObject);
     procedure cmdConnectClick(Sender: TObject);
     procedure cmdSendClick(Sender: TObject);
     procedure CheckBox1Change(Sender: TObject);
-    procedure CheckBox2Change(Sender: TObject);
     procedure CheckBox3Change(Sender: TObject);
     procedure Edit1KeyPress(Sender: TObject; var Key: char);
     procedure FormCreate(Sender: TObject);
@@ -119,14 +115,6 @@ begin
   end;
 end;
 
-procedure TForm1.chkUseWMIChange(Sender: TObject);
-begin
-  if (chkUseWMI.checked = True)
-    then SerialSelector1.Options := SerialSelector1.Options + [ssoUseWMI]
-    else SerialSelector1.Options := SerialSelector1.Options - [ssoUseWMI];
-  SerialSelector1.Refresh;
-end;
-
 procedure TForm1.cmdSendClick(Sender: TObject);
 begin
   if LazSerial1.Active then LazSerial1.WriteData(Edit1.Text);
@@ -134,27 +122,20 @@ end;
 
 procedure TForm1.CheckBox1Change(Sender: TObject);
 begin
-  if (CheckBox1.checked = True)
-    then SerialSelector1.Options := SerialSelector1.Options + [ssoAppendFriendlyNames]
-    else SerialSelector1.Options := SerialSelector1.Options - [ssoAppendFriendlyNames];
+  SerialSelector1.ShowFriendlyName := CheckBox1.Checked;
   chkSerialNumber.Enabled := CheckBox1.Checked;
-  SerialSelector1.Refresh;
 end;
 
 procedure TForm1.chkSerialNumberChange(Sender: TObject);
+var
+  Options: TSerialDeviceDisplayOptions;
 begin
-  if (chkSerialNumber.checked = True)
-    then SerialSelector1.Options := SerialSelector1.Options + [ssoAppendSerialNumber]
-    else SerialSelector1.Options := SerialSelector1.Options - [ssoAppendSerialNumber];
-  SerialSelector1.Refresh;
-end;
-
-procedure TForm1.CheckBox2Change(Sender: TObject);
-begin
-  if (CheckBox2.checked = True)
-    then SerialSelector1.Options := SerialSelector1.Options + [ssoHide_tty_usbserial]
-    else SerialSelector1.Options := SerialSelector1.Options - [ssoHide_tty_usbserial];
-  SerialSelector1.Refresh;
+  Options := SerialSelector1.DisplayOptions;
+  if chkSerialNumber.Checked then
+    Include(Options, sddoSerialShort)
+  else
+    Exclude(Options, sddoSerialShort);
+  SerialSelector1.DisplayOptions := Options;
 end;
 
 procedure TForm1.CheckBox3Change(Sender: TObject);
@@ -177,14 +158,7 @@ end;
 
 procedure TForm1.FormCreate(Sender: TObject);
 begin
-  CheckBox2.Visible := False;
-  chkUseWMI.Visible := False;
   CheckBox3.Checked  := SerialSelector1.ShowHint;
-  {$ifdef darwin}CheckBox2.Visible := True;{$endif}
-  {$ifdef windows}
-  chkUseWMI.Visible := True;
-  chkUseWMI.Visible := ssoUseWMI in SerialSelector1.Options;
-  {$endif}
   StringArrayToList(ComboBox1.Items,BaudRateStrings) ;
   //Set baudrate to 9 600
   {$ifdef linux}ComboBox1.ItemIndex := 13;
@@ -215,4 +189,3 @@ begin
 end;
 
 end.
-

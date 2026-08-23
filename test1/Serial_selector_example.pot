@@ -9,10 +9,6 @@ msgstr ""
 msgid "Append friendly names"
 msgstr ""
 
-#: tform1.checkbox2.caption
-msgid "Hide TTI"
-msgstr ""
-
 #: tform1.checkbox3.caption
 msgid "Show hint"
 msgstr ""
@@ -25,10 +21,6 @@ msgstr ""
 msgid ""
 "Append the Serial № to the friendly names.\n"
 "Serial devices rarely have serial numbers."
-msgstr ""
-
-#: tform1.chkusewmi.caption
-msgid "Use WMI"
 msgstr ""
 
 #: tform1.cmdconnect.caption
@@ -82,4 +74,3 @@ msgstr ""
 #, object-pascal-format
 msgid "Error: cannot connect to %s."
 msgstr ""
-

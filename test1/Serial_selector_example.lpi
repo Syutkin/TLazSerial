@@ -20,9 +20,6 @@
     </i18n>
     <BuildModes>
       <Item Name="Default" Default="True"/>
-      <SharedMatrixOptions Count="1">
-        <Item1 ID="787640759952" Modes="Default" Value="-gw3"/>
-      </SharedMatrixOptions>
     </BuildModes>
     <PublishOptions>
       <Version Value="2"/>

@@ -10,7 +10,8 @@ uses
   Interfaces,
   Forms,
   ConsoleTestRunner,
-  SerialSelectorComponentTests;
+  SerialSelectorComponentTests,
+  SerialWatcherComponentTests;
 
 var
   Runner: TTestRunner;

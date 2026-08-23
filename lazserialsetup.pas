@@ -16,7 +16,7 @@ interface
 uses
   LCLIntf, SysUtils, Classes, Graphics, Controls, Forms, Dialogs,
   StdCtrls, ExtCtrls, Buttons, LResources,lazSerial,
-  SerialSelector, LazSerialCommon;
+  SerialSelector, LazSerialCommon, LazSerialDevices;
 
 type
   // TLazSerial setup dialog
@@ -215,11 +215,19 @@ begin
 end;
 
 procedure EditComPort(ComPort: TlazSerial; Options : tSSOptionS = [ssoAppendFriendlyNames, ssoHide_tty_usbserial,ssoUseWMI,ssoAppendSerialNumber]);
+var
+  DisplayOptions: TSerialDeviceDisplayOptions;
 begin
   with TComSetupFrm.Create(nil) do
   begin
     SerialSelector1.Device :=  ComPort.Device;
-    SerialSelector1.Options := Options;
+    SerialSelector1.ShowFriendlyName := ssoAppendFriendlyNames in Options;
+    DisplayOptions := [sddoVendor, sddoModel];
+    if ssoAppendSerialNumber in Options then
+      Include(DisplayOptions, sddoSerialShort);
+    if ssoAppendErrorCode in Options then
+      Include(DisplayOptions, sddoErrorCode);
+    SerialSelector1.DisplayOptions := DisplayOptions;
     ComComboBox2.Text :=  BaudRateToStr(ComPort.BaudRate);
     ComComboBox3.Text :=  DataBitsToStr(ComPort.DataBits);
     ComComBoBox4.Text :=  StopBitsToStr(ComPort.StopBits);
@@ -246,7 +254,6 @@ end;
 
 procedure TComSetupFrm.FormCreate(Sender: TObject);
 begin
-  SerialSelector1.Items.CommaText := GetSerialPortNames();
   SerialSelector1.ShowHint := true;
   StringArrayToList(ComComboBox2.Items,BaudRateStrings) ;
   StringArrayToList(ComComboBox3.Items,DataBitsStrings) ;

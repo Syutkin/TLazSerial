@@ -1,4 +1,4 @@
-//Introduced in v0.7 by СМ630 2025÷2026
+// Introduced in v0.7 by СМ630 2025÷2026
 unit SerialSelector;
 
 {$mode ObjFPC}{$H+}
@@ -6,496 +6,442 @@ unit SerialSelector;
 interface
 
 uses
-  Classes, SysUtils, LResources, Forms, Controls, Dialogs, StdCtrls, LazUTF8,
-  LazSynaSer, LCL, Graphics, math, Types, LCLTranslator, LazStringUtils, ExtCtrls,
-  SerialWatcher, LazSerialCommon
-  {$ifNdef darwin}, StrUtils{$endif}
-  {$ifdef windows}, Windows, ActiveX{, Utilwmi, registry, Messages}{$endif}
-  {$ifNdef linux}, process{$endif};
+  Classes, SysUtils, LResources, Forms, Controls, StdCtrls, Graphics, Types,
+  ExtCtrls, SerialWatcher, LazSerialDevices;
 
 type
-  Integer1D = array of integer;
-  String1D = array of string;
-  tVIDPIDID = record
-    VID_PID : string;
-    ID : String; //TODO: Is this used ?
-    EnumKeyName : String;
-  end;
-  tVIDPIDID_1D = array of tVIDPIDID;
-
-  TSerialSelector = class;
-
-  {$ifdef windows}
-  TUpdatePortsThread = class(TThread)
-  private
-
-  protected
-    procedure Execute; override;
-  public
-    Owner: TSerialSelector;
-    Constructor Create(CreateSuspended : boolean);
-  end;
-  {$endif}
-
-
   TSerialSelector = class(TCustomComboBox)
+  private
+    FDevices: TSerialDeviceInfoArray;
+    FRequestedDevice: string;
+    FSerialWatcher: TSerialWatcher;
+    FHintWindow: THintWindow;
+    FAddedPorts: string;
+    FRemovedPorts: string;
+    FShowHint: Boolean;
+    FHint: string;
+    FHintCaption: string;
+    FShowFriendlyName: Boolean;
+    FDisplayOptions: TSerialDeviceDisplayOptions;
+    FRefreshTimer: TTimer;
+    function GetDevice: string;
+    function GetDeviceCount: Integer;
+    function GetDeviceInfo(const AIndex: Integer): TSerialDeviceInfo;
+    procedure SetDevice(const AValue: string);
+    procedure SetDisplayOptions(const AValue: TSerialDeviceDisplayOptions);
+    procedure SetShowFriendlyName(const AValue: Boolean);
+    function MouseIn: Boolean;
+    procedure DoMouseEnter(Sender: TObject);
+    procedure DoUpdateComPorts(Sender: TObject);
+    procedure DoOnRefreshTimer(Sender: TObject);
+    procedure HideHint(Sender: TObject);
+    procedure SetSelectorHint(const AValue: string);
+    procedure SetShowHint(const AValue: Boolean);
+    procedure RebuildItems(const ASelectedDevice: string);
+    procedure UpdatePortChanges(const AOldDevices: TSerialDeviceInfoArray);
+    property Items;
+  protected
+    function LoadDevices: TSerialDeviceInfoArray; virtual;
+    procedure Loaded; override;
+  public
+    constructor Create(AOwner: TComponent); override;
+    destructor Destroy; override;
+    function TryGetSelectedDevice(out ADevice: TSerialDeviceInfo): Boolean;
+    procedure Refresh;
+    procedure UpdateHint;
+    procedure UpdateHintCaption;
+    property Device: string read GetDevice write SetDevice;
+    property DeviceCount: Integer read GetDeviceCount;
+    property Devices[const AIndex: Integer]: TSerialDeviceInfo
+      read GetDeviceInfo;
+    property Text;
+  published
+    property ShowFriendlyName: Boolean
+      read FShowFriendlyName write SetShowFriendlyName default True;
+    property DisplayOptions: TSerialDeviceDisplayOptions
+      read FDisplayOptions write SetDisplayOptions
+      default DefaultSerialDeviceDisplayOptions;
 
-    private
-      fDevice              : string;      //Used to store the device name until the selector get populated
-      fDeviceList          : TStringList; //The list of the ports without the friendly names
-      fDeviceListFriend    : TStringList; //The list of the ports with the friendly names
-      FSerialWatcher       : TSerialWatcher;
-      FHintWindow          : THintWindow;
-      FAddedPorts          : String;
-      FRemovedPorts        : String;
-      FShowHint            : Boolean;
-      FHint                : String;
-      FHintCaption         : String;
-      FOptions             : tSSOptionS;
-      FRefreshTimer        : TTimer;
-      {$ifdef windows}
-      FUpdatePortsThread   : TUpdatePortsThread;{$endif}
-      function GetDevice: String;
-      procedure SetDevice(aValue: string);
-      function MouseIn : Boolean;
-      procedure DoMouseEnter (Sender: TObject);
-      procedure DoUpdateComPorts(Sender: TObject);
-      procedure DoOnRefreshTimer(Sender: TObject);
-      procedure HideHint(Sender: TObject);
-      //The list of the ports to be displayed to the user. This data CANNOT be used for connecting to the serial port (see the “DeviceList” property).
-      property Items; //TODO: Shall it be read only??
-      procedure Loaded; override;
-      procedure SetHint(const Value: string);
-      procedure setOptions (Value:tSSOptionS);
-      procedure SetShowHint(const Value: Boolean);
-      procedure UpdatePorts;
-    public
-      //The name of the selected device in the format proper for connecting to. When set the item index is changed <b>if</b> the provided value is present in the list.
-      property Device: String read GetDevice write SetDevice;
-      constructor Create (aOwner: TComponent); override;
-      destructor Destroy; override;
-      property Text;
-      procedure UpdateHint;
-      procedure UpdateHintCaption;
-      procedure Refresh;
-    published
-      // The list of the ports without the friendly names. This is the list that contains the usable port names.
-      property DeviceList: TStringList read fDeviceList;
-      // The list of the ports with the friendly names
-      property DeviceListFriend : TStringList read fDeviceListFriend; //The list of the ports with the friendly names
-
-      //Default combo box properties
-      property Align;
-      property Anchors;
-      property ArrowKeysTraverseList;
-      property AutoComplete;
-      property AutoCompleteText;
-      property AutoDropDown;
-      property AutoSelect;
-      property AutoSize;
-      property BidiMode;
-      property BorderSpacing;
-      property BorderStyle;
-      property CharCase;
-      property Color;
-      property Constraints;
-      property DoubleBuffered;
-      property DragCursor;
-      property DragKind;
-      property DragMode;
-      property DropDownCount;
-      property Enabled;
-      property Font;
-      // If empty, information about the serial devices is shown as a hint, otherwse the provided text is displayed
-      property Hint : string read FHint write SetHint;
-      property ItemHeight;
-      property ItemIndex;
-      property ItemWidth;
-      property MaxLength;
-      // AppendFriendlyNames - Appends friendly names to the names of the COM ports
-      // AppendSerialNumber - Appends the serial number of the device to the friendly name. Serial devices rarely have serial numbers
-      // Hide_tty_usbserial - (MacOS only) removes COM ports starting with tty.usbserial*, if duplicated by cu.usbserial*
-      // UseWMI (windows only)- retrives the list of the serial devices from WMI (slower, but data is usually true) and uses registry if fails. If disabled, gets the list from the registry only (faster, but the data is often wrong).
-      // Apend error code - Appends error code to the friendly names if it is ≠ 0. Windows only.
-      property Options : tSSOptions read FOptions write SetOptions;
-      property ParentBidiMode;
-      property ParentColor;
-      property ParentDoubleBuffered;
-      property ParentFont;
-      property ParentShowHint;
-      property PopupMenu;
-      property ShowHint : Boolean read FShowHint write SetShowHint;
-      property Sorted;
-      property Style;
-      property TabOrder;
-      property TabStop;
-      property TextHint;
-      property Visible;
-      property OnChange;
-      property OnChangeBounds;
-      property OnClick;
-      property OnCloseUp;
-      property OnContextPopup;
-      property OnDblClick;
-      property OnDragDrop;
-      property OnDragOver;
-      property OnDrawItem;
-      property OnEndDrag;
-      property OnDropDown;
-      property OnEditingDone;
-      property OnEnter;
-      property OnExit;
-      property OnGetItems;
-      property OnKeyDown;
-      property OnKeyPress;
-      property OnKeyUp;
-      property OnMeasureItem;
-      property OnMouseDown;
-      property OnMouseEnter;
-      property OnMouseLeave;
-      property OnMouseMove;
-      property OnMouseUp;
-      property OnMouseWheel;
-      property OnMouseWheelDown;
-      property OnMouseWheelUp;
-      property OnSelect;
-      property OnStartDrag;
-      property OnUTF8KeyPress;
+    property Align;
+    property Anchors;
+    property ArrowKeysTraverseList;
+    property AutoComplete;
+    property AutoCompleteText;
+    property AutoDropDown;
+    property AutoSelect;
+    property AutoSize;
+    property BidiMode;
+    property BorderSpacing;
+    property BorderStyle;
+    property CharCase;
+    property Color;
+    property Constraints;
+    property DoubleBuffered;
+    property DragCursor;
+    property DragKind;
+    property DragMode;
+    property DropDownCount;
+    property Enabled;
+    property Font;
+    property Hint: string read FHint write SetSelectorHint;
+    property ItemHeight;
+    property ItemWidth;
+    property MaxLength;
+    property ParentBidiMode;
+    property ParentColor;
+    property ParentDoubleBuffered;
+    property ParentFont;
+    property ParentShowHint;
+    property PopupMenu;
+    property ShowHint: Boolean read FShowHint write SetShowHint default True;
+    property Style;
+    property TabOrder;
+    property TabStop;
+    property TextHint;
+    property Visible;
+    property OnChange;
+    property OnChangeBounds;
+    property OnClick;
+    property OnCloseUp;
+    property OnContextPopup;
+    property OnDblClick;
+    property OnDragDrop;
+    property OnDragOver;
+    property OnDrawItem;
+    property OnEndDrag;
+    property OnDropDown;
+    property OnEditingDone;
+    property OnEnter;
+    property OnExit;
+    property OnKeyDown;
+    property OnKeyPress;
+    property OnKeyUp;
+    property OnMeasureItem;
+    property OnMouseDown;
+    property OnMouseEnter;
+    property OnMouseLeave;
+    property OnMouseMove;
+    property OnMouseUp;
+    property OnMouseWheel;
+    property OnMouseWheelDown;
+    property OnMouseWheelUp;
+    property OnSelect;
+    property OnStartDrag;
+    property OnUTF8KeyPress;
   end;
-
-const
-  DBT_DEVICEARRIVAL         = $8000;      // system detected a new device
-  DBT_DEVNODES_CHANGED      = $0007;
-  DBT_DEVICEREMOVECOMPLETE  = $8004;      // dec32772 = device is gone
-  DBT_DEVTYP_HANDLE         = $00000006;  // file system handle
-  DBT_DEVTYP_PORT           = $00000003;  // port handle (serial, parallel)
-  DBT_DEVTYP_VOLUME         = $00000002;  // volume handle (CDROM, DVD)
-  DBFT_MEDIA                = $0001;
-  DBFT_NET                  = $0002;
 
 procedure Register;
 
 implementation
 
-function TSerialSelector.GetDevice: string;
+uses
+  LazSerialCommon;
+
+function CopyDevices(
+  const ADevices: TSerialDeviceInfoArray
+): TSerialDeviceInfoArray;
+var
+  I: Integer;
+begin
+  Result := nil;
+  SetLength(Result, Length(ADevices));
+  for I := Low(ADevices) to High(ADevices) do
+    Result[I] := ADevices[I];
+end;
+
+function DeviceChanges(
+  const ASource, AReference: TSerialDeviceInfoArray
+): string;
+var
+  I: Integer;
 begin
   Result := '';
-  if (Items.Count > ItemIndex)
-    then Result := fDeviceList[ItemIndex];
-end;
-
-//TODO: Maybe allow unlisted devices?
-procedure TSerialSelector.SetDevice(aValue: string);
-var
-  mIndex : integer = -1;
-begin
-  if (DeviceList.Count <1) then
-  begin
-    fDevice := aValue; //Store the value to populate it when the list is updated
-    exit;
-  end;
-  mIndex := SearchStringList(DeviceList,aValue,{$ifdef windows}false{$else}true{$endif});
-  if (mIndex > -1) then
-  begin
-    ItemIndex := mIndex;
-    fDevice :=  DeviceList.Strings[ItemIndex];
-  end;
-end;
-
-//TODO: Preserve the currently selected port, if still present
-procedure TSerialSelector.Refresh;
-begin
-  {$ifdef windows}
-  DoUpdateComPorts(Self);
-  {$else}
-  UpdatePorts;
-  {$endif};
-end;
-
-{$ifdef darwin}
-procedure RemoveTTY(var aDeviceList: tStringlist; DoNothing : boolean);
-var
-  i: integer = 0;
-begin
-  if ((DoNothing = True) or (aDeviceList.Count = 0)) then exit;
-  for i:= aDeviceList.Count -1 downto 0 do
-    if aDeviceList.Strings[i].StartsWith('/dev/tty') then aDeviceList.Delete(i);
-end;
-{$endif}
-
-//Check if the COM port is aready prsent (hapenns when windows assign the same COM port name to multipel devices)
-function IsPresent(ComPortName: string; FriendlyList: TStringList) : Boolean;
-var
-  i: integer;
-begin
-  Result := False;
-  if (FriendlyList.Count < 1) then exit;
-  for i:= 0 to FriendlyList.Count -1 do
-  begin
-    if FriendlyList.Strings[i].StartsWith(ComPortName + ' <') then exit (True);
-  end; //for
-end;
-
-procedure TSerialSelector.UpdatePorts;
-var
-  OldPorts: TStringList;
-  AddedPorts: TStringList;
-  RemovedPorts: TStringList;
-  CurrentPort: string = '';
-  i : integer;
-  FriendlyName : string = '';
-  DeviceIDs : string = '';
-begin
-  if (ItemIndex > 0)
-    then CurrentPort := fDeviceList.Strings[ItemIndex]
-    else CurrentPort := fDevice; //Stored device (from the settings)
-  OldPorts     := TStringList.Create;
-  AddedPorts   := TStringList.Create;
-    AddedPorts.StrictDelimiter := True;
-    AddedPorts.Delimiter := #13;
-  RemovedPorts := TStringList.Create;
-    RemovedPorts.StrictDelimiter := True;
-    RemovedPorts.Delimiter := #13;
-
-  OldPorts.Assign(fDeviceList);
-  {$ifdef windows}
-  if ssoUseWMI in FOptions
-    then fDeviceList.CommaText := GetSerialPortNames(DeviceIDs)
-    else {$endif}fDeviceList.CommaText := GetSerialPortNames;
-  {$ifdef darwin}
-  RemoveTTY(fDeviceList,not (ssoHide_tty_usbserial in FOptions));
-  fDeviceList.Sort;
-  {$endif}
-  {$ifdef windows}{$IF FPC_FULLVERSION >= 30002}fDeviceList.CustomSort(@NaturalSortCompare);{$endif}{$endif}
-  {$ifdef linux}{$IF FPC_FULLVERSION >= 30002}fDeviceList.CustomSort(@NaturalSortCompare);{$endif}{$endif}
-  fDeviceListFriend.Clear;
-  for i:= 0 to fDeviceList.Count -1 do
+  for I := Low(ASource) to High(ASource) do
+    if not ContainsSerialDevice(AReference, ASource[I].Device) then
     begin
-      FriendlyName := GetFriendlyName(fDeviceList[i],ssoAppendSerialNumber in FOptions{$ifdef windows},DeviceIDs,ssoAppendErrorCode in FOptions{$endif});
-      if (IsPresent(fDeviceList[i],fDeviceListFriend) = false) then
-        fDeviceListFriend.Append (fDeviceList[i] + BoolToStr(FriendlyName = '','',' <' + FriendlyName +'>'));
+      if Result <> '' then
+        Result := Result + LineEnding;
+      Result := Result + ASource[I].Device;
     end;
+end;
 
-  if (OldPorts.Count > 0)    then FindRemovedPorts(OldPorts, fDeviceList, RemovedPorts);
-  if (fDeviceList.Count < 1) then begin Clear; FRemovedPorts := UTF8StringReplace(RemovedPorts.DelimitedText,#13,#13#10,[rfReplaceAll]); UpdateHintCaption;  exit; end;
-  if (fDeviceList.Count > 0) then
-    FindAddedPorts(OldPorts, fDeviceList,AddedPorts);
-  FAddedPorts := UTF8StringReplace(AddedPorts.DelimitedText,#13,#13#10,[rfReplaceAll]);
+function TSerialSelector.GetDevice: string;
+begin
+  if (ItemIndex >= Low(FDevices)) and (ItemIndex <= High(FDevices)) then
+    Result := FDevices[ItemIndex].Device
+  else
+    Result := '';
+end;
 
-  FRemovedPorts := UTF8StringReplace(RemovedPorts.DelimitedText,#13,#13#10,[rfReplaceAll]);
+function TSerialSelector.GetDeviceCount: Integer;
+begin
+  Result := Length(FDevices);
+end;
 
-  if assigned(OldPorts) then OldPorts.Free;
-  if assigned(AddedPorts) then AddedPorts.Free;
-  if assigned(RemovedPorts) then RemovedPorts.Free;
+function TSerialSelector.GetDeviceInfo(
+  const AIndex: Integer
+): TSerialDeviceInfo;
+begin
+  if (AIndex < Low(FDevices)) or (AIndex > High(FDevices)) then
+    raise EListError.CreateFmt('Serial device index %d out of bounds', [AIndex]);
+  Result := FDevices[AIndex];
+end;
 
-  if (ssoAppendFriendlyNames in FOptions = True)
-    then Items := fDeviceListFriend
-    else Items := fDeviceList;
+procedure TSerialSelector.SetDevice(const AValue: string);
+var
+  Index: Integer;
+begin
+  FRequestedDevice := AValue;
+  Index := IndexOfSerialDevice(FDevices, AValue);
+  if Index >= 0 then
+    ItemIndex := Index
+  else
+    ItemIndex := -1;
+end;
 
- if (CurrentPort <> '') then
-    if (SearchStringList(fDeviceList,CurrentPort) > -1)
-      then ItemIndex := SearchStringList(fDeviceList,CurrentPort);
+procedure TSerialSelector.SetDisplayOptions(
+  const AValue: TSerialDeviceDisplayOptions
+);
+var
+  SelectedDevice: string;
+begin
+  if FDisplayOptions = AValue then
+    Exit;
+  SelectedDevice := Device;
+  FDisplayOptions := AValue;
+  RebuildItems(SelectedDevice);
+end;
 
-  if (ItemIndex < 0) and (Items.Count  > 0) then ItemIndex := 0;
-  Text := Items.Strings[ItemIndex];
-  if (FHintWindow <> nil) then
-    UpdateHint;
+procedure TSerialSelector.SetShowFriendlyName(const AValue: Boolean);
+var
+  SelectedDevice: string;
+begin
+  if FShowFriendlyName = AValue then
+    Exit;
+  SelectedDevice := Device;
+  FShowFriendlyName := AValue;
+  RebuildItems(SelectedDevice);
+end;
+
+function TSerialSelector.LoadDevices: TSerialDeviceInfoArray;
+begin
+  Result := GetSerialDevices;
+end;
+
+procedure TSerialSelector.RebuildItems(const ASelectedDevice: string);
+var
+  I: Integer;
+  SelectedIndex: Integer;
+begin
+  Sorted := False;
+  Items.BeginUpdate;
+  try
+    Items.Clear;
+    for I := Low(FDevices) to High(FDevices) do
+      if FShowFriendlyName then
+        Items.Add(FormatSerialDeviceDisplayName(FDevices[I], FDisplayOptions))
+      else
+        Items.Add(FDevices[I].Device);
+  finally
+    Items.EndUpdate;
+  end;
+
+  SelectedIndex := IndexOfSerialDevice(FDevices, ASelectedDevice);
+  if (SelectedIndex < 0) and (Length(FDevices) > 0) then
+    SelectedIndex := 0;
+  ItemIndex := SelectedIndex;
+
+  if ItemIndex >= 0 then
+  begin
+    FRequestedDevice := FDevices[ItemIndex].Device;
+    Text := Items[ItemIndex];
+  end
+  else
+    Text := '';
   SelLength := 0;
+end;
+
+procedure TSerialSelector.UpdatePortChanges(
+  const AOldDevices: TSerialDeviceInfoArray
+);
+begin
+  FAddedPorts := DeviceChanges(FDevices, AOldDevices);
+  FRemovedPorts := DeviceChanges(AOldDevices, FDevices);
+end;
+
+procedure TSerialSelector.Refresh;
+var
+  OldDevices: TSerialDeviceInfoArray;
+  SelectedDevice: string;
+begin
+  SelectedDevice := Device;
+  if SelectedDevice = '' then
+    SelectedDevice := FRequestedDevice;
+  OldDevices := CopyDevices(FDevices);
+  FDevices := LoadDevices;
+  UpdatePortChanges(OldDevices);
+  RebuildItems(SelectedDevice);
+  if FHintWindow <> nil then
+    UpdateHint;
 end;
 
 procedure TSerialSelector.DoUpdateComPorts(Sender: TObject);
 begin
-  {$ifNdef windows}UpdatePorts;
-  {$else}
-  if (ssoUseWMI in FOptions) then
-  begin
-    FUpdatePortsThread := TUpdatePortsThread.Create(True); // This way it doesn't start automatically
-    FUpdatePortsThread.Owner := Self;
-    FUpdatePortsThread.Start;
-  end
-  else
-     UpdatePorts;
-  {$endif}
+  Refresh;
 end;
 
 function TSerialSelector.MouseIn: Boolean;
 var
-  MyPoint : TPoint;
+  MousePoint: TPoint;
 begin
-  MyPoint := ScreenToClient(Mouse.CursorPos);
-  Result := PtInRect(ClientRect, MyPoint);
+  MousePoint := ScreenToClient(Mouse.CursorPos);
+  Result := PtInRect(ClientRect, MousePoint);
 end;
 
-//In Linux the hint might not be removed when the control is removed.
-//Also applied for all OSes, just in case.
 procedure TSerialSelector.DoOnRefreshTimer(Sender: TObject);
 begin
   if not MouseIn then
     HideHint(Self);
 end;
 
-//TODO: The last added/removed device is lost when applying the change
-procedure TSerialSelector.setOptions(Value: tSSOptionS);
+constructor TSerialSelector.Create(AOwner: TComponent);
 begin
-  FOptions := Value;
-end;
-
-constructor TSerialSelector.Create (aOwner: TComponent);
-begin
-  inherited Create(aOwner);
-  ItemIndex := -1;
-  fDevice := '';
-  fDeviceList := TStringList.Create;
-  fDeviceListFriend := TStringList.Create;
+  inherited Create(AOwner);
+  FDevices := nil;
+  FRequestedDevice := '';
   FAddedPorts := '';
   FRemovedPorts := '';
-  FOptions := [ssoAppendFriendlyNames,ssoUseWMI, ssoHide_tty_usbserial,ssoAppendSerialNumber,ssoAppendErrorCode];
+  FShowFriendlyName := True;
+  FDisplayOptions := DefaultSerialDeviceDisplayOptions;
+  FShowHint := True;
+  FHint := '';
 
-  FRefreshTimer := TTimer.Create(Self) ;
+  Sorted := False;
+  ItemIndex := -1;
+  ReadOnly := True;
+  Text := '';
+  Width := 256;
+
+  FRefreshTimer := TTimer.Create(Self);
   FRefreshTimer.Enabled := True;
   FRefreshTimer.Interval := 1000;
   FRefreshTimer.OnTimer := @DoOnRefreshTimer;
 
-  Hint := '';
-  FShowHint := True;
-  ReadOnly := True;
-  Text := '';
   OnMouseEnter := @DoMouseEnter;
   OnMouseLeave := @HideHint;
-  OnGetItems := @HideHint;
   FSerialWatcher := TSerialWatcher.Create(Self);
-  FSerialWatcher.OnComConnected    := @DoUpdateComPorts;
+  FSerialWatcher.OnComConnected := @DoUpdateComPorts;
   FSerialWatcher.OnComDisconnected := @DoUpdateComPorts;
-  Width := 256;
 end;
 
-//Begin HintRoutines
+function TSerialSelector.TryGetSelectedDevice(
+  out ADevice: TSerialDeviceInfo
+): Boolean;
+begin
+  Result := (ItemIndex >= Low(FDevices)) and (ItemIndex <= High(FDevices));
+  if Result then
+    ADevice := FDevices[ItemIndex]
+  else
+    ADevice := Default(TSerialDeviceInfo);
+end;
+
 procedure TSerialSelector.UpdateHintCaption;
 begin
-  if (ItemIndex < 0) then exit; //Todo: How come that ItemIndex = -1 when the .Items are not empty‽
-  FHintCaption := '';
-  if (FHint = '') then
-  begin
-    if (fDeviceList.Count > 0)
-      then FHintCaption := fDeviceListFriend.Strings[ItemIndex]
-      else FHintCaption := lngNoDevicesAvailable;
-    //Todo: Maybe there is bug in Linux: LineEnding + LineEnding is rendered as a single LineEnding
-    if (FAddedPorts <> '') then
-      FHintCaption := FHintCaption + LineEnding + ' ' + LineEnding + lngAddedPorts + LineEnding + FAddedPorts;
-    if (FRemovedPorts <> '') then
-      FHintCaption := FHintCaption + LineEnding + ' ' + LineEnding + lngRemovedPorts + LineEnding + FRemovedPorts;
-  end
+  if FHint <> '' then
+    FHintCaption := FHint
+  else if (ItemIndex >= Low(FDevices)) and (ItemIndex <= High(FDevices)) then
+    FHintCaption := FormatSerialDeviceDisplayName(
+      FDevices[ItemIndex],
+      DefaultSerialDeviceDisplayOptions
+    )
   else
-    FHintCaption := FHint;
+    FHintCaption := lngNoDevicesAvailable;
+
+  if FHint = '' then
+  begin
+    if FAddedPorts <> '' then
+      FHintCaption := FHintCaption + LineEnding + ' ' + LineEnding +
+        lngAddedPorts + LineEnding + FAddedPorts;
+    if FRemovedPorts <> '' then
+      FHintCaption := FHintCaption + LineEnding + ' ' + LineEnding +
+        lngRemovedPorts + LineEnding + FRemovedPorts;
+  end;
 end;
 
-//Shows the hint or updates it if shown
 procedure TSerialSelector.UpdateHint;
 var
-  mRect : trect;
+  HintRect: TRect;
 begin
-  if not ShowHint then exit;
-  if not MouseIn then exit;
-  if (FHintWindow = nil) then
+  if not ShowHint or not MouseIn then
+    Exit;
+  if FHintWindow = nil then
   begin
-    FHintWindow:= THintWindow.Create(self);
+    FHintWindow := THintWindow.Create(Self);
     FRefreshTimer.Enabled := True;
   end;
   UpdateHintCaption;
-  mRect := FHintWindow.CalcHintRect(0, FHintCaption ,nil);
-  Offsetrect(mRect, Mouse.CursorPos.X,Mouse.CursorPos.Y + 4);
-  FHintWindow.ActivateHint(mRect,FHintCaption);
+  HintRect := FHintWindow.CalcHintRect(0, FHintCaption, nil);
+  OffsetRect(HintRect, Mouse.CursorPos.X, Mouse.CursorPos.Y + 4);
+  FHintWindow.ActivateHint(HintRect, FHintCaption);
 end;
 
-//Show the hint
 procedure TSerialSelector.DoMouseEnter(Sender: TObject);
 begin
   UpdateHint;
 end;
 
-procedure TSerialSelector.SetHint(const Value: string);
+procedure TSerialSelector.SetSelectorHint(const AValue: string);
 begin
-  if (FHint = Value) then exit;
-  FHint := Value;
-  DoUpdateComPorts(self); //Todo: maybe this is not the best behaviour
+  if FHint = AValue then
+    Exit;
+  FHint := AValue;
+  UpdateHintCaption;
+  if FHintWindow <> nil then
+    UpdateHint;
 end;
 
-procedure TSerialSelector.SetShowHint(const Value: Boolean);
+procedure TSerialSelector.SetShowHint(const AValue: Boolean);
 begin
-  if (FShowHint = Value) then exit;
-  FShowHint := Value;
-  try
-    if (FShowHint = True)
-      then UpdateHintCaption
-      else if (FHintWindow <> nil) then
-       HideHint(self);
-  finally
-  end;
+  if FShowHint = AValue then
+    Exit;
+  FShowHint := AValue;
+  if FShowHint then
+    UpdateHintCaption
+  else if FHintWindow <> nil then
+    HideHint(Self);
 end;
 
 procedure TSerialSelector.HideHint(Sender: TObject);
 begin
-  try
-    {$ifNdef linux}
-    FreeAndNil(FHintWindow);
-    {$else}
-    //Linux Mint Cinnamon crashes on FreeAndNil
-    if (FHintWindow <> nil) then FHintWindow.Hide;
-    {$endif}
-  finally
-//    FTimer.Enabled := False;
-  end;
+  {$IFNDEF Linux}
+  FreeAndNil(FHintWindow);
+  {$ELSE}
+  // Linux Mint Cinnamon crashes when a visible THintWindow is freed here.
+  if FHintWindow <> nil then
+    FHintWindow.Hide;
+  {$ENDIF}
 end;
-//End HintRoutines
 
-//Complete initialization after settings are loaded from the GUI
 procedure TSerialSelector.Loaded;
 begin
-  inherited;
-  DoUpdateComPorts(self);
+  inherited Loaded;
+  if not (csDesigning in ComponentState) then
+    Refresh;
 end;
 
 destructor TSerialSelector.Destroy;
 begin
-  if assigned(fDeviceList) then fDeviceList.Free;
-  if assigned(fDeviceListFriend) then fDeviceListFriend.Free;
-  if assigned(FHintWindow) then FHintWindow.Free;
-  inherited;
+  FreeAndNil(FHintWindow);
+  inherited Destroy;
 end;
-
-
-{TUpdatePortsThread}
-{$ifdef windows}
-constructor TUpdatePortsThread.Create(CreateSuspended : boolean);
-begin
-  inherited Create(CreateSuspended);
-  FreeOnTerminate := True;
-end;
-
-procedure TUpdatePortsThread.Execute;
-begin
-  try
-   CoInitialize(nil); //The app will crash without this
-   //The first call of GetWMIInfo is slow. The next call is done in TriggerDisconnected, but it is not slow
-   //Todo: maybe this is not reliable enough
-   Owner.UpdatePorts; //usually this does not take more than 6 seconds, but 20 seconds are also observed
-   //Synchronize(@Owner.SelStart := 0);
-   Synchronize(@Application.ProcessMessages);
-  // Synchronize(@Owner.UpdatePorts);
-  finally
-    Terminate;
-  end; //try
-end;
-{$endif} //windows
-//End: Handle disconnect detection
 
 procedure Register;
 begin
   {$I serialselector_icon.lrs}
-  RegisterComponents('LazSerial',[TSerialSelector]);
+  RegisterComponents('LazSerial', [TSerialSelector]);
 end;
 
 initialization
-{$i serialselector_icon.lrs}
+  {$I serialselector_icon.lrs}
 
 end.

@@ -172,8 +172,6 @@ object ComSetupFrm: TComSetupFrm
       Font.Quality = fqDraft
       Font.Style = [fsBold]
       ItemHeight = 13
-      ItemIndex = 0
-      Options = [ssoAppendFriendlyNames, ssoUseWMI, ssoHide_tty_usbserial, ssoAppendSerialNumber]
       ParentFont = False
       ShowHint = True
       TabOrder = 5

@@ -8,7 +8,8 @@ unit LazSerialPort;
 interface
 
 uses
-  LazSerial, SerialWatcher, SerialSelector, LazSerialCommon, LazarusPackageIntf;
+  LazSerial, SerialWatcher, SerialSelector, LazSerialCommon, LazSerialDevices,
+  LazarusPackageIntf;
 
 implementation
 

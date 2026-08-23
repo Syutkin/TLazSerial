@@ -48,3 +48,4 @@ Temporary Items
 
 # Lazarus build output
 /lib/
+/tests/deviceinfo/.test_build/

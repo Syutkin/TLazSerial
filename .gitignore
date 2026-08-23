@@ -49,8 +49,8 @@ Temporary Items
 # Lazarus build output
 /lib/
 /packagefiles.xml
-/test/lib/
-/test1/lib/
-/test1/Serial_selector_example
+/examples/serial-gps/lib/
+/examples/serial-selector/lib/
+/examples/serial-selector/serialselectorexample
 /tests/deviceinfo/.test_build/
 /tests/selector/.test_build/

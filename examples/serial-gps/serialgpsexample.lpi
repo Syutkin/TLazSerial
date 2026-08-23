@@ -43,9 +43,9 @@
     </RequiredPackages>
     <Units Count="2">
       <Unit0>
-        <Filename Value="sertest.lpr"/>
+        <Filename Value="serialgpsexample.lpr"/>
         <IsPartOfProject Value="True"/>
-        <UnitName Value="SerTest"/>
+        <UnitName Value="SerialGpsExample"/>
       </Unit0>
       <Unit1>
         <Filename Value="main.pas"/>

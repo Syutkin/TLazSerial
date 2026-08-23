@@ -1,4 +1,4 @@
-program Serial_selector_example;
+program SerialSelectorExample;
 
 {$mode objfpc}{$H+}
 
@@ -25,4 +25,3 @@ begin
   Application.CreateForm(TForm1, Form1);
   Application.Run;
 end.
-

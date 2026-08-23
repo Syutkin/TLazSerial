@@ -1,4 +1,4 @@
-program SerTest;
+program SerialGpsExample;
 
 {$mode objfpc}{$H+}
 
@@ -18,4 +18,3 @@ begin
   Application.CreateForm(TFMain, FMain);
   Application.Run;
 end.
-

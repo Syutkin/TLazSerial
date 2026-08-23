@@ -5,14 +5,14 @@
     <PathDelim Value="\"/>
     <General>
       <SessionStorage Value="InProjectDir"/>
-      <Title Value="Serial_selector_example"/>
+      <Title Value="SerialSelectorExample"/>
       <Scaled Value="True"/>
       <ResourceType Value="res"/>
       <UseXPManifest Value="True"/>
       <XPManifest>
         <DpiAware Value="True"/>
-        <TextName Value="Serial_selector_example"/>
-        <TextDesc Value="Serial_selector_example for TLazSerial"/>
+        <TextName Value="SerialSelectorExample"/>
+        <TextDesc Value="Serial selector example for TLazSerial"/>
       </XPManifest>
     </General>
     <i18n>
@@ -38,7 +38,7 @@
     </RequiredPackages>
     <Units>
       <Unit>
-        <Filename Value="Serial_selector_example.lpr"/>
+        <Filename Value="serialselectorexample.lpr"/>
         <IsPartOfProject Value="True"/>
       </Unit>
       <Unit>
@@ -55,7 +55,7 @@
     <Version Value="11"/>
     <PathDelim Value="\"/>
     <Target>
-      <Filename Value="Serial_selector_example"/>
+      <Filename Value="serialselectorexample"/>
     </Target>
     <SearchPaths>
       <IncludeFiles Value="$(ProjOutDir)"/>

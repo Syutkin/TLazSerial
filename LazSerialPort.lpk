@@ -26,7 +26,7 @@
   along with This library; if not, Write to the Free Software Foundation,
   Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA. }"/>
     <Version Minor="7" Release="8" Build="2"/>
-    <Files Count="6">
+    <Files Count="7">
       <Item1>
         <Filename Value="lazserial.pas"/>
         <HasRegisterProc Value="True"/>
@@ -54,13 +54,17 @@
         <Filename Value="lazserialdeviceparsers.pas"/>
         <UnitName Value="LazSerialDeviceParsers"/>
       </Item6>
+      <Item7>
+        <Filename Value="lazserialdevicecollectors.pas"/>
+        <UnitName Value="LazSerialDeviceCollectors"/>
+      </Item7>
     </Files>
     <CompatibilityMode Value="True"/>
     <i18n>
       <EnableI18N Value="True"/>
       <OutDir Value="languages"/>
     </i18n>
-    <RequiredPkgs Count="3">
+    <RequiredPkgs Count="4">
       <Item1>
         <PackageName Value="IDEIntf"/>
       </Item1>
@@ -68,9 +72,12 @@
         <PackageName Value="LCL"/>
       </Item2>
       <Item3>
+        <PackageName Value="LazUtils"/>
+      </Item3>
+      <Item4>
         <PackageName Value="FCL"/>
         <MinVersion Major="1" Valid="True"/>
-      </Item3>
+      </Item4>
     </RequiredPkgs>
     <UsageOptions>
       <CustomOptions Value="-dUseCThreads"/>

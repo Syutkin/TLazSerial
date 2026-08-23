@@ -119,7 +119,6 @@ uses
   winver,
   {$ENDIF}
 {$ENDIF}
-{$ifdef linux}FileUtil,{$ENDIF}
   LazSynaFpc,
   Classes, SysUtils, LazSynaUtil, LazSerialCommon;
 
@@ -787,6 +786,11 @@ function GetSerialPortNames(out DeviceDetails: string): string; overload;
 {$endif}
 
 implementation
+
+{$IFDEF Linux}
+uses
+  LazSerialDevices;
+{$ENDIF}
 
 constructor TBlockSerial.Create;
 begin
@@ -2493,13 +2497,11 @@ end;
 {$ENDIF}
 
 {$IFNDEF MSWINDOWS}
+{$IFNDEF Linux}
 // Modif J.P   03/2013 - O1/2017 - 11/2022
 // Modif СМ630 2025
 //Gets the list of the serial devices in Unix. OnlyAccessible removes the unaccesible devices from the list, incl. those, which are already open.
-{$ifdef linux}function GetSerialPortNames06: string;
-{$else}
 function GetSerialPortNames: string;
-{$endif}
 var
   Index: Integer;
   Data: string;
@@ -2575,60 +2577,31 @@ begin
   end;
 end;
 {$ENDIF}
+{$ENDIF}
 
-
-{$ifdef linux}
-function GetInbuiltPorts: string;
+{$IFDEF Linux}
+function GetSerialPortNames(Ver06: Boolean = False): string;
 var
-  SerialDevs: TStringList;
-  i : integer;
-  F: TextFile;
-  TypeValue : string = '';
+  Devices: TSerialDeviceInfoArray;
+  DeviceNames: TStringList;
+  I: Integer;
 begin
-  Result := '';
-  SerialDevs :=  TStringList.Create;
+  if Ver06 then
+    Devices := GetSerialDevices([sdeoAccessibleOnly])
+  else
+    Devices := GetSerialDevices;
+  DeviceNames := TStringList.Create;
   try
-    SerialDevs := FindAllDirectories('/sys/class/tty/', false);
-    if (SerialDevs.Count > 0) then
-      for i :=0 to SerialDevs.Count -1 do
-        if FileExists(SerialDevs.Strings[i] +  '/type') then
-        begin
-          AssignFile(F, SerialDevs.Strings[i] +  '/type');
-          Reset(F);
-          ReadLn(F, TypeValue);
-          CloseFile(F);
-          if (TypeValue = '4') then Result := Result +  BoolToStr(Result = '','','  ') + '/dev/' +ExtractFileName(SerialDevs.Strings[i]) ;
-        end; //if FileExists;
+    DeviceNames.StrictDelimiter := True;
+    DeviceNames.Delimiter := ',';
+    for I := Low(Devices) to High(Devices) do
+      DeviceNames.Add(Devices[I].Device);
+    Result := DeviceNames.DelimitedText;
   finally
-    SerialDevs.Free;
+    DeviceNames.Free;
   end;
 end;
-
-function GetSerialPortNames07: string;
-const
-  Prefixes = 'ttyAMA*;rfcomm*;ttyUSB*;ttyACM*';
-var
-  SerialDevs: TStringList;
-begin
-  SerialDevs :=  TStringList.Create;
-  SerialDevs.StrictDelimiter := True;
-  SerialDevs.Delimiter := ';';
-  Result := GetInbuiltPorts;
-  try
-    FindAllFiles(SerialDevs,'/dev',Prefixes,false,faAnyFile);
-    if (SerialDevs.Count >0) then Result := Result + BoolToStr(Result = '','','  ') + StringReplace(SerialDevs.DelimitedText,';','  ',[rfReplaceAll]);
-  finally
-    SerialDevs.Free;
-  end;
-end;
-
-function GetSerialPortNames (Ver06: Boolean = False): string;
-begin
-  if Ver06
-    then Result := GetSerialPortNames06
-    else Result := GetSerialPortNames07;
-end;
-{$endif}
+{$ENDIF}
 
 
 end.

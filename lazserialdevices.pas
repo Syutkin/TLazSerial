@@ -21,6 +21,11 @@ type
 
   TSerialDeviceInfoArray = array of TSerialDeviceInfo;
 
+  TSerialDeviceEnumerationOption = (
+    sdeoAccessibleOnly
+  );
+  TSerialDeviceEnumerationOptions = set of TSerialDeviceEnumerationOption;
+
   TSerialDeviceDisplayOption = (
     sddoVendor,
     sddoModel,
@@ -36,6 +41,20 @@ const
     sddoSerialShort,
     sddoErrorCode
   ];
+
+function GetSerialDevices(
+  const AOptions: TSerialDeviceEnumerationOptions = []
+): TSerialDeviceInfoArray;
+
+function IndexOfSerialDevice(
+  const ADevices: TSerialDeviceInfoArray;
+  const ADevice: string
+): Integer;
+
+function ContainsSerialDevice(
+  const ADevices: TSerialDeviceInfoArray;
+  const ADevice: string
+): Boolean;
 
 function NormalizeUsbId(const AValue: string): string;
 
@@ -53,8 +72,58 @@ function FormatSerialDeviceDisplayName(
 
 implementation
 
+uses
+  LazSerialDeviceCollectors;
+
 resourcestring
   SSerialDeviceErrorCode = 'error %s';
+
+function GetSerialDevices(
+  const AOptions: TSerialDeviceEnumerationOptions
+): TSerialDeviceInfoArray;
+{$IFDEF Linux}
+var
+  Collector: TLinuxSerialDeviceCollector;
+{$ENDIF}
+begin
+  {$IFDEF Linux}
+  Collector := TLinuxSerialDeviceCollector.Create;
+  try
+    Result := Collector.Collect(AOptions);
+  finally
+    Collector.Free;
+  end;
+  {$ELSE}
+  Result := nil;
+  {$ENDIF}
+end;
+
+function IndexOfSerialDevice(
+  const ADevices: TSerialDeviceInfoArray;
+  const ADevice: string
+): Integer;
+var
+  I: Integer;
+begin
+  for I := Low(ADevices) to High(ADevices) do
+  begin
+    {$IFDEF Windows}
+    if CompareText(ADevices[I].Device, ADevice) = 0 then
+    {$ELSE}
+    if CompareStr(ADevices[I].Device, ADevice) = 0 then
+    {$ENDIF}
+      Exit(I);
+  end;
+  Result := -1;
+end;
+
+function ContainsSerialDevice(
+  const ADevices: TSerialDeviceInfoArray;
+  const ADevice: string
+): Boolean;
+begin
+  Result := IndexOfSerialDevice(ADevices, ADevice) >= 0;
+end;
 
 procedure AppendPart(var ATarget: string; const APart: string);
 var

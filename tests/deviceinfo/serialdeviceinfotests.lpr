@@ -5,10 +5,12 @@ program SerialDeviceInfoTests;
 uses
   {$IFDEF UNIX}
   CThreads,
+  cwstring,
   {$ENDIF}
   ConsoleTestRunner,
   SerialDeviceFormatTests,
-  SerialDeviceParserTests;
+  SerialDeviceParserTests,
+  SerialDeviceCollectorTests;
 
 var
   Runner: TTestRunner;

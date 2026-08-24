@@ -16,7 +16,30 @@ jobs:
       - name: Check out sources
         uses: actions/checkout@v4
 
+      - name: Cache Lazarus toolchain
+        id: toolchain-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.tool_cache }}/tlazserial/lazarus-4.8-linux-x64.tar
+          key: tlazserial-ubuntu-24.04-x64-lazarus-4.8-fpc-3.2.2-v1
+
+      - name: Restore cached Lazarus toolchain
+        if: steps.toolchain-cache.outputs.cache-hit == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TOOL_CACHE/tlazserial/lazarus-4.8-linux-x64.tar"
+          sudo tar --extract --file "$archive" --directory /
+
+      - name: Install Linux GUI dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes xvfb libgtk2.0-dev
+
       - name: Install Lazarus 4.8
+        if: steps.toolchain-cache.outputs.cache-hit != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -40,13 +63,34 @@ jobs:
           echo "8c9e145d8056754a9ca39ce3e52e982b8e4816124984c5f542f2a874e721ad53  $fpc_sources" | sha256sum --check
           echo "401742cefb01ad99a628188034bf728fb5360d641ed2be5f91fb0ee183a301cd  $lazarus_package" | sha256sum --check
 
-          sudo apt-get update
-          sudo apt-get install --yes xvfb libgtk2.0-dev
           sudo apt-get install --yes \
             "$fpc_package" \
             "$fpc_sources" \
             "$lazarus_package"
 
+      - name: Snapshot Lazarus toolchain
+        if: steps.toolchain-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TOOL_CACHE/tlazserial/lazarus-4.8-linux-x64.tar"
+          mkdir -p "$(dirname "$archive")"
+          sudo tar --create --file "$archive" --directory / \
+            etc/fpc.cfg \
+            usr/bin/fpc \
+            usr/bin/fpcmake \
+            usr/bin/fpcmkcfg \
+            usr/bin/fpcres \
+            usr/bin/lazbuild \
+            usr/bin/ppcx64 \
+            usr/lib/fpc/3.2.2 \
+            usr/lib/lazarus
+          sudo chown "$(id -u):$(id -g)" "$archive"
+
+      - name: Verify toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
           test "$(lazbuild --version)" = '4.8'
           test "$(fpc -iV)" = '3.2.2'
 
@@ -107,7 +151,27 @@ jobs:
       - name: Check out sources
         uses: actions/checkout@v4
 
+      - name: Cache Lazarus toolchain
+        id: toolchain-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.tool_cache }}/tlazserial/lazarus-4.8-windows-x64.tar
+          key: tlazserial-windows-2025-x64-lazarus-4.8-fpc-3.2.2-v1
+
+      - name: Restore cached Lazarus toolchain
+        if: steps.toolchain-cache.outputs.cache-hit == 'true'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $archive = Join-Path $env:RUNNER_TOOL_CACHE `
+            'tlazserial\lazarus-4.8-windows-x64.tar'
+          tar.exe -xf $archive -C C:\
+          if ($LASTEXITCODE -ne 0) {
+            throw "Could not restore Lazarus toolchain: exit code $LASTEXITCODE"
+          }
+
       - name: Install Lazarus 4.8
+        if: steps.toolchain-cache.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -136,6 +200,23 @@ jobs:
             throw "Lazarus installer failed: exit code $($process.ExitCode)"
           }
 
+      - name: Snapshot Lazarus toolchain
+        if: steps.toolchain-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $archive = Join-Path $env:RUNNER_TOOL_CACHE `
+            'tlazserial\lazarus-4.8-windows-x64.tar'
+          New-Item -ItemType Directory -Force (Split-Path $archive) |
+            Out-Null
+          tar.exe -cf $archive -C C:\ Lazarus
+          if ($LASTEXITCODE -ne 0) {
+            throw "Could not snapshot Lazarus toolchain: exit code $LASTEXITCODE"
+          }
+
+      - name: Configure toolchain paths
+        shell: pwsh
+        run: |
           'C:\Lazarus' | Out-File -FilePath $env:GITHUB_PATH -Append
           'C:\Lazarus\fpc\3.2.2\bin\x86_64-win64' |
             Out-File -FilePath $env:GITHUB_PATH -Append
@@ -222,7 +303,23 @@ jobs:
       - name: Check out sources
         uses: actions/checkout@v4
 
+      - name: Cache Lazarus toolchain
+        id: toolchain-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.tool_cache }}/tlazserial/lazarus-4.8-macos-arm64.tar
+          key: tlazserial-macos-latest-arm64-lazarus-4.8-fpc-3.2.4rc1-v1
+
+      - name: Restore cached Lazarus toolchain
+        if: steps.toolchain-cache.outputs.cache-hit == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TOOL_CACHE/tlazserial/lazarus-4.8-macos-arm64.tar"
+          sudo tar --extract --file "$archive" --directory /
+
       - name: Install Lazarus 4.8
+        if: steps.toolchain-cache.outputs.cache-hit != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -231,7 +328,7 @@ jobs:
           fpc_image="$RUNNER_TEMP/fpc-3.2.4rc1a.intelarm64-macosx.dmg"
           lazarus_archive="$RUNNER_TEMP/lazarus-darwin-aarch64-4.8.zip"
           fpc_volume="$RUNNER_TEMP/fpc-volume"
-          lazarus_dir="$RUNNER_TEMP/lazarus-4.8"
+          lazarus_dir="$RUNNER_TOOL_CACHE/tlazserial/installed/lazarus-4.8"
 
           curl --fail --location --retry 3 \
             "$base_url/fpc-3.2.4rc1a.intelarm64-macosx.dmg" \
@@ -261,6 +358,40 @@ jobs:
           xattr -cr "$lazarus_archive"
           unzip -q "$lazarus_archive" -d "$lazarus_dir"
 
+      - name: Snapshot Lazarus toolchain
+        if: steps.toolchain-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TOOL_CACHE/tlazserial/lazarus-4.8-macos-arm64.tar"
+          lazarus_dir="$RUNNER_TOOL_CACHE/tlazserial/installed/lazarus-4.8"
+          paths=(
+            etc/fpc.cfg
+            usr/local/lib/fpc
+            "${lazarus_dir#/}"
+          )
+
+          for candidate in \
+            usr/local/bin/fpc \
+            usr/local/bin/fpcmake \
+            usr/local/bin/fpcmkcfg \
+            usr/local/bin/fpcres \
+            usr/local/bin/ppca64
+          do
+            if [ -e "/$candidate" ] || [ -L "/$candidate" ]; then
+              paths+=("$candidate")
+            fi
+          done
+
+          mkdir -p "$(dirname "$archive")"
+          sudo tar --create --file "$archive" --directory / "${paths[@]}"
+          sudo chown "$(id -u):$(id -g)" "$archive"
+
+      - name: Configure toolchain paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          lazarus_dir="$RUNNER_TOOL_CACHE/tlazserial/installed/lazarus-4.8"
           lazbuild_path=''
           while IFS= read -r candidate; do
             lazbuild_path="$candidate"
@@ -268,6 +399,7 @@ jobs:
           done < <(find "$lazarus_dir" -type f -name lazbuild -print)
           test -n "$lazbuild_path"
           test -x "$lazbuild_path"
+          echo '/usr/local/bin' >> "$GITHUB_PATH"
           dirname "$lazbuild_path" >> "$GITHUB_PATH"
 
       - name: Verify toolchain

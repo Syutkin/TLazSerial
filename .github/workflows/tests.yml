@@ -555,18 +555,22 @@ jobs:
           mkdir -p ci-artifacts
 
           lazbuild --lazarusdir="$LAZARUS_DIR" \
-            --build-all --ws=cocoa LazSerialPort.lpk \
+            --build-all --ws=cocoa --opt=-k-ld_classic LazSerialPort.lpk \
             2>&1 | tee ci-artifacts/build-package.log
           lazbuild --lazarusdir="$LAZARUS_DIR" --build-all --ws=cocoa \
+            --opt=-k-ld_classic \
             tests/deviceinfo/serialdeviceinfotests.lpi \
             2>&1 | tee ci-artifacts/build-deviceinfo-tests.log
           lazbuild --lazarusdir="$LAZARUS_DIR" --build-all --ws=cocoa \
+            --opt=-k-ld_classic \
             tests/selector/serialselectortests.lpi \
             2>&1 | tee ci-artifacts/build-selector-tests.log
           lazbuild --lazarusdir="$LAZARUS_DIR" --build-all --ws=cocoa \
+            --opt=-k-ld_classic \
             examples/serial-selector/serialselectorexample.lpi \
             2>&1 | tee ci-artifacts/build-serial-selector-example.log
           lazbuild --lazarusdir="$LAZARUS_DIR" --build-all --ws=cocoa \
+            --opt=-k-ld_classic \
             examples/serial-gps/serialgpsexample.lpi \
             2>&1 | tee ci-artifacts/build-serial-gps-example.log
 

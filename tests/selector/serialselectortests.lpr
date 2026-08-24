@@ -17,7 +17,8 @@ uses
   SerialWindowsChangeSourceTests,
   SerialSelectorComponentTests,
   SerialWatcherComponentTests,
-  LazSerialSetupTests;
+  LazSerialSetupTests,
+  SerialInfrastructureTests;
 
 var
   Runner: TTestRunner;

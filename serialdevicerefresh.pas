@@ -21,6 +21,7 @@ type
     FLoadDevices: TLoadSerialDevicesMethod;
     FOnDevicesLoaded: TSerialDevicesLoadedMethod;
     FOnFinished: TSerialDeviceRefreshFinishedMethod;
+    FStarted: Boolean;
     procedure Deliver;
   protected
     procedure Execute; override;
@@ -31,6 +32,7 @@ type
       const AOnFinished: TSerialDeviceRefreshFinishedMethod = nil
     );
     procedure DetachCallbacks;
+    procedure Start; reintroduce;
     property Delivering: Boolean read FDelivering;
   end;
 
@@ -52,6 +54,20 @@ begin
   FLoadDevices := ALoadDevices;
   FOnDevicesLoaded := AOnDevicesLoaded;
   FOnFinished := AOnFinished;
+  FStarted := False;
+end;
+
+procedure TSerialDeviceRefreshThread.Start;
+begin
+  if FStarted then
+    Exit;
+  FStarted := True;
+  try
+    inherited Start;
+  except
+    FStarted := False;
+    raise;
+  end;
 end;
 
 procedure TSerialDeviceRefreshThread.Execute;
@@ -99,6 +115,8 @@ begin
     Exit;
 
   Thread.Terminate;
+  if not Thread.FStarted then
+    Thread.Start;
   Thread.WaitFor;
   TThread.RemoveQueuedEvents(Thread);
   Thread.DetachCallbacks;

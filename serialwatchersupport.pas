@@ -211,7 +211,15 @@ begin
   if Source <> nil then
     Source.Stop;
   Inc(FCurrentIndex);
-  StartNextCandidate;
+  try
+    StartNextCandidate;
+  except
+    on E: EInvalidOperation do
+    begin
+      Failed;
+      Exit;
+    end;
+  end;
   Changed;
 end;
 

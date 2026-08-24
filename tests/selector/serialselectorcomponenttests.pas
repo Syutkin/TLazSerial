@@ -548,13 +548,14 @@ begin
     'ESP32',
     'ABC123'
   );
+  FSelector.DisplayOptions := [sddoVendor, sddoModel, sddoErrorCode];
   FSelector.SetSnapshot([DeviceA]);
   FSelector.Refresh;
 
   AssertEquals(
     FormatSerialDeviceDisplayName(
       DeviceA,
-      DefaultSerialDeviceDisplayOptions
+      FSelector.DisplayOptions
     ),
     FSelector.HintFirstLine
   );

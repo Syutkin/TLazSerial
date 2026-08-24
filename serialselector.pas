@@ -452,7 +452,7 @@ begin
   else if (ItemIndex >= Low(FDevices)) and (ItemIndex <= High(FDevices)) then
     Result := FormatSerialDeviceDisplayName(
       FDevices[ItemIndex],
-      DefaultSerialDeviceDisplayOptions
+      FDisplayOptions
     )
   else if FAllowCustomDevice and (Device <> '') then
     Result := Format(lngManualDevice, [Device])

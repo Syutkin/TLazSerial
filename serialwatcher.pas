@@ -9,32 +9,52 @@ uses
   {$IFDEF Windows}
   Windows, JwaWinUser, JwaDbt,
   {$ENDIF}
-  Classes, SysUtils, Controls, LCLIntf, ExtCtrls, LResources,
-  LazSerialDevices, SerialDeviceRefresh;
+  Classes, SysUtils, Controls, LCLIntf, LResources, LazSerialDevices,
+  SerialWatcherSupport, SerialDeviceRefresh;
 
 type
   TSerialWatcher = class(TComponent)
   private
+    FChangeDelayMs: Cardinal;
+    FChangeSource: TSerialChangeSource;
     FComConnected: TNotifyEvent;
     FComDisconnected: TNotifyEvent;
     FDeviceRefreshThread: TSerialDeviceRefreshThread;
     FDevices: TSerialDeviceInfoArray;
     FInitialized: Boolean;
+    FOwnInfrastructure: Boolean;
+    FRefreshDirty: Boolean;
     FRefreshOnLoaded: Boolean;
-    FTimer: TTimer;
+    FRefreshPending: Boolean;
+    FRefreshScheduler: TSerialRefreshScheduler;
+    FWatching: Boolean;
     {$IFDEF Windows}
     FDeviceNotification: HDEVNOTIFY;
     FWindowHandle: HWND;
     procedure InitializeWindowsNotifications;
     procedure WndProcNew(var Message: TMessage);
     {$ENDIF}
-    procedure DoOnTimer(Sender: TObject);
+    procedure ChangeDetected(Sender: TObject);
+    procedure InitializeInfrastructure(
+      AChangeSource: TSerialChangeSource;
+      ARefreshScheduler: TSerialRefreshScheduler;
+      const AOwnInfrastructure: Boolean
+    );
+    procedure RefreshFinished;
+    procedure ScheduledRefresh(Sender: TObject);
+    procedure StartWatching;
     procedure StartBackgroundRefresh;
   protected
+    procedure SetInfrastructure(
+      AChangeSource: TSerialChangeSource;
+      ARefreshScheduler: TSerialRefreshScheduler;
+      const AOwnInfrastructure: Boolean
+    );
     procedure ApplyDevices(const ADevices: TSerialDeviceInfoArray); virtual;
     function LoadDevices: TSerialDeviceInfoArray; virtual;
     procedure Loaded; override;
     procedure PollDevices;
+    procedure StopWatching;
   public
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
@@ -53,6 +73,9 @@ type
 procedure Register;
 
 implementation
+
+const
+  SerialRefreshSettleRetryMs = 1;
 
 function CopyDevices(
   const ADevices: TSerialDeviceInfoArray
@@ -97,6 +120,11 @@ end;
 
 procedure TSerialWatcher.Refresh;
 begin
+  StartWatching;
+  if FRefreshPending then
+    Exit;
+  FRefreshScheduler.Cancel;
+  FRefreshDirty := False;
   StartBackgroundRefresh;
 end;
 
@@ -123,10 +151,6 @@ begin
     if RemovedDevices and Assigned(FComDisconnected) then
       FComDisconnected(Self);
   end;
-
-  {$IFNDEF Windows}
-  FTimer.Enabled := True;
-  {$ENDIF}
 end;
 
 procedure TSerialWatcher.PollDevices;
@@ -140,52 +164,173 @@ procedure TSerialWatcher.AdoptSnapshot(
 begin
   FDevices := CopyDevices(ADevices);
   FInitialized := True;
-  {$IFNDEF Windows}
-  FTimer.Enabled := True;
-  {$ENDIF}
+  StartWatching;
 end;
 
 procedure TSerialWatcher.StartBackgroundRefresh;
 begin
+  if not FWatching or FRefreshPending then
+    Exit;
+
   if FDeviceRefreshThread <> nil then
   begin
     if not FDeviceRefreshThread.Finished or
       FDeviceRefreshThread.Delivering then
+    begin
+      FRefreshScheduler.Schedule(
+        SerialRefreshSettleRetryMs,
+        @ScheduledRefresh
+      );
       Exit;
+    end;
     CancelSerialDeviceRefresh(FDeviceRefreshThread);
   end;
 
-  FTimer.Enabled := False;
-  FDeviceRefreshThread := TSerialDeviceRefreshThread.Create(
-    @LoadDevices,
-    @ApplyDevices
-  );
-  FDeviceRefreshThread.Start;
+  FRefreshPending := True;
+  try
+    FDeviceRefreshThread := TSerialDeviceRefreshThread.Create(
+      @LoadDevices,
+      @ApplyDevices,
+      @RefreshFinished
+    );
+    FDeviceRefreshThread.Start;
+  except
+    FRefreshPending := False;
+    raise;
+  end;
 end;
 
-procedure TSerialWatcher.DoOnTimer(Sender: TObject);
+procedure TSerialWatcher.RefreshFinished;
 begin
-  FTimer.Enabled := False;
-  Refresh;
+  if not FRefreshPending then
+    Exit;
+  FRefreshPending := False;
+  if FWatching and FRefreshDirty then
+  begin
+    FRefreshDirty := False;
+    FRefreshScheduler.Schedule(FChangeDelayMs, @ScheduledRefresh);
+  end;
 end;
 
-constructor TSerialWatcher.Create(AOwner: TComponent);
+procedure TSerialWatcher.ChangeDetected(Sender: TObject);
 begin
-  inherited Create(AOwner);
+  if not FWatching then
+    Exit;
+  if FRefreshPending then
+  begin
+    FRefreshDirty := True;
+    Exit;
+  end;
+  FRefreshScheduler.Schedule(FChangeDelayMs, @ScheduledRefresh);
+end;
+
+procedure TSerialWatcher.ScheduledRefresh(Sender: TObject);
+begin
+  if FWatching then
+    StartBackgroundRefresh;
+end;
+
+procedure TSerialWatcher.InitializeInfrastructure(
+  AChangeSource: TSerialChangeSource;
+  ARefreshScheduler: TSerialRefreshScheduler;
+  const AOwnInfrastructure: Boolean
+);
+begin
+  if AChangeSource = nil then
+    raise EArgumentNilException.Create('AChangeSource');
+  if ARefreshScheduler = nil then
+    raise EArgumentNilException.Create('ARefreshScheduler');
+
+  FChangeSource := AChangeSource;
+  FRefreshScheduler := ARefreshScheduler;
+  FOwnInfrastructure := AOwnInfrastructure;
   FDevices := nil;
   FDeviceRefreshThread := nil;
   FInitialized := False;
+  FRefreshDirty := False;
   FRefreshOnLoaded := True;
-
-  FTimer := TTimer.Create(Self);
-  FTimer.OnTimer := @DoOnTimer;
-  FTimer.Enabled := False;
+  FRefreshPending := False;
+  FWatching := False;
   {$IFDEF Windows}
-  FTimer.Interval := 3000;
-  InitializeWindowsNotifications;
+  FChangeDelayMs := 3000;
   {$ELSE}
-  FTimer.Interval := 1000;
+  FChangeDelayMs := 0;
   {$ENDIF}
+end;
+
+procedure TSerialWatcher.SetInfrastructure(
+  AChangeSource: TSerialChangeSource;
+  ARefreshScheduler: TSerialRefreshScheduler;
+  const AOwnInfrastructure: Boolean
+);
+begin
+  if AChangeSource = nil then
+    raise EArgumentNilException.Create('AChangeSource');
+  if ARefreshScheduler = nil then
+    raise EArgumentNilException.Create('ARefreshScheduler');
+
+  StopWatching;
+  if FOwnInfrastructure then
+  begin
+    FRefreshScheduler.Free;
+    FChangeSource.Free;
+  end;
+  InitializeInfrastructure(
+    AChangeSource,
+    ARefreshScheduler,
+    AOwnInfrastructure
+  );
+end;
+
+constructor TSerialWatcher.Create(AOwner: TComponent);
+var
+  ChangeSource: TSerialChangeSource;
+begin
+  inherited Create(AOwner);
+  {$IFDEF Windows}
+  ChangeSource := TSerialManualChangeSource.Create;
+  {$ELSE}
+  ChangeSource := TSerialPollingChangeSource.Create(1000);
+  {$ENDIF}
+  try
+    InitializeInfrastructure(
+      ChangeSource,
+      TSerialTimerScheduler.Create,
+      True
+    );
+  except
+    ChangeSource.Free;
+    raise;
+  end;
+
+  {$IFDEF Windows}
+  InitializeWindowsNotifications;
+  {$ENDIF}
+end;
+
+procedure TSerialWatcher.StartWatching;
+begin
+  if FWatching then
+    Exit;
+  FWatching := True;
+  try
+    FChangeSource.Start(@ChangeDetected);
+  except
+    FWatching := False;
+    raise;
+  end;
+end;
+
+procedure TSerialWatcher.StopWatching;
+begin
+  FWatching := False;
+  FRefreshDirty := False;
+  if FRefreshScheduler <> nil then
+    FRefreshScheduler.Cancel;
+  if FChangeSource <> nil then
+    FChangeSource.Stop;
+  CancelSerialDeviceRefresh(FDeviceRefreshThread);
+  FRefreshPending := False;
 end;
 
 procedure TSerialWatcher.Loaded;
@@ -202,14 +347,18 @@ end;
 
 destructor TSerialWatcher.Destroy;
 begin
-  FTimer.Enabled := False;
-  CancelSerialDeviceRefresh(FDeviceRefreshThread);
+  StopWatching;
   {$IFDEF Windows}
   if FDeviceNotification <> nil then
     UnregisterDeviceNotification(FDeviceNotification);
   if FWindowHandle <> 0 then
     DeallocateHWnd(FWindowHandle);
   {$ENDIF}
+  if FOwnInfrastructure then
+  begin
+    FRefreshScheduler.Free;
+    FChangeSource.Free;
+  end;
   inherited Destroy;
 end;
 
@@ -241,10 +390,7 @@ begin
       DBT_DEVICEARRIVAL,
       DBT_DEVICEREMOVECOMPLETE,
       DBT_DEVNODES_CHANGED:
-        begin
-          FTimer.Enabled := False;
-          FTimer.Enabled := True;
-        end;
+        ChangeDetected(Self);
     end;
 end;
 {$ENDIF}

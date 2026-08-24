@@ -26,7 +26,7 @@
   along with This library; if not, Write to the Free Software Foundation,
   Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA. }"/>
     <Version Minor="8"/>
-    <Files Count="18">
+    <Files Count="19">
       <Item1>
         <Filename Value="lazserial.pas"/>
         <HasRegisterProc Value="True"/>
@@ -102,6 +102,10 @@
         <Filename Value="serialwatcher_icon.lrs"/>
         <Type Value="LRS"/>
       </Item18>
+      <Item19>
+        <Filename Value="serialwatchersupport.pas"/>
+        <UnitName Value="SerialWatcherSupport"/>
+      </Item19>
     </Files>
     <CompatibilityMode Value="True"/>
     <i18n>

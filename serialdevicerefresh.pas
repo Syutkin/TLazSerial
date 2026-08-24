@@ -12,6 +12,7 @@ type
   TSerialDevicesLoadedMethod = procedure(
     const ADevices: TSerialDeviceInfoArray
   ) of object;
+  TSerialDeviceRefreshFinishedMethod = procedure of object;
 
   TSerialDeviceRefreshThread = class(TThread)
   private
@@ -19,13 +20,15 @@ type
     FDevices: TSerialDeviceInfoArray;
     FLoadDevices: TLoadSerialDevicesMethod;
     FOnDevicesLoaded: TSerialDevicesLoadedMethod;
+    FOnFinished: TSerialDeviceRefreshFinishedMethod;
     procedure Deliver;
   protected
     procedure Execute; override;
   public
     constructor Create(
       const ALoadDevices: TLoadSerialDevicesMethod;
-      const AOnDevicesLoaded: TSerialDevicesLoadedMethod
+      const AOnDevicesLoaded: TSerialDevicesLoadedMethod;
+      const AOnFinished: TSerialDeviceRefreshFinishedMethod = nil
     );
     procedure DetachCallbacks;
     property Delivering: Boolean read FDelivering;
@@ -39,7 +42,8 @@ implementation
 
 constructor TSerialDeviceRefreshThread.Create(
   const ALoadDevices: TLoadSerialDevicesMethod;
-  const AOnDevicesLoaded: TSerialDevicesLoadedMethod
+  const AOnDevicesLoaded: TSerialDevicesLoadedMethod;
+  const AOnFinished: TSerialDeviceRefreshFinishedMethod
 );
 begin
   inherited Create(True);
@@ -47,6 +51,7 @@ begin
   FDelivering := False;
   FLoadDevices := ALoadDevices;
   FOnDevicesLoaded := AOnDevicesLoaded;
+  FOnFinished := AOnFinished;
 end;
 
 procedure TSerialDeviceRefreshThread.Execute;
@@ -70,6 +75,8 @@ begin
       FOnDevicesLoaded(FDevices);
   finally
     FDelivering := False;
+    if not Terminated and Assigned(FOnFinished) then
+      FOnFinished();
   end;
 end;
 
@@ -77,6 +84,7 @@ procedure TSerialDeviceRefreshThread.DetachCallbacks;
 begin
   FLoadDevices := nil;
   FOnDevicesLoaded := nil;
+  FOnFinished := nil;
 end;
 
 procedure CancelSerialDeviceRefresh(

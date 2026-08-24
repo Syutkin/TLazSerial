@@ -11,7 +11,7 @@ uses
   LazSerial, SerialWatcher, SerialSelector, LazSerialCommon, LazSerialDevices,
   LazSerialDeviceParsers, LazSerialDeviceCollectors, SerialDeviceRefresh,
   SerialCommandRunner, LazSerialWindowsDevices, LazSynaFpc, LazSynaUtil,
-  LazSynaSer, lazserialsetup, LazarusPackageIntf;
+  LazSynaSer, lazserialsetup, SerialWatcherSupport, LazarusPackageIntf;
 
 implementation
 

@@ -20,6 +20,9 @@ resourcestring
   lngDisconnect = 'Disconnect';
   lngDeviceDisconnected = 'Device %s was removed while the connection was active.';
   lngErrorCannotConnect = 'Error: cannot connect to %s.';
+  lngLineEndingNone = 'No line ending';
+  lngLineEndingLF = 'LF (\n)';
+  lngLineEndingCRLF = 'CRLF (\r\n)';
 
 type
 
@@ -35,6 +38,7 @@ type
     CheckBox1: TCheckBox;
     CheckBox3: TCheckBox;
     ComboBox1: TComboBox;
+    ComboLineEnding: TComboBox;
     Edit1: TEdit;
     Label1: TLabel;
     LazSerial1:TLazSerial;
@@ -53,7 +57,7 @@ type
     procedure LazSerial1RxData(Sender: TObject);
     procedure LazSerial1Status(Sender:TObject;Reason:THookSerialReason;const Value:string);
   private
-
+    function SelectedLineEnding: string;
   public
 
   end;
@@ -117,7 +121,8 @@ end;
 
 procedure TForm1.cmdSendClick(Sender: TObject);
 begin
-  if LazSerial1.Active then LazSerial1.WriteData(Edit1.Text);
+  if LazSerial1.Active then
+    LazSerial1.WriteData(Edit1.Text + SelectedLineEnding);
 end;
 
 procedure TForm1.CheckBox1Change(Sender: TObject);
@@ -152,7 +157,21 @@ end;
 
 procedure TForm1.Edit1KeyPress(Sender: TObject; var Key: char);
 begin
- if key = #13 then cmdSendClick(self);
+  if Key = #13 then
+  begin
+    cmdSendClick(Self);
+    Key := #0;
+  end;
+end;
+
+function TForm1.SelectedLineEnding: string;
+begin
+  case ComboLineEnding.ItemIndex of
+    1: Result := #10;
+    2: Result := #13#10;
+  else
+    Result := '';
+  end;
 end;
 
 procedure StringArrayToList(AList: TStrings; const AStrings: array of string);
@@ -165,6 +184,10 @@ end;
 
 procedure TForm1.FormCreate(Sender: TObject);
 begin
+  ComboLineEnding.Items.Add(lngLineEndingNone);
+  ComboLineEnding.Items.Add(lngLineEndingLF);
+  ComboLineEnding.Items.Add(lngLineEndingCRLF);
+  ComboLineEnding.ItemIndex := 1;
   CheckBox3.Checked  := SerialSelector1.ShowHint;
   chkVendor.Checked := sddoVendor in SerialSelector1.DisplayOptions;
   chkModel.Checked := sddoModel in SerialSelector1.DisplayOptions;

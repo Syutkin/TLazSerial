@@ -83,3 +83,15 @@ msgstr ""
 msgid "Error: cannot connect to %s."
 msgstr ""
 
+#: unit1.lnglineendingcrlf
+msgid "CRLF (\\r\\n)"
+msgstr ""
+
+#: unit1.lnglineendinglf
+msgid "LF (\\n)"
+msgstr ""
+
+#: unit1.lnglineendingnone
+msgid "No line ending"
+msgstr ""
+

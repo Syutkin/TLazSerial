@@ -31,7 +31,8 @@ void loop() {
   LedState = ! LedState;}
   
   if (Serial.available() > 0) {
-   String inSerial = Serial.readString();
+   String inSerial = Serial.readStringUntil('\n');
+   inSerial.trim();
    inSerial.toLowerCase();
    if (inSerial.startsWith("on"))     {AlwaysON = True;  AlwaysOFF = False; Serial.write("Let it be light!\n");} else
    if (inSerial.startsWith("off"))    {AlwaysON = False; AlwaysOFF = True; Serial.write("Darkness.\n");} else

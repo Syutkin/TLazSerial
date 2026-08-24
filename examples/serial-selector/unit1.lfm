@@ -79,18 +79,34 @@ object Form1: TForm1
     AnchorSideLeft.Control = Owner
     AnchorSideTop.Control = Memo1
     AnchorSideTop.Side = asrBottom
-    AnchorSideRight.Control = cmdSend
+    AnchorSideRight.Control = ComboLineEnding
     AnchorSideBottom.Control = Owner
     AnchorSideBottom.Side = asrBottom
     Left = 6
     Height = 32
     Top = 442
-    Width = 547
+    Width = 415
     Anchors = [akLeft, akRight, akBottom]
     BorderSpacing.Around = 6
     Constraints.MinHeight = 28
     TabOrder = 4
     OnKeyPress = Edit1KeyPress
+  end
+  object ComboLineEnding: TComboBox
+    AnchorSideTop.Control = Edit1
+    AnchorSideTop.Side = asrCenter
+    AnchorSideRight.Control = cmdSend
+    AnchorSideBottom.Control = Edit1
+    AnchorSideBottom.Side = asrCenter
+    Left = 427
+    Height = 32
+    Top = 442
+    Width = 126
+    Anchors = [akRight, akBottom]
+    BorderSpacing.Around = 6
+    ItemHeight = 31
+    Style = csDropDownList
+    TabOrder = 5
   end
   object cmdSend: TButton
     AnchorSideLeft.Control = Owner
@@ -109,7 +125,7 @@ object Form1: TForm1
     Caption = 'Send'
     Constraints.MinHeight = 28
     Enabled = False
-    TabOrder = 5
+    TabOrder = 6
     OnClick = cmdSendClick
   end
   object SpinEdit1: TSpinEdit
@@ -127,7 +143,7 @@ object Form1: TForm1
     MinValue = -1
     ParentShowHint = False
     ShowHint = True
-    TabOrder = 6
+    TabOrder = 7
     Value = -1
   end
   object lblCustomBaudrate: TLabel
@@ -155,7 +171,7 @@ object Form1: TForm1
     ItemHeight = 31
     ParentShowHint = False
     ShowHint = True
-    TabOrder = 7
+    TabOrder = 8
     Text = 'ComboBox1'
   end
   object Label1: TLabel
@@ -185,7 +201,7 @@ object Form1: TForm1
     ParentShowHint = False
     ShowHint = True
     State = cbChecked
-    TabOrder = 9
+    TabOrder = 10
     OnChange = chkDisplayOptionChange
   end
   object chkVendor: TCheckBox
@@ -200,7 +216,7 @@ object Form1: TForm1
     Caption = 'Vendor'
     Checked = True
     State = cbChecked
-    TabOrder = 10
+    TabOrder = 11
     OnChange = chkDisplayOptionChange
   end
   object chkModel: TCheckBox
@@ -216,7 +232,7 @@ object Form1: TForm1
     Caption = 'Model'
     Checked = True
     State = cbChecked
-    TabOrder = 11
+    TabOrder = 12
     OnChange = chkDisplayOptionChange
   end
   object chkErrorCode: TCheckBox
@@ -232,7 +248,7 @@ object Form1: TForm1
     Caption = 'Error code'
     Checked = True
     State = cbChecked
-    TabOrder = 12
+    TabOrder = 13
     OnChange = chkDisplayOptionChange
   end
   object SerialSelector1: TSerialSelector
@@ -246,7 +262,7 @@ object Form1: TForm1
     Anchors = [akTop, akLeft, akRight]
     BorderSpacing.Around = 7
     ItemHeight = 31
-    TabOrder = 8
+    TabOrder = 9
   end
   object LazSerial1: TLazSerial
     Active = False

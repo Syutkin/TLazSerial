@@ -23,8 +23,8 @@ type
   TWindowsSerialDeviceCollector = class
   protected
     function CanOpenDevice(const ADevice: string): Boolean; virtual;
+    function EnumerateSetupApiDevices: TSerialDeviceInfoArray; virtual;
     procedure EnumerateRegistryDeviceNames(ADevices: TStrings); virtual;
-    function ReadWmiSnapshot(out ASnapshot: string): Boolean; virtual;
   public
     function Collect(
       const AOptions: TSerialDeviceEnumerationOptions = []
@@ -60,12 +60,12 @@ implementation
 
 uses
   FileUtil, StrUtils, SysUtils, SerialCommandRunner,
-  LazSerialDeviceParsers
+  LazSerialDeviceParsers, LazSerialWindowsDevices
   {$IFDEF UNIX}
   , BaseUnix
   {$ENDIF}
   {$IFDEF Windows}
-  , ActiveX, ComObj, Registry, Variants, Windows, WmiUtil
+  , Registry, Windows
   {$ENDIF};
 
 const
@@ -345,14 +345,11 @@ var
   I: Integer;
   RawDevices: TSerialDeviceInfoArray;
   RegistryDeviceNames: TStringList;
-  Snapshot: string;
 begin
   Result := nil;
   RawDevices := nil;
-  Snapshot := '';
   try
-    if ReadWmiSnapshot(Snapshot) then
-      RawDevices := ParseWindowsWmiSnapshot(Snapshot);
+    RawDevices := EnumerateSetupApiDevices;
   except
     on E: Exception do
       RawDevices := nil;
@@ -388,6 +385,12 @@ begin
       Continue;
     AddDevice(Result, RawDevices[I]);
   end;
+end;
+
+function TWindowsSerialDeviceCollector.EnumerateSetupApiDevices:
+  TSerialDeviceInfoArray;
+begin
+  Result := EnumerateWindowsSetupApiDevices;
 end;
 
 function TWindowsSerialDeviceCollector.CanOpenDevice(
@@ -449,114 +452,6 @@ begin
   finally
     ValueNames.Free;
     Registry.Free;
-  end;
-  {$ENDIF}
-end;
-
-{$IFDEF Windows}
-function SanitizeWmiSnapshotValue(const AValue: string): string;
-begin
-  Result := StringReplace(AValue, #13, ' ', [rfReplaceAll]);
-  Result := StringReplace(Result, #10, ' ', [rfReplaceAll]);
-end;
-
-procedure AppendWmiSnapshotProperty(
-  var ASnapshot: string;
-  const AName, AValue: string
-);
-begin
-  ASnapshot := ASnapshot + AName + '=' +
-    SanitizeWmiSnapshotValue(AValue) + LineEnding;
-end;
-{$ENDIF}
-
-function TWindowsSerialDeviceCollector.ReadWmiSnapshot(
-  out ASnapshot: string
-): Boolean;
-{$IFDEF Windows}
-const
-  WbemComputer = 'localhost';
-  WbemPassword = '';
-  WbemUser = '';
-  WbemFlagForwardOnly = $00000020;
-var
-  ComInitialization: HRESULT;
-  Iterator: OEnumIterator;
-  Locator: OleVariant;
-  ObjectSet: OleVariant;
-  Service: OleVariant;
-  WmiObject: OleVariant;
-{$ENDIF}
-begin
-  ASnapshot := '';
-  Result := False;
-  {$IFDEF Windows}
-  ComInitialization := CoInitialize(nil);
-  if Failed(ComInitialization) then
-    Exit;
-  try
-    try
-      Locator := CreateOleObject('WbemScripting.SWbemLocator');
-      Service := Locator.ConnectServer(
-        WbemComputer,
-        'root\CIMV2',
-        WbemUser,
-        WbemPassword
-      );
-      ObjectSet := Service.ExecQuery(
-        'SELECT Caption, Manufacturer, DeviceID, PNPDeviceID, ' +
-        'ConfigManagerErrorCode FROM Win32_PnPEntity ' +
-        'WHERE Caption LIKE "%(COM%)"',
-        'WQL',
-        WbemFlagForwardOnly
-      );
-
-      for WmiObject in Iterator.Enumerate(ObjectSet) do
-      begin
-        AppendWmiSnapshotProperty(
-          ASnapshot,
-          'Caption',
-          OleVariantToText(WmiObject.Caption)
-        );
-        AppendWmiSnapshotProperty(
-          ASnapshot,
-          'Manufacturer',
-          OleVariantToText(WmiObject.Manufacturer)
-        );
-        AppendWmiSnapshotProperty(
-          ASnapshot,
-          'DeviceID',
-          OleVariantToText(WmiObject.DeviceID)
-        );
-        AppendWmiSnapshotProperty(
-          ASnapshot,
-          'PNPDeviceID',
-          OleVariantToText(WmiObject.PNPDeviceID)
-        );
-        AppendWmiSnapshotProperty(
-          ASnapshot,
-          'ConfigManagerErrorCode',
-          OleVariantToText(WmiObject.ConfigManagerErrorCode)
-        );
-        ASnapshot := ASnapshot + LineEnding;
-      end;
-      Result := Trim(ASnapshot) <> '';
-    except
-      on E: Exception do
-      begin
-        ASnapshot := '';
-        Result := False;
-      end;
-    end;
-  finally
-    VarClear(Iterator.IterItem);
-    Iterator.OEnum := nil;
-    VarClear(Iterator.MainObj);
-    VarClear(WmiObject);
-    VarClear(ObjectSet);
-    VarClear(Service);
-    VarClear(Locator);
-    CoUninitialize;
   end;
   {$ENDIF}
 end;

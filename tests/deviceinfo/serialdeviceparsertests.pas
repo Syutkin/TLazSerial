@@ -25,8 +25,6 @@ type
     procedure ParseWindowsPnpIdExtractsUsbFieldsAndSerial;
     procedure ParseWindowsPnpIdRejectsGeneratedInstanceAsSerial;
     procedure ParseWindowsPnpIdHandlesFtdiBusFormat;
-    procedure ParseWindowsWmiSnapshotExtractsStructuredDevices;
-    procedure ParseWindowsWmiSnapshotSkipsInvalidCaptions;
     procedure ParseMacOSProfilerMatchesSerialNumber;
     procedure ParseMacOSProfilerUsesVendorIdDescriptionFallback;
     procedure ParseMacOSProfilerMatchesNormalizedLocationId;
@@ -223,49 +221,6 @@ begin
   AssertEquals('0403', DeviceInfo.VendorId);
   AssertEquals('6001', DeviceInfo.ProductId);
   AssertEquals('FTABC123', DeviceInfo.SerialShort);
-end;
-
-procedure TSerialDeviceParserTests.
-  ParseWindowsWmiSnapshotExtractsStructuredDevices;
-var
-  Devices: TSerialDeviceInfoArray;
-begin
-  Devices := ParseWindowsWmiSnapshot(
-    LoadFixture('windows-wmi-devices.txt')
-  );
-
-  AssertEquals(3, Length(Devices));
-  AssertEquals('COM10', Devices[0].Device);
-  AssertEquals('QinHeng Electronics', Devices[0].Vendor);
-  AssertEquals('USB Serial CH343', Devices[0].Model);
-  AssertEquals('1a86', Devices[0].VendorId);
-  AssertEquals('55d3', Devices[0].ProductId);
-  AssertEquals('5ABA019711', Devices[0].SerialShort);
-  AssertEquals('0', Devices[0].ErrorCode);
-  AssertEquals('COM2', Devices[1].Device);
-  AssertEquals('Espressif Systems', Devices[1].Vendor);
-  AssertEquals('Espressif USB JTAG/serial debug unit', Devices[1].Model);
-  AssertEquals('123456', Devices[1].SerialShort);
-  AssertEquals('COM7', Devices[2].Device);
-  AssertEquals('', Devices[2].SerialShort);
-  AssertEquals('22', Devices[2].ErrorCode);
-end;
-
-procedure TSerialDeviceParserTests.
-  ParseWindowsWmiSnapshotSkipsInvalidCaptions;
-var
-  Devices: TSerialDeviceInfoArray;
-begin
-  Devices := ParseWindowsWmiSnapshot(
-    'Caption=Not a port' + LineEnding +
-    'DeviceID=USB\VID_1234&PID_5678\SERIAL' + LineEnding +
-    LineEnding +
-    'Caption=Valid port (COM4)' + LineEnding
-  );
-
-  AssertEquals(1, Length(Devices));
-  AssertEquals('COM4', Devices[0].Device);
-  AssertEquals('Valid port', Devices[0].Model);
 end;
 
 procedure TSerialDeviceParserTests.ParseMacOSProfilerMatchesSerialNumber;

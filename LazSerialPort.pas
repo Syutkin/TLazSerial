@@ -10,7 +10,7 @@ interface
 uses
   LazSerial, SerialWatcher, SerialSelector, LazSerialCommon, LazSerialDevices,
   LazSerialDeviceParsers, LazSerialDeviceCollectors, SerialDeviceRefresh,
-  SerialCommandRunner, LazarusPackageIntf;
+  SerialCommandRunner, LazSerialWindowsDevices, LazarusPackageIntf;
 
 implementation
 

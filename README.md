@@ -80,7 +80,7 @@ opened at enumeration time are needed.
 Platform metadata sources are:
 
 - Linux: `udevadm`, with device-only fallback;
-- Windows: WMI, with registry fallback;
+- Windows: SetupAPI, with registry fallback;
 - macOS: one `system_profiler SPUSBDataType` snapshot, preferring `/dev/cu.*`
   over a matching `/dev/tty.*` alias;
 - other Unix targets: device names without guaranteed metadata.

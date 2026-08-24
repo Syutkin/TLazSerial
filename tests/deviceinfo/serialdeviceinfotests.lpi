@@ -19,7 +19,7 @@
         <PackageName Value="LazUtils"/>
       </Item2>
     </RequiredPackages>
-    <Units Count="2">
+    <Units Count="3">
       <Unit0>
         <Filename Value="serialdeviceinfotests.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -29,6 +29,11 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="SerialCommandRunnerTests"/>
       </Unit1>
+      <Unit2>
+        <Filename Value="serialwindowsdevicetests.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="SerialWindowsDeviceTests"/>
+      </Unit2>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

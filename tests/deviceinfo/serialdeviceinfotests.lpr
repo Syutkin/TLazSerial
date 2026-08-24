@@ -11,7 +11,8 @@ uses
   SerialCommandRunnerTests,
   SerialDeviceFormatTests,
   SerialDeviceParserTests,
-  SerialDeviceCollectorTests;
+  SerialDeviceCollectorTests,
+  SerialWindowsDeviceTests;
 
 var
   Runner: TTestRunner;

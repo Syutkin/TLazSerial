@@ -32,6 +32,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Destruction now stops the reader before detaching the Synapse status hook.
 - Linux and macOS metadata commands now have bounded execution time and are
   cancelled when their selector or watcher is destroyed.
+- Windows device enumeration now uses SetupAPI instead of WMI.
 
 ### Removed
 

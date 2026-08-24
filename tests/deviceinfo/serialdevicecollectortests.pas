@@ -26,8 +26,8 @@ type
     procedure DeviceLookupUsesLinuxCaseSensitiveNames;
     procedure WindowsCollectorDeduplicatesCaseInsensitivelyAndNaturalSorts;
     procedure WindowsCollectorUsesRegistryFallback;
-    procedure WindowsCollectorUsesRegistryForInvalidWmiSnapshot;
-    procedure WindowsCollectorDoesNotReadRegistryWhenWmiHasPorts;
+    procedure WindowsCollectorUsesRegistryWhenSetupApiFails;
+    procedure WindowsCollectorDoesNotReadRegistryWhenSetupApiHasPorts;
     procedure WindowsCollectorFiltersAccessibleDevicesAfterEnumeration;
     procedure MacOSCollectorUsesOneSnapshotAndCanonicalAliases;
     procedure MacOSCollectorPreservesDevicesWhenProfilerFails;
@@ -74,24 +74,25 @@ type
     FAccessibilityCheckCount: Integer;
     FRegistryDevices: TStringList;
     FRegistryReadCount: Integer;
-    FWmiReadCount: Integer;
-    FWmiSnapshot: string;
-    FWmiSucceeds: Boolean;
+    FSetupApiDevices: TSerialDeviceInfoArray;
+    FSetupApiRaisesException: Boolean;
+    FSetupApiReadCount: Integer;
   protected
     function CanOpenDevice(const ADevice: string): Boolean; override;
     procedure EnumerateRegistryDeviceNames(ADevices: TStrings); override;
-    function ReadWmiSnapshot(out ASnapshot: string): Boolean; override;
+    function EnumerateSetupApiDevices: TSerialDeviceInfoArray; override;
   public
     constructor Create;
     destructor Destroy; override;
     procedure AddAccessibleDevice(const ADevice: string);
     procedure AddRegistryDevice(const ADevice: string);
+    procedure AddSetupApiDevice(const ADevice, AModel: string);
     property AccessibilityCheckCount: Integer
       read FAccessibilityCheckCount;
     property RegistryReadCount: Integer read FRegistryReadCount;
-    property WmiReadCount: Integer read FWmiReadCount;
-    property WmiSnapshot: string read FWmiSnapshot write FWmiSnapshot;
-    property WmiSucceeds: Boolean read FWmiSucceeds write FWmiSucceeds;
+    property SetupApiRaisesException: Boolean
+      read FSetupApiRaisesException write FSetupApiRaisesException;
+    property SetupApiReadCount: Integer read FSetupApiReadCount;
   end;
 
   TFakeMacOSSerialDeviceCollector = class(TMacOSSerialDeviceCollector)
@@ -217,7 +218,6 @@ begin
   FAccessibleDevices := TStringList.Create;
   FAccessibleDevices.CaseSensitive := False;
   FRegistryDevices := TStringList.Create;
-  FWmiSucceeds := False;
 end;
 
 destructor TFakeWindowsSerialDeviceCollector.Destroy;
@@ -241,6 +241,19 @@ begin
   FRegistryDevices.Add(ADevice);
 end;
 
+procedure TFakeWindowsSerialDeviceCollector.AddSetupApiDevice(
+  const ADevice, AModel: string
+);
+var
+  NewIndex: Integer;
+begin
+  NewIndex := Length(FSetupApiDevices);
+  SetLength(FSetupApiDevices, NewIndex + 1);
+  FSetupApiDevices[NewIndex] := Default(TSerialDeviceInfo);
+  FSetupApiDevices[NewIndex].Device := ADevice;
+  FSetupApiDevices[NewIndex].Model := AModel;
+end;
+
 function TFakeWindowsSerialDeviceCollector.CanOpenDevice(
   const ADevice: string
 ): Boolean;
@@ -257,13 +270,18 @@ begin
   ADevices.Assign(FRegistryDevices);
 end;
 
-function TFakeWindowsSerialDeviceCollector.ReadWmiSnapshot(
-  out ASnapshot: string
-): Boolean;
+function TFakeWindowsSerialDeviceCollector.EnumerateSetupApiDevices:
+  TSerialDeviceInfoArray;
+var
+  I: Integer;
 begin
-  Inc(FWmiReadCount);
-  ASnapshot := FWmiSnapshot;
-  Result := FWmiSucceeds;
+  Inc(FSetupApiReadCount);
+  if FSetupApiRaisesException then
+    raise Exception.Create('Simulated SetupAPI failure');
+  Result := nil;
+  SetLength(Result, Length(FSetupApiDevices));
+  for I := Low(FSetupApiDevices) to High(FSetupApiDevices) do
+    Result[I] := FSetupApiDevices[I];
 end;
 
 constructor TFakeMacOSSerialDeviceCollector.Create;
@@ -562,11 +580,9 @@ var
 begin
   Collector := TFakeWindowsSerialDeviceCollector.Create;
   try
-    Collector.WmiSucceeds := True;
-    Collector.WmiSnapshot :=
-      'Caption=Tenth device (COM10)' + LineEnding + LineEnding +
-      'Caption=Second device (COM2)' + LineEnding + LineEnding +
-      'Caption=Duplicate device (com2)' + LineEnding;
+    Collector.AddSetupApiDevice('COM10', 'Tenth device');
+    Collector.AddSetupApiDevice('COM2', 'Second device');
+    Collector.AddSetupApiDevice('com2', 'Duplicate device');
 
     Devices := Collector.Collect;
 
@@ -598,23 +614,21 @@ begin
     AssertEquals('', Devices[0].Vendor);
     AssertEquals('', Devices[0].Model);
     AssertEquals('COM10', Devices[1].Device);
-    AssertEquals(1, Collector.WmiReadCount);
+    AssertEquals(1, Collector.SetupApiReadCount);
     AssertEquals(1, Collector.RegistryReadCount);
   finally
     Collector.Free;
   end;
 end;
 
-procedure TSerialDeviceCollectorTests.
-  WindowsCollectorUsesRegistryForInvalidWmiSnapshot;
+procedure TSerialDeviceCollectorTests.WindowsCollectorUsesRegistryWhenSetupApiFails;
 var
   Collector: TFakeWindowsSerialDeviceCollector;
   Devices: TSerialDeviceInfoArray;
 begin
   Collector := TFakeWindowsSerialDeviceCollector.Create;
   try
-    Collector.WmiSucceeds := True;
-    Collector.WmiSnapshot := 'Caption=Device without port';
+    Collector.SetupApiRaisesException := True;
     Collector.AddRegistryDevice('COM4');
 
     Devices := Collector.Collect;
@@ -628,15 +642,14 @@ begin
 end;
 
 procedure TSerialDeviceCollectorTests.
-  WindowsCollectorDoesNotReadRegistryWhenWmiHasPorts;
+  WindowsCollectorDoesNotReadRegistryWhenSetupApiHasPorts;
 var
   Collector: TFakeWindowsSerialDeviceCollector;
   Devices: TSerialDeviceInfoArray;
 begin
   Collector := TFakeWindowsSerialDeviceCollector.Create;
   try
-    Collector.WmiSucceeds := True;
-    Collector.WmiSnapshot := 'Caption=WMI device (COM3)';
+    Collector.AddSetupApiDevice('COM3', 'SetupAPI device');
     Collector.AddRegistryDevice('COM8');
 
     Devices := Collector.Collect;
@@ -657,10 +670,8 @@ var
 begin
   Collector := TFakeWindowsSerialDeviceCollector.Create;
   try
-    Collector.WmiSucceeds := True;
-    Collector.WmiSnapshot :=
-      'Caption=Unavailable device (COM2)' + LineEnding + LineEnding +
-      'Caption=Available device (COM3)' + LineEnding;
+    Collector.AddSetupApiDevice('COM2', 'Unavailable device');
+    Collector.AddSetupApiDevice('COM3', 'Available device');
     Collector.AddAccessibleDevice('com3');
 
     Devices := Collector.Collect([sdeoAccessibleOnly]);

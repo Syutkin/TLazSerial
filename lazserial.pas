@@ -59,7 +59,7 @@ uses
 {$ELSE}
   Windows, Classes,
 {$ENDIF}
-  SysUtils, lazsynaser,  LResources, Forms, Controls, Graphics, Dialogs,
+  SysUtils, SyncObjs, lazsynaser,  LResources, Forms, Controls, Graphics, Dialogs,
   PropEdits, SerialWatcher, LazSerialCommon;
 
 
@@ -110,17 +110,30 @@ const
 type
   TLazSerial = class;
 
+  ISerialReaderSession = interface
+    procedure Cancel;
+    procedure DeliverReceive;
+    procedure DeliverStatus(Sender: TObject; Reason: THookSerialReason;
+      const Value: string);
+    procedure Detach;
+    procedure SignalReader;
+    function WaitForReader(const ATimeout: Cardinal): TWaitResult;
+  end;
+
   TComPortReadThread=class(TThread)
-  public
-    MustDie: boolean;
-    Owner: TLazSerial;
-    StatusReason: THookSerialReason;
-    StatusSender: TObject;
-    StatusValue: string;
+  private
+    FSession: ISerialReaderSession;
+    procedure QueueReceive;
+    procedure QueueStatus(Sender: TObject; Reason: THookSerialReason;
+      const Value: string);
+    procedure WaitForDelivery;
   protected
-    procedure CallEvent;
-    procedure CallStatusEvent;
     procedure Execute; override;
+    procedure TerminatedSet; override;
+  public
+    Owner: TLazSerial;
+    constructor Create(AOwner: TLazSerial;
+      const ASession: ISerialReaderSession);
   published
     property Terminated;
   end;
@@ -149,6 +162,8 @@ type
     FOnStatus: TStatusEvent;
     FOnRemoved: TNotifyEvent;
     FClosing: Boolean;
+    FDestroying: Boolean;
+    FReaderSession: ISerialReaderSession;
     ReadThread: TComPortReadThread;
 
     procedure DeviceOpen;
@@ -156,6 +171,9 @@ type
 
     procedure ComException(str: string);
     procedure ComDisconnected(Sender: TObject);
+    procedure DeliverReaderReceive;
+    procedure DeliverReaderStatus(Sender: TObject;
+      Reason: THookSerialReason; const Value: string);
     procedure SynSerStatus(Sender: TObject; Reason: THookSerialReason;
       const Value: string);
     procedure TriggerDisconnected;
@@ -227,6 +245,143 @@ procedure Register;
 implementation
 uses LazSerialSetup;
 
+type
+  TSerialReaderEventKind = (srekReceive, srekStatus);
+
+  TSerialReaderSession = class(TInterfacedObject, ISerialReaderSession)
+  private
+    FActive: Boolean;
+    FCompletionEvent: TEvent;
+    FOwner: TLazSerial;
+  public
+    constructor Create(AOwner: TLazSerial);
+    destructor Destroy; override;
+    procedure Cancel;
+    procedure DeliverReceive;
+    procedure DeliverStatus(Sender: TObject; Reason: THookSerialReason;
+      const Value: string);
+    procedure Detach;
+    procedure SignalReader;
+    function WaitForReader(const ATimeout: Cardinal): TWaitResult;
+  end;
+
+  TSerialReaderEventDelivery = class
+  private
+    FKind: TSerialReaderEventKind;
+    FReason: THookSerialReason;
+    FSender: TObject;
+    FSession: ISerialReaderSession;
+    FValue: string;
+    procedure Deliver;
+  public
+    constructor CreateReceive(const ASession: ISerialReaderSession);
+    constructor CreateStatus(const ASession: ISerialReaderSession;
+      ASender: TObject; AReason: THookSerialReason; const AValue: string);
+  end;
+
+constructor TSerialReaderSession.Create(AOwner: TLazSerial);
+begin
+  inherited Create;
+  FOwner := AOwner;
+  FActive := True;
+  FCompletionEvent := TEvent.Create(nil, False, False, '');
+end;
+
+destructor TSerialReaderSession.Destroy;
+begin
+  FCompletionEvent.Free;
+  inherited Destroy;
+end;
+
+procedure TSerialReaderSession.Cancel;
+begin
+  FActive := False;
+  SignalReader;
+end;
+
+procedure TSerialReaderSession.DeliverReceive;
+var
+  Serial: TLazSerial;
+begin
+  if not FActive then
+    Exit;
+  Serial := FOwner;
+  if Serial <> nil then
+    Serial.DeliverReaderReceive;
+end;
+
+procedure TSerialReaderSession.DeliverStatus(Sender: TObject;
+  Reason: THookSerialReason; const Value: string);
+var
+  Serial: TLazSerial;
+begin
+  if not FActive then
+    Exit;
+  Serial := FOwner;
+  if Serial <> nil then
+    Serial.DeliverReaderStatus(Sender, Reason, Value);
+end;
+
+procedure TSerialReaderSession.Detach;
+begin
+  FOwner := nil;
+  Cancel;
+end;
+
+procedure TSerialReaderSession.SignalReader;
+begin
+  FCompletionEvent.SetEvent;
+end;
+
+function TSerialReaderSession.WaitForReader(
+  const ATimeout: Cardinal
+): TWaitResult;
+begin
+  Result := FCompletionEvent.WaitFor(ATimeout);
+end;
+
+constructor TSerialReaderEventDelivery.CreateReceive(
+  const ASession: ISerialReaderSession
+);
+begin
+  inherited Create;
+  FSession := ASession;
+  FKind := srekReceive;
+end;
+
+constructor TSerialReaderEventDelivery.CreateStatus(
+  const ASession: ISerialReaderSession;
+  ASender: TObject;
+  AReason: THookSerialReason;
+  const AValue: string
+);
+begin
+  inherited Create;
+  FSession := ASession;
+  FKind := srekStatus;
+  FSender := ASender;
+  FReason := AReason;
+  FValue := AValue;
+end;
+
+procedure TSerialReaderEventDelivery.Deliver;
+var
+  Session: ISerialReaderSession;
+begin
+  Session := FSession;
+  try
+    case FKind of
+      srekReceive:
+        Session.DeliverReceive;
+      srekStatus:
+        Session.DeliverStatus(FSender, FReason, FValue);
+    end;
+  finally
+    Session.SignalReader;
+    Free;
+  end;
+end;
+
 { TLazSerial }
 
 procedure TLazSerial.Close;
@@ -242,14 +397,16 @@ begin
     if ReadThread <> nil then
     begin
       ReadThread.FreeOnTerminate := False;
-      ReadThread.MustDie := True;
       ReadThread.Terminate;
+      if FReaderSession <> nil then
+        FReaderSession.Cancel;
       while not ReadThread.Finished do
-        CheckSynchronize(10);
+        Sleep(1);
       ReadThread.WaitFor;
       ReadThread.Free;
       ReadThread := nil;
     end;
+    FReaderSession := nil;
 
     if FSynSer.Handle <> INVALID_HANDLE_VALUE then
     begin
@@ -276,6 +433,8 @@ begin
   FSerialWatcher.OnComDisconnected := @ComDisconnected;
   FCustomBaudRate := -1;
   FClosing := False;
+  FDestroying := False;
+  FReaderSession := nil;
   {$IFDEF LINUX}
   FDevice:='/dev/ttyS0';
   {$ELSE}
@@ -296,10 +455,14 @@ end;
 
 destructor TLazSerial.Destroy;
 begin
+  FDestroying := True;
   FSerialWatcher.OnComDisconnected := nil;
-  FSynSer.OnStatus := nil;
+  if FReaderSession <> nil then
+    FReaderSession.Detach;
   Close;
+  FSynSer.OnStatus := nil;
   FSynSer.Free;
+  FReaderSession := nil;
   inherited;
 end;
 
@@ -333,9 +496,8 @@ begin
                  FFlowControl);
 
   // Launch Thread
-  ReadThread := TComPortReadThread.Create(true);
-  ReadThread.Owner := Self;
-  ReadThread.MustDie := false;
+  FReaderSession := TSerialReaderSession.Create(Self);
+  ReadThread := TComPortReadThread.Create(Self, FReaderSession);
 //  ReadThread.Resume;   --> deprecated
   ReadThread.Start;
 end;
@@ -529,45 +691,103 @@ end;
 procedure TLazSerial.SynSerStatus(Sender: TObject;
   Reason: THookSerialReason; const Value: string);
 begin
-  if not Assigned(FOnStatus) then
+  if FDestroying then
     Exit;
   if (ReadThread <> nil) and
     (GetCurrentThreadID = ReadThread.ThreadID) then
   begin
-    ReadThread.StatusSender := Sender;
-    ReadThread.StatusReason := Reason;
-    ReadThread.StatusValue := Value;
-    ReadThread.Synchronize(@ReadThread.CallStatusEvent);
+    ReadThread.QueueStatus(Sender, Reason, Value);
   end
-  else
+  else if Assigned(FOnStatus) then
     FOnStatus(Sender, Reason, Value);
 end;
 
 { TComPortReadThread }
 
-procedure TComPortReadThread.CallEvent;
+constructor TComPortReadThread.Create(AOwner: TLazSerial;
+  const ASession: ISerialReaderSession);
 begin
-  if not Owner.FClosing and Assigned(Owner.FOnRxData) then begin
-    Owner.FOnRxData(Owner);
-  end;
+  inherited Create(True);
+  FreeOnTerminate := False;
+  Owner := AOwner;
+  FSession := ASession;
 end;
 
-procedure TComPortReadThread.CallStatusEvent;
+procedure TComPortReadThread.WaitForDelivery;
 begin
-  if not Owner.FClosing and Assigned(Owner.FOnStatus) then
-    Owner.FOnStatus(StatusSender, StatusReason, StatusValue);
+  while not Terminated do
+    if FSession.WaitForReader(100) = wrSignaled then
+      Exit;
+end;
+
+procedure TComPortReadThread.QueueReceive;
+var
+  Delivery: TSerialReaderEventDelivery;
+begin
+  if Terminated then
+    Exit;
+  Delivery := TSerialReaderEventDelivery.CreateReceive(FSession);
+  try
+    TThread.Queue(nil, @Delivery.Deliver);
+  except
+    Delivery.Free;
+    raise;
+  end;
+  WaitForDelivery;
+end;
+
+procedure TComPortReadThread.QueueStatus(Sender: TObject;
+  Reason: THookSerialReason; const Value: string);
+var
+  Delivery: TSerialReaderEventDelivery;
+begin
+  if Terminated then
+    Exit;
+  Delivery := TSerialReaderEventDelivery.CreateStatus(
+    FSession,
+    Sender,
+    Reason,
+    Value
+  );
+  try
+    TThread.Queue(nil, @Delivery.Deliver);
+  except
+    Delivery.Free;
+    raise;
+  end;
+  WaitForDelivery;
+end;
+
+procedure TComPortReadThread.TerminatedSet;
+begin
+  inherited TerminatedSet;
+  if FSession <> nil then
+    FSession.SignalReader;
 end;
 
 procedure TComPortReadThread.Execute;
 begin
   try
-    while not Terminated and not MustDie do begin
+    while not Terminated do begin
       if Owner.FSynSer.CanReadEx(100) then
-        Synchronize(@CallEvent);
+        QueueReceive;
     end;
   finally
     Terminate;
   end;
+end;
+
+procedure TLazSerial.DeliverReaderReceive;
+begin
+  if not FClosing and not FDestroying and Assigned(FOnRxData) then
+    FOnRxData(Self);
+end;
+
+procedure TLazSerial.DeliverReaderStatus(Sender: TObject;
+  Reason: THookSerialReason; const Value: string);
+begin
+  if not FClosing and not FDestroying and Assigned(FOnStatus) then
+    FOnStatus(Sender, Reason, Value);
 end;
 
 //Begin: Handle disconnect detection

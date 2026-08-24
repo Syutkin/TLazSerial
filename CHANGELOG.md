@@ -27,6 +27,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Serial status callbacks raised by the reader are now delivered on the main
   thread, making them safe for LCL event handlers.
 - Repeated refresh requests no longer start overlapping device enumerations.
+- Reader callbacks can now close or destroy `TLazSerial` without deadlocking,
+  and callback exceptions no longer stop the reader thread.
+- Destruction now stops the reader before detaching the Synapse status hook.
 
 ### Removed
 

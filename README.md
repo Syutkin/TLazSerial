@@ -42,6 +42,11 @@ Serial.Open;
 Use `OnRxData` with `ReadData` for incoming data and `WriteData` for outgoing
 data. `ShowSetupDialog` opens the bundled port-settings dialog.
 
+Reader-originated `OnRxData` and `OnStatus` callbacks are delivered on the LCL
+main thread. A handler may close or destroy its `TLazSerial` component; an
+exception raised by a handler remains a main-thread exception and does not stop
+the serial reader.
+
 ## Structured device enumeration
 
 `LazSerialDevices` returns the connectable device name separately from optional

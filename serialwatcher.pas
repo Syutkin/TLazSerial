@@ -12,6 +12,9 @@ uses
   {$IFDEF Linux}
   SerialLinuxChangeSource,
   {$ENDIF}
+  {$IFDEF Darwin}
+  SerialMacChangeSource,
+  {$ENDIF}
   Classes, SysUtils, Controls, LResources, LazSerialDevices,
   SerialWatcherSupport, SerialDeviceRefresh;
 
@@ -367,7 +370,11 @@ begin
   {$IFDEF Linux}
   ChangeSource := CreateLinuxSerialChangeSource;
   {$ELSE}
+  {$IFDEF Darwin}
+  ChangeSource := CreateMacSerialChangeSource;
+  {$ELSE}
   ChangeSource := TSerialPollingChangeSource.Create(1000);
+  {$ENDIF}
   {$ENDIF}
   {$ENDIF}
   try

@@ -12,7 +12,7 @@ uses
   LazSerialDeviceParsers, LazSerialDeviceCollectors, SerialDeviceRefresh,
   SerialCommandRunner, LazSerialWindowsDevices, LazSynaFpc, LazSynaUtil,
   LazSynaSer, lazserialsetup, SerialWatcherSupport, SerialLinuxChangeSource,
-  SerialWindowsChangeSource, LazarusPackageIntf;
+  SerialWindowsChangeSource, SerialMacChangeSource, LazarusPackageIntf;
 
 implementation
 

@@ -109,6 +109,12 @@ On Windows, TLazSerial listens for the COM-port device-interface class through
 settling retries while SetupAPI finishes publishing a new port. If native
 notification registration fails, the watcher falls back to periodic polling.
 
+On macOS, TLazSerial listens for matched and terminated `IOSerialBSDClient`
+services through IOKit. The initial notification iterators are drained before
+normal event delivery, and all IOKit handles are released synchronously when
+the watcher stops. If IOKit initialization fails or its run-loop source becomes
+invalid, the watcher falls back to periodic polling.
+
 ## Serial selector
 
 `TSerialSelector` displays the structured snapshot without mixing the friendly

@@ -59,7 +59,8 @@ function IsLinuxBuiltInSerialDevice(const ATypeValue: string;
 implementation
 
 uses
-  FileUtil, Process, StrUtils, SysUtils, LazSerialDeviceParsers
+  FileUtil, StrUtils, SysUtils, SerialCommandRunner,
+  LazSerialDeviceParsers
   {$IFDEF UNIX}
   , BaseUnix
   {$ENDIF}
@@ -68,6 +69,12 @@ uses
   {$ENDIF};
 
 const
+  {$IFDEF Linux}
+  LinuxMetadataTimeoutMs = 3000;
+  {$ENDIF}
+  {$IFDEF Darwin}
+  MacOSMetadataTimeoutMs = 10000;
+  {$ENDIF}
   LinuxSerialDevicePatterns: array[0..3] of string = (
     'ttyAMA*',
     'rfcomm*',
@@ -321,11 +328,11 @@ begin
   AProperties := '';
   Result := False;
   {$IFDEF Linux}
-  Result := RunCommand(
+  Result := RunSerialCommand(
     'udevadm',
     ['info', '--query=property', '--name', ADevice],
-    AProperties,
-    [poStderrToOutput]
+    LinuxMetadataTimeoutMs,
+    AProperties
   ) and (Trim(AProperties) <> '');
   {$ENDIF}
 end;
@@ -669,11 +676,11 @@ begin
   ASnapshot := '';
   Result := False;
   {$IFDEF Darwin}
-  Result := RunCommand(
+  Result := RunSerialCommand(
     'system_profiler',
     ['SPUSBDataType'],
-    ASnapshot,
-    [poStderrToOutput]
+    MacOSMetadataTimeoutMs,
+    ASnapshot
   ) and (Trim(ASnapshot) <> '');
   {$ENDIF}
 end;

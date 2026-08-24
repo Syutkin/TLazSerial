@@ -6,7 +6,7 @@ interface
 
 uses
   Classes, SysUtils, SyncObjs, FpcUnit, TestRegistry, LazSerialDevices,
-  SerialWatcher;
+  SerialCommandRunner, SerialWatcher;
 
 type
   TTestSerialWatcher = class(TSerialWatcher)
@@ -34,6 +34,15 @@ type
     property ReleaseLoad: TEvent read FReleaseLoad write FReleaseLoad;
   end;
 
+  TCancellableCommandSerialWatcher = class(TSerialWatcher)
+  private
+    FLoadStarted: TEvent;
+  protected
+    function LoadDevices: TSerialDeviceInfoArray; override;
+  public
+    property LoadStarted: TEvent read FLoadStarted write FLoadStarted;
+  end;
+
   TSerialWatcherComponentTests = class(TTestCase)
   private
     FConnectedCount: Integer;
@@ -55,9 +64,20 @@ type
     procedure AdoptSnapshotEstablishesBaselineWithoutLoading;
     procedure RefreshLoadsDevicesInBackground;
     procedure RepeatedRefreshDoesNotStartSecondLoad;
+    procedure DestroyCancelsHungSystemCommand;
   end;
 
 implementation
+
+function TCancellableCommandSerialWatcher.LoadDevices: TSerialDeviceInfoArray;
+var
+  Output: string;
+begin
+  if FLoadStarted <> nil then
+    FLoadStarted.SetEvent;
+  RunSerialCommand('/bin/sleep', ['5'], 30000, Output);
+  Result := nil;
+end;
 
 function TBackgroundTestSerialWatcher.LoadDevices: TSerialDeviceInfoArray;
 begin
@@ -315,6 +335,39 @@ begin
     ReleaseLoad.Free;
     LoadStarted.Free;
   end;
+end;
+
+procedure TSerialWatcherComponentTests.DestroyCancelsHungSystemCommand;
+{$IFDEF UNIX}
+var
+  Elapsed: QWord;
+  LoadStarted: TEvent;
+  StartedAt: QWord;
+  Watcher: TCancellableCommandSerialWatcher;
+{$ENDIF}
+begin
+  {$IFDEF UNIX}
+  LoadStarted := TEvent.Create(nil, True, False, '');
+  Watcher := TCancellableCommandSerialWatcher.Create(nil);
+  try
+    Watcher.LoadStarted := LoadStarted;
+    Watcher.Refresh;
+    AssertEquals(Ord(wrSignaled), Ord(LoadStarted.WaitFor(1000)));
+
+    StartedAt := GetTickCount64;
+    Watcher.Free;
+    Watcher := nil;
+    Elapsed := GetTickCount64 - StartedAt;
+
+    AssertTrue(
+      'Destroy must cancel a running system metadata command',
+      Elapsed < 1000
+    );
+  finally
+    Watcher.Free;
+    LoadStarted.Free;
+  end;
+  {$ENDIF}
 end;
 
 initialization

@@ -8,6 +8,7 @@ uses
   cwstring,
   {$ENDIF}
   ConsoleTestRunner,
+  SerialCommandRunnerTests,
   SerialDeviceFormatTests,
   SerialDeviceParserTests,
   SerialDeviceCollectorTests;

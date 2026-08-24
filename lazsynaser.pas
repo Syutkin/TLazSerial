@@ -870,7 +870,11 @@ begin
   FComNr := PortIsClosed;
   if pos('COM', uppercase(Value)) = 1 then
     FComNr := StrToIntdef(copy(Value, 4, Length(Value) - 3), PortIsClosed + 1) - 1;
+  {$IFDEF UNIX}
+  if pos('/dev/ttyS', Value) = 1 then
+  {$ELSE}
   if pos('/DEV/TTYS', uppercase(Value)) = 1 then
+  {$ENDIF}
     FComNr := StrToIntdef(copy(Value, 10, Length(Value) - 9), PortIsClosed);
 end;
 

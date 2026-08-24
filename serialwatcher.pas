@@ -205,9 +205,9 @@ begin
   FTimer.Enabled := False;
   CancelSerialDeviceRefresh(FDeviceRefreshThread);
   {$IFDEF Windows}
-  if FDeviceNotification <> 0 then
+  if FDeviceNotification <> nil then
     UnregisterDeviceNotification(FDeviceNotification);
-  if FWindowHandle <> 0 then
+  if FWindowHandle <> nil then
     DeallocateHWnd(FWindowHandle);
   {$ENDIF}
   inherited Destroy;
@@ -231,7 +231,7 @@ begin
     @DeviceInterface,
     DEVICE_NOTIFY_WINDOW_HANDLE or DEVICE_NOTIFY_ALL_INTERFACE_CLASSES
   );
-  Win32Check(FDeviceNotification <> 0);
+  Win32Check(FDeviceNotification <> nil);
 end;
 
 procedure TSerialWatcher.WndProcNew(var Message: TMessage);

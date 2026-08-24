@@ -13,7 +13,7 @@ object FMain: TFMain
   Constraints.MinHeight = 408
   Constraints.MinWidth = 591
   Position = poScreenCenter
-  LCLVersion = '4.4.0.0'
+  LCLVersion = '4.8.0.0'
   OnActivate = FormActivate
   OnClose = FormClose
   OnCreate = FormCreate
@@ -79,7 +79,7 @@ object FMain: TFMain
     Left = 8
     Height = 26
     Hint = 'Open a dialog form '#13#10'for serial port settings'
-    Top = 5
+    Top = 4
     Width = 106
     Caption = 'Port Settings'
     ParentFont = False
@@ -89,10 +89,10 @@ object FMain: TFMain
     OnClick = BPortSettingsClick
   end
   object Label3: TLabel
-    Left = 416
-    Height = 21
+    Left = 412
+    Height = 22
     Top = 8
-    Width = 70
+    Width = 74
     Anchors = [akTop, akRight]
     Caption = 'Altitude :'
     Font.Height = -16
@@ -101,10 +101,10 @@ object FMain: TFMain
     ParentFont = False
   end
   object Label5: TLabel
-    Left = 413
-    Height = 21
+    Left = 410
+    Height = 22
     Top = 78
-    Width = 73
+    Width = 76
     Anchors = [akTop, akRight]
     Caption = 'Heading :'
     Font.Height = -16
@@ -137,10 +137,10 @@ object FMain: TFMain
     TabOrder = 6
   end
   object Label4: TLabel
-    Left = 431
-    Height = 21
+    Left = 429
+    Height = 22
     Top = 46
-    Width = 55
+    Width = 57
     Anchors = [akTop, akRight]
     Caption = 'Speed :'
     Font.Height = -16
@@ -167,10 +167,10 @@ object FMain: TFMain
     TabOrder = 7
   end
   object Label6: TLabel
-    Left = 544
-    Height = 21
+    Left = 543
+    Height = 22
     Top = 9
-    Width = 15
+    Width = 16
     Anchors = [akTop, akRight]
     Caption = 'm'
     Font.Height = -16
@@ -179,10 +179,10 @@ object FMain: TFMain
     ParentFont = False
   end
   object Label7: TLabel
-    Left = 544
-    Height = 21
+    Left = 542
+    Height = 22
     Top = 46
-    Width = 42
+    Width = 44
     Anchors = [akTop, akRight]
     Caption = 'Km/h'
     Font.Height = -16
@@ -191,10 +191,10 @@ object FMain: TFMain
     ParentFont = False
   end
   object Label8: TLabel
-    Left = 544
-    Height = 21
+    Left = 543
+    Height = 22
     Top = 77
-    Width = 6
+    Width = 7
     Anchors = [akTop, akRight]
     Caption = '°'
     Font.Height = -16
@@ -270,9 +270,9 @@ object FMain: TFMain
   end
   object Label1: TLabel
     Left = 128
-    Height = 21
+    Height = 22
     Top = 44
-    Width = 86
+    Width = 90
     Caption = 'Longitude :'
     Font.Height = -16
     Font.Style = [fsBold]
@@ -281,9 +281,9 @@ object FMain: TFMain
   end
   object Label2: TLabel
     Left = 143
-    Height = 21
+    Height = 22
     Top = 78
-    Width = 71
+    Width = 76
     Caption = 'Latitude :'
     Font.Height = -16
     Font.Style = [fsBold]
@@ -378,9 +378,9 @@ object FMain: TFMain
   end
   object Label9: TLabel
     Left = 265
-    Height = 21
+    Height = 22
     Top = 40
-    Width = 6
+    Width = 7
     Caption = '°'
     Font.Height = -16
     Font.Style = [fsBold]
@@ -389,9 +389,9 @@ object FMain: TFMain
   end
   object Label10: TLabel
     Left = 265
-    Height = 21
+    Height = 22
     Top = 77
-    Width = 6
+    Width = 7
     Caption = '°'
     Font.Height = -16
     Font.Style = [fsBold]
@@ -400,7 +400,7 @@ object FMain: TFMain
   end
   object Label11: TLabel
     Left = 347
-    Height = 21
+    Height = 22
     Top = 42
     Width = 5
     Caption = ''''
@@ -411,7 +411,7 @@ object FMain: TFMain
   end
   object Label12: TLabel
     Left = 347
-    Height = 21
+    Height = 22
     Top = 77
     Width = 5
     Caption = ''''

@@ -26,7 +26,7 @@
   along with This library; if not, Write to the Free Software Foundation,
   Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA. }"/>
     <Version Minor="8"/>
-    <Files Count="10">
+    <Files Count="18">
       <Item1>
         <Filename Value="lazserial.pas"/>
         <HasRegisterProc Value="True"/>
@@ -70,6 +70,38 @@
         <Filename Value="lazserialwindowsdevices.pas"/>
         <UnitName Value="LazSerialWindowsDevices"/>
       </Item10>
+      <Item11>
+        <Filename Value="lazsynafpc.pas"/>
+        <UnitName Value="LazSynaFpc"/>
+      </Item11>
+      <Item12>
+        <Filename Value="lazsynautil.pas"/>
+        <UnitName Value="LazSynaUtil"/>
+      </Item12>
+      <Item13>
+        <Filename Value="lazsynaser.pas"/>
+        <UnitName Value="LazSynaSer"/>
+      </Item13>
+      <Item14>
+        <Filename Value="lazserialsetup.pas"/>
+        <UnitName Value="LazSerialSetup"/>
+      </Item14>
+      <Item15>
+        <Filename Value="lazserialsetup.lfm"/>
+        <Type Value="LFM"/>
+      </Item15>
+      <Item16>
+        <Filename Value="TLazSerial.lrs"/>
+        <Type Value="LRS"/>
+      </Item16>
+      <Item17>
+        <Filename Value="serialselector_icon.lrs"/>
+        <Type Value="LRS"/>
+      </Item17>
+      <Item18>
+        <Filename Value="serialwatcher_icon.lrs"/>
+        <Type Value="LRS"/>
+      </Item18>
     </Files>
     <CompatibilityMode Value="True"/>
     <i18n>

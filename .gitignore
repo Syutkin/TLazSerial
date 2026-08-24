@@ -52,6 +52,7 @@ Temporary Items
 /lib/
 /packagefiles.xml
 /examples/serial-gps/lib/
+/examples/serial-gps/backup/
 /examples/serial-selector/lib/
 /examples/serial-selector/serialselectorexample
 /examples/serial-selector/backup/

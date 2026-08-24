@@ -1,16 +1,14 @@
 object ComSetupFrm: TComSetupFrm
   Left = 857
-  Height = 250
+  Height = 295
   Top = 119
-  Width = 300
+  Width = 360
   HorzScrollBar.Page = 230
   VertScrollBar.Page = 271
   ActiveControl = Button1
-  AutoSize = True
-  BorderStyle = bsDialog
   Caption = 'Setup'
-  ClientHeight = 250
-  ClientWidth = 300
+  ClientHeight = 295
+  ClientWidth = 360
   Constraints.MinHeight = 250
   Constraints.MinWidth = 300
   Font.Height = -11
@@ -18,41 +16,6 @@ object ComSetupFrm: TComSetupFrm
   Position = poMainFormCenter
   LCLVersion = '4.8.0.0'
   OnCreate = FormCreate
-  object Button1: TButton
-    Left = 104
-    Height = 25
-    Top = 232
-    Width = 83
-    BorderSpacing.InnerBorder = 4
-    Caption = 'OK'
-    Default = True
-    Font.CharSet = ANSI_CHARSET
-    Font.Height = -13
-    Font.Name = 'MS Sans Serif'
-    Font.Pitch = fpVariable
-    Font.Quality = fqDraft
-    Font.Style = [fsBold]
-    ModalResult = 1
-    ParentFont = False
-    TabOrder = 1
-  end
-  object Button2: TButton
-    Left = 216
-    Height = 25
-    Top = 232
-    Width = 83
-    BorderSpacing.InnerBorder = 4
-    Caption = 'Cancel'
-    Font.CharSet = ANSI_CHARSET
-    Font.Height = -13
-    Font.Name = 'MS Sans Serif'
-    Font.Pitch = fpVariable
-    Font.Quality = fqDraft
-    Font.Style = [fsBold]
-    ModalResult = 2
-    ParentFont = False
-    TabOrder = 2
-  end
   object GroupBox1: TGroupBox
     AnchorSideLeft.Control = Owner
     AnchorSideTop.Control = Owner
@@ -61,14 +24,13 @@ object ComSetupFrm: TComSetupFrm
     AnchorSideBottom.Control = Owner
     AnchorSideBottom.Side = asrBottom
     Left = 0
-    Height = 250
+    Height = 295
     Top = 0
-    Width = 300
+    Width = 360
     Anchors = [akTop, akLeft, akRight, akBottom]
-    AutoSize = True
     Caption = ' Settings '
-    ClientHeight = 221
-    ClientWidth = 296
+    ClientHeight = 266
+    ClientWidth = 356
     Font.CharSet = ANSI_CHARSET
     Font.Height = -13
     Font.Name = 'MS Sans Serif'
@@ -158,7 +120,7 @@ object ComSetupFrm: TComSetupFrm
       Left = 100
       Height = 32
       Top = 36
-      Width = 188
+      Width = 248
       Anchors = [akTop, akLeft, akRight]
       BorderSpacing.Top = 2
       BorderSpacing.Right = 8
@@ -177,7 +139,7 @@ object ComSetupFrm: TComSetupFrm
       Left = 100
       Height = 32
       Top = 70
-      Width = 188
+      Width = 248
       Anchors = [akTop, akLeft, akRight]
       BorderSpacing.Top = 2
       BorderSpacing.Right = 8
@@ -195,7 +157,7 @@ object ComSetupFrm: TComSetupFrm
       Left = 100
       Height = 32
       Top = 104
-      Width = 188
+      Width = 248
       Anchors = [akTop, akLeft, akRight]
       BorderSpacing.Top = 2
       BorderSpacing.Right = 8
@@ -213,7 +175,7 @@ object ComSetupFrm: TComSetupFrm
       Left = 100
       Height = 32
       Top = 138
-      Width = 188
+      Width = 248
       Anchors = [akTop, akLeft, akRight]
       BorderSpacing.Top = 2
       BorderSpacing.Right = 8
@@ -231,7 +193,7 @@ object ComSetupFrm: TComSetupFrm
       Left = 100
       Height = 32
       Top = 172
-      Width = 188
+      Width = 248
       Anchors = [akTop, akLeft, akRight]
       BorderSpacing.Top = 2
       BorderSpacing.Right = 8
@@ -247,7 +209,7 @@ object ComSetupFrm: TComSetupFrm
       Left = 100
       Height = 32
       Top = 2
-      Width = 188
+      Width = 248
       Anchors = [akTop, akLeft, akRight]
       BorderSpacing.Top = 2
       BorderSpacing.Right = 8
@@ -255,5 +217,40 @@ object ComSetupFrm: TComSetupFrm
       ItemHeight = 31
       TabOrder = 5
     end
+  end
+  object Button1: TButton
+    Left = 104
+    Height = 25
+    Top = 232
+    Width = 83
+    BorderSpacing.InnerBorder = 4
+    Caption = 'OK'
+    Default = True
+    Font.CharSet = ANSI_CHARSET
+    Font.Height = -13
+    Font.Name = 'MS Sans Serif'
+    Font.Pitch = fpVariable
+    Font.Quality = fqDraft
+    Font.Style = [fsBold]
+    ModalResult = 1
+    ParentFont = False
+    TabOrder = 1
+  end
+  object Button2: TButton
+    Left = 216
+    Height = 25
+    Top = 232
+    Width = 83
+    BorderSpacing.InnerBorder = 4
+    Caption = 'Cancel'
+    Font.CharSet = ANSI_CHARSET
+    Font.Height = -13
+    Font.Name = 'MS Sans Serif'
+    Font.Pitch = fpVariable
+    Font.Quality = fqDraft
+    Font.Style = [fsBold]
+    ModalResult = 2
+    ParentFont = False
+    TabOrder = 2
   end
 end

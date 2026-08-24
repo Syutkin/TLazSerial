@@ -149,18 +149,18 @@ const
   IOKitSuccess = 0;
 
 function IOServiceMatching(AName: PChar): CFMutableDictionaryRef; cdecl;
-  external name '_IOServiceMatching';
+  external name 'IOServiceMatching';
 function IONotificationPortCreate(
   AMainPort: Cardinal
 ): TSerialIOKitNotificationPort; cdecl;
-  external name '_IONotificationPortCreate';
+  external name 'IONotificationPortCreate';
 procedure IONotificationPortDestroy(
   APort: TSerialIOKitNotificationPort
-); cdecl; external name '_IONotificationPortDestroy';
+); cdecl; external name 'IONotificationPortDestroy';
 function IONotificationPortGetRunLoopSource(
   APort: TSerialIOKitNotificationPort
 ): CFRunLoopSourceRef; cdecl;
-  external name '_IONotificationPortGetRunLoopSource';
+  external name 'IONotificationPortGetRunLoopSource';
 function IOServiceAddMatchingNotification(
   APort: TSerialIOKitNotificationPort;
   ANotificationType: PChar;
@@ -168,13 +168,13 @@ function IOServiceAddMatchingNotification(
   ACallback: TSerialIOKitServiceCallback;
   AContext: Pointer;
   var AIterator: TSerialIOKitObject
-): SInt32; cdecl; external name '_IOServiceAddMatchingNotification';
+): SInt32; cdecl; external name 'IOServiceAddMatchingNotification';
 function IOIteratorNext(
   AIterator: TSerialIOKitObject
-): TSerialIOKitObject; cdecl; external name '_IOIteratorNext';
+): TSerialIOKitObject; cdecl; external name 'IOIteratorNext';
 function IOObjectRelease(
   AObject: TSerialIOKitObject
-): SInt32; cdecl; external name '_IOObjectRelease';
+): SInt32; cdecl; external name 'IOObjectRelease';
 
 type
   TSerialDarwinIOKitApi = class(TSerialIOKitApi)

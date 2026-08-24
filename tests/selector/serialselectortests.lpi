@@ -25,7 +25,7 @@
         <PackageName Value="IDEIntf"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="8">
+    <Units Count="9">
       <Unit0>
         <Filename Value="serialselectortests.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -65,6 +65,11 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="SerialMacChangeSourceTests"/>
       </Unit7>
+      <Unit8>
+        <Filename Value="lazserialsetuptests.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="LazSerialSetupTests"/>
+      </Unit8>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

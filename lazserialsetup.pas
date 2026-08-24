@@ -99,91 +99,56 @@ end;
 // string to baud rate
 function StrToBaudRate(Str: string): TBaudRate;
 var
-  I: TBaudRate;
+  I: Integer;
 begin
-  I := Low(TBaudRate);
-  while (I <= High(TBaudRate)) do
-  begin
-    if UpperCase(Str) = UpperCase(BaudRateToStr(TBaudRate(I))) then
-      Break;
-    I := Succ(I);
-  end;
-  if I > High(TBaudRate) then
-    Result := br__9600
-  else
-    Result := I;
+  for I := Ord(Low(TBaudRate)) to Ord(High(TBaudRate)) do
+    if SameText(Str, BaudRateToStr(TBaudRate(I))) then
+      Exit(TBaudRate(I));
+  Result := br__9600;
 end;
 
 // string to stop bits
 function StrToStopBits(Str: string): TStopBits;
 var
-  I: TStopBits;
+  I: Integer;
 begin
-  I := Low(TStopBits);
-  while (I <= High(TStopBits)) do
-  begin
-    if UpperCase(Str) = UpperCase(StopBitsToStr(TStopBits(I))) then
-      Break;
-    I := Succ(I);
-  end;
-  if I > High(TStopBits) then
-    Result := sbOne
-  else
-    Result := I;
+  for I := Ord(Low(TStopBits)) to Ord(High(TStopBits)) do
+    if SameText(Str, StopBitsToStr(TStopBits(I))) then
+      Exit(TStopBits(I));
+  Result := sbOne;
 end;
 
 // string to data bits
 function StrToDataBits(Str: string): TDataBits;
 var
-  I: TDataBits;
+  I: Integer;
 begin
-  I := Low(TDataBits);
-  while (I <= High(TDataBits)) do
-  begin
-    if UpperCase(Str) = UpperCase(DataBitsToStr(I)) then
-      Break;
-    I := Succ(I);
-  end;
-  if I > High(TDataBits) then
-    Result := db8bits
-  else
-    Result := I;
+  for I := Ord(Low(TDataBits)) to Ord(High(TDataBits)) do
+    if SameText(Str, DataBitsToStr(TDataBits(I))) then
+      Exit(TDataBits(I));
+  Result := db8bits;
 end;
 
 // string to parity
 function StrToParity(Str: string): TParity;
 var
-  I: TParity;
+  I: Integer;
 begin
-  I := Low(TParity);
-  while (I <= High(TParity)) do
-  begin
-    if UpperCase(Str) = UpperCase(ParityToStr(I)) then
-      Break;
-    I := Succ(I);
-  end;
-  if I > High(TParity) then
-    Result := pNone
-  else
-    Result := I;
+  for I := Ord(Low(TParity)) to Ord(High(TParity)) do
+    if SameText(Str, ParityToStr(TParity(I))) then
+      Exit(TParity(I));
+  Result := pNone;
 end;
 
 // string to flow control
 function StrToFlowControl(Str: string): TFlowControl;
 var
-  I: TFlowControl;
+  I: Integer;
 begin
-  I := Low(TFlowControl);
-  while (I <= High(TFlowControl)) do
-  begin
-    if UpperCase(Str) = UpperCase(FlowControlToStr(I)) then
-      Break;
-    I := Succ(I);
-  end;
-  if I > High(TFlowControl) then
-    Result := fcNone
-  else
-    Result := I;
+  for I := Ord(Low(TFlowControl)) to Ord(High(TFlowControl)) do
+    if SameText(Str, FlowControlToStr(TFlowControl(I))) then
+      Exit(TFlowControl(I));
+  Result := fcNone;
 end;
 
 // baud rate to string

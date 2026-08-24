@@ -16,7 +16,8 @@ uses
   SerialMacChangeSourceTests,
   SerialWindowsChangeSourceTests,
   SerialSelectorComponentTests,
-  SerialWatcherComponentTests;
+  SerialWatcherComponentTests,
+  LazSerialSetupTests;
 
 var
   Runner: TTestRunner;

@@ -24,6 +24,8 @@ type
     procedure EmptyOptionsHideFriendlyName;
     procedure DisplayNameWrapsFriendlyName;
     procedure DisplayNameUsesDeviceWhenFriendlyNameIsEmpty;
+    procedure DeviceLookupHandlesBoundaries;
+    procedure DeviceLookupUsesPlatformCaseRules;
   end;
 
 implementation
@@ -200,6 +202,41 @@ begin
     '/dev/ttyACM0',
     FormatSerialDeviceDisplayName(DeviceInfo, [])
   );
+end;
+
+procedure TSerialDeviceFormatTests.DeviceLookupHandlesBoundaries;
+var
+  Devices: TSerialDeviceInfoArray;
+begin
+  Devices := nil;
+  AssertEquals(-1, IndexOfSerialDevice(Devices, '/dev/ttyACM0'));
+  AssertFalse(ContainsSerialDevice(Devices, '/dev/ttyACM0'));
+
+  SetLength(Devices, 3);
+  Devices[0].Device := 'first';
+  Devices[1].Device := 'middle';
+  Devices[2].Device := 'last';
+
+  AssertEquals(0, IndexOfSerialDevice(Devices, 'first'));
+  AssertEquals(2, IndexOfSerialDevice(Devices, 'last'));
+  AssertTrue(ContainsSerialDevice(Devices, 'middle'));
+  AssertFalse(ContainsSerialDevice(Devices, 'missing'));
+end;
+
+procedure TSerialDeviceFormatTests.DeviceLookupUsesPlatformCaseRules;
+var
+  Devices: TSerialDeviceInfoArray;
+begin
+  SetLength(Devices, 1);
+  {$IFDEF Windows}
+  Devices[0].Device := 'COM12';
+  AssertEquals(0, IndexOfSerialDevice(Devices, 'com12'));
+  AssertTrue(ContainsSerialDevice(Devices, 'Com12'));
+  {$ELSE}
+  Devices[0].Device := '/dev/ttyACM0';
+  AssertEquals(-1, IndexOfSerialDevice(Devices, '/dev/ttyacm0'));
+  AssertFalse(ContainsSerialDevice(Devices, '/DEV/TTYACM0'));
+  {$ENDIF}
 end;
 
 initialization

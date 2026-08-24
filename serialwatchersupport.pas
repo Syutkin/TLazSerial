@@ -5,22 +5,44 @@ unit SerialWatcherSupport;
 interface
 
 uses
-  Classes, ExtCtrls;
+  Classes, Contnrs, ExtCtrls, SysUtils;
 
 type
   TSerialChangeSource = class
   private
     FActive: Boolean;
     FOnChanged: TNotifyEvent;
+    FOnFailed: TNotifyEvent;
   protected
     procedure Changed;
+    procedure Failed;
     procedure DoStart; virtual; abstract;
     procedure DoStop; virtual; abstract;
   public
     destructor Destroy; override;
-    procedure Start(const AOnChanged: TNotifyEvent);
+    procedure Start(
+      const AOnChanged: TNotifyEvent;
+      const AOnFailed: TNotifyEvent = nil
+    );
     procedure Stop;
     property Active: Boolean read FActive;
+  end;
+
+  TSerialFallbackChangeSource = class(TSerialChangeSource)
+  private
+    FCandidates: TObjectList;
+    FCurrentIndex: Integer;
+    procedure CandidateChanged(Sender: TObject);
+    procedure CandidateFailed(Sender: TObject);
+    function CurrentSource: TSerialChangeSource;
+    procedure StartNextCandidate;
+  protected
+    procedure DoStart; override;
+    procedure DoStop; override;
+  public
+    constructor Create(const ACandidates: array of TSerialChangeSource);
+    destructor Destroy; override;
+    property CurrentIndex: Integer read FCurrentIndex;
   end;
 
   TSerialManualChangeSource = class(TSerialChangeSource)
@@ -79,18 +101,29 @@ begin
     FOnChanged(Self);
 end;
 
-procedure TSerialChangeSource.Start(const AOnChanged: TNotifyEvent);
+procedure TSerialChangeSource.Failed;
+begin
+  if FActive and Assigned(FOnFailed) then
+    FOnFailed(Self);
+end;
+
+procedure TSerialChangeSource.Start(
+  const AOnChanged: TNotifyEvent;
+  const AOnFailed: TNotifyEvent
+);
 begin
   if FActive then
     Exit;
 
   FOnChanged := AOnChanged;
+  FOnFailed := AOnFailed;
   FActive := True;
   try
     DoStart;
   except
     FActive := False;
     FOnChanged := nil;
+    FOnFailed := nil;
     raise;
   end;
 end;
@@ -100,6 +133,7 @@ begin
   if not FActive then
   begin
     FOnChanged := nil;
+    FOnFailed := nil;
     Exit;
   end;
 
@@ -108,12 +142,101 @@ begin
     DoStop;
   finally
     FOnChanged := nil;
+    FOnFailed := nil;
   end;
 end;
 
 destructor TSerialChangeSource.Destroy;
 begin
   Stop;
+  inherited Destroy;
+end;
+
+constructor TSerialFallbackChangeSource.Create(
+  const ACandidates: array of TSerialChangeSource
+);
+var
+  Candidate: TSerialChangeSource;
+begin
+  inherited Create;
+  FCandidates := TObjectList.Create(True);
+  FCurrentIndex := -1;
+  for Candidate in ACandidates do
+  begin
+    if Candidate = nil then
+      raise EArgumentNilException.Create('ACandidates');
+    FCandidates.Add(Candidate);
+  end;
+  if FCandidates.Count = 0 then
+    raise EArgumentException.Create('At least one change source is required');
+end;
+
+function TSerialFallbackChangeSource.CurrentSource: TSerialChangeSource;
+begin
+  if (FCurrentIndex < 0) or (FCurrentIndex >= FCandidates.Count) then
+    Exit(nil);
+  Result := TSerialChangeSource(FCandidates[FCurrentIndex]);
+end;
+
+procedure TSerialFallbackChangeSource.CandidateChanged(Sender: TObject);
+begin
+  if Sender = CurrentSource then
+    Changed;
+end;
+
+procedure TSerialFallbackChangeSource.CandidateFailed(Sender: TObject);
+var
+  Source: TSerialChangeSource;
+begin
+  if Sender <> CurrentSource then
+    Exit;
+
+  Source := CurrentSource;
+  if Source <> nil then
+    Source.Stop;
+  Inc(FCurrentIndex);
+  StartNextCandidate;
+  Changed;
+end;
+
+procedure TSerialFallbackChangeSource.StartNextCandidate;
+var
+  Source: TSerialChangeSource;
+begin
+  while FCurrentIndex < FCandidates.Count do
+  begin
+    Source := CurrentSource;
+    try
+      Source.Start(@CandidateChanged, @CandidateFailed);
+      Exit;
+    except
+      Source.Stop;
+      Inc(FCurrentIndex);
+    end;
+  end;
+  raise EInvalidOperation.Create('No serial change source is available');
+end;
+
+procedure TSerialFallbackChangeSource.DoStart;
+begin
+  FCurrentIndex := 0;
+  StartNextCandidate;
+end;
+
+procedure TSerialFallbackChangeSource.DoStop;
+var
+  Source: TSerialChangeSource;
+begin
+  Source := CurrentSource;
+  if Source <> nil then
+    Source.Stop;
+  FCurrentIndex := -1;
+end;
+
+destructor TSerialFallbackChangeSource.Destroy;
+begin
+  Stop;
+  FCandidates.Free;
   inherited Destroy;
 end;
 

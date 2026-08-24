@@ -9,6 +9,9 @@ uses
   {$IFDEF Windows}
   Windows, JwaWinUser, JwaDbt,
   {$ENDIF}
+  {$IFDEF Linux}
+  SerialLinuxChangeSource,
+  {$ENDIF}
   Classes, SysUtils, Controls, LCLIntf, LResources, LazSerialDevices,
   SerialWatcherSupport, SerialDeviceRefresh;
 
@@ -290,7 +293,11 @@ begin
   {$IFDEF Windows}
   ChangeSource := TSerialManualChangeSource.Create;
   {$ELSE}
+  {$IFDEF Linux}
+  ChangeSource := CreateLinuxSerialChangeSource;
+  {$ELSE}
   ChangeSource := TSerialPollingChangeSource.Create(1000);
+  {$ENDIF}
   {$ENDIF}
   try
     InitializeInfrastructure(

@@ -12,6 +12,7 @@ uses
   ConsoleTestRunner,
   LazSerialLifecycleTests,
   LazSerialThreadContractTests,
+  SerialLinuxChangeSourceTests,
   SerialSelectorComponentTests,
   SerialWatcherComponentTests;
 

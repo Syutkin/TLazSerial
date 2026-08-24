@@ -99,6 +99,11 @@ Platform metadata sources are:
   over a matching `/dev/tty.*` alias;
 - other Unix targets: device names without guaranteed metadata.
 
+On Linux, serial-device changes are detected through a dynamically loaded
+`libudev.so.1` monitor. If it is unavailable or stops working, TLazSerial
+automatically falls back to `inotify(/dev)` and then to periodic polling;
+`libudev` is not a required link-time dependency.
+
 ## Serial selector
 
 `TSerialSelector` displays the structured snapshot without mixing the friendly

@@ -23,6 +23,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Serial watcher, setup dialog and examples now use the structured API.
 - `TLazSerial` transport operations now have an explicit main-thread-only
   contract, and its owned `SynSer` object can no longer be replaced.
+- Linux serial-device watching now prefers dynamically loaded `libudev`, with
+  automatic `inotify` and polling fallbacks.
 
 ### Fixed
 

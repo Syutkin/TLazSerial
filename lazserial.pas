@@ -108,6 +108,8 @@ const
 
 
 type
+  ELazSerialThreadError = class(Exception);
+
   TLazSerial = class;
 
   ISerialReaderSession = interface
@@ -169,6 +171,7 @@ type
     procedure DeviceOpen;
     procedure DeviceClose;
 
+    procedure CheckMainThread(const AOperation: string);
     procedure ComException(str: string);
     procedure ComDisconnected(Sender: TObject);
     procedure DeliverReaderReceive;
@@ -178,6 +181,7 @@ type
       const Value: string);
     procedure TriggerDisconnected;
     function AppliedBaudrate: integer;
+    function GetSynSer: TBlockSerial;
 
   protected
     procedure SetActive(state: boolean);
@@ -187,6 +191,8 @@ type
     procedure SetParity(pr: TParity);
     procedure SetFlowControl(aFlowControl: TFlowControl);
     procedure SetStopBits(sb: TStopBits);
+    procedure SetDevice(const ADevice: string);
+    procedure SetRcvLineCRLF(AValue: Boolean);
 
   public
     constructor Create(AOwner: TComponent); override;
@@ -230,9 +236,9 @@ type
     property FlowControl: TFlowControl read FFlowControl write SetFlowControl;
     property StopBits: TStopBits read FStopBits write SetStopBits;
     
-    property SynSer: TBlockSerial read FSynSer write FSynSer;
-    property Device: string read FDevice write FDevice;
-    property RcvLineCRLF: Boolean read FRcvLineCRLF write FRcvLineCRLF;
+    property SynSer: TBlockSerial read GetSynSer;
+    property Device: string read FDevice write SetDevice;
+    property RcvLineCRLF: Boolean read FRcvLineCRLF write SetRcvLineCRLF;
 
     property OnRxData: TNotifyEvent read FOnRxData write FOnRxData;
     property OnStatus: TStatusEvent read FOnStatus write FOnStatus;
@@ -386,6 +392,7 @@ end;
 
 procedure TLazSerial.Close;
 begin
+  CheckMainThread('TLazSerial.Close');
   Active:=false;
 end;
 
@@ -446,6 +453,7 @@ end;
 
 function TLazSerial.DataAvailable: boolean;
 begin
+  CheckMainThread('TLazSerial.DataAvailable');
   if FSynSer.Handle=INVALID_HANDLE_VALUE then begin
     result:=false;
     exit;
@@ -468,11 +476,13 @@ end;
 
 procedure TLazSerial.Open;
 begin
+  CheckMainThread('TLazSerial.Open');
   Active:=true;
 end;
 
 procedure TLazSerial.ShowSetupDialog;
 begin
+  CheckMainThread('TLazSerial.ShowSetupDialog');
   EditComPort(Self);
 end;
 
@@ -481,6 +491,12 @@ begin
   if (FCustomBaudRate < 0)
     then Result := ConstsBaud[FBaudRate]
     else Result := FCustomBaudRate;
+end;
+
+function TLazSerial.GetSynSer: TBlockSerial;
+begin
+  CheckMainThread('TLazSerial.SynSer');
+  Result := FSynSer;
 end;
 
 procedure TLazSerial.DeviceOpen;
@@ -505,6 +521,7 @@ end;
 
 function TLazSerial.ReadData: string;
 begin
+  CheckMainThread('TLazSerial.ReadData');
   result:='';
   if FSynSer.Handle=INVALID_HANDLE_VALUE then
     ComException('can not read from a closed port.');
@@ -516,6 +533,7 @@ end;
 
 procedure TLazSerial.SetActive(state: boolean);
 begin
+  CheckMainThread('TLazSerial.Active');
   if state=FActive then exit;
 
   if state then
@@ -531,6 +549,7 @@ end;
 
 procedure TLazSerial.SetBaudRate(br: TBaudRate);
 begin
+  CheckMainThread('TLazSerial.BaudRate');
   FBaudRate:=br;
   if (FCustomBaudRate > -1) then exit;
   if FSynSer.Handle<>INVALID_HANDLE_VALUE then begin
@@ -541,6 +560,7 @@ end;
 
 procedure TLazSerial.SetCustomBaudrate(br: Integer);
 begin
+  CheckMainThread('TLazSerial.CustomBaudRate');
   if (FCustomBaudRate = br) then exit;
   FCustomBaudRate := br;
   if (FCustomBaudRate < 0)
@@ -551,11 +571,18 @@ end;
 
 procedure TLazSerial.SetDataBits(db: TDataBits);
 begin
+  CheckMainThread('TLazSerial.DataBits');
   FDataBits:=db;
   if FSynSer.Handle<>INVALID_HANDLE_VALUE then begin
     FSynSer.Config(AppliedBaudrate, ConstsBits[FDataBits], ConstsParity[FParity],
                    ConstsStopBits[FStopBits], FFlowControl);
   end;
+end;
+
+procedure TLazSerial.SetDevice(const ADevice: string);
+begin
+  CheckMainThread('TLazSerial.Device');
+  FDevice := ADevice;
 end;
 
 {procedure TLazSerial.SetFlowControl_obsolete(fc: TFlowControl);
@@ -583,6 +610,7 @@ end;}
 
 procedure TLazSerial.SetFlowControl(aFlowControl: TFlowControl);
 begin
+  CheckMainThread('TLazSerial.FlowControl');
   if (FFlowControl = aFlowControl) then exit;
   if (FSynSer.Handle<>INVALID_HANDLE_VALUE) then
     FSynSer.Config(AppliedBaudrate, ConstsBits[FDataBits], ConstsParity[FParity], ConstsStopBits[FStopBits], FFlowControl);
@@ -604,6 +632,7 @@ end;
 }
 procedure TLazSerial.SetParity(pr: TParity);
 begin
+  CheckMainThread('TLazSerial.Parity');
   FParity:=pr;
   if FSynSer.Handle<>INVALID_HANDLE_VALUE then begin
     FSynSer.Config(AppliedBaudrate, ConstsBits[FDataBits], ConstsParity[FParity],
@@ -611,8 +640,15 @@ begin
   end;
 end;
 
+procedure TLazSerial.SetRcvLineCRLF(AValue: Boolean);
+begin
+  CheckMainThread('TLazSerial.RcvLineCRLF');
+  FRcvLineCRLF := AValue;
+end;
+
 procedure TLazSerial.SetStopBits(sb: TStopBits);
 begin
+  CheckMainThread('TLazSerial.StopBits');
   FStopBits:=sb;
   if FSynSer.Handle<>INVALID_HANDLE_VALUE then begin
     FSynSer.Config(AppliedBaudrate, ConstsBits[FDataBits], ConstsParity[FParity],
@@ -622,6 +658,7 @@ end;
 
 function TLazSerial.WriteBuffer(var buf; size: integer): integer;
 begin
+  CheckMainThread('TLazSerial.WriteBuffer');
 //  if FSynSer.Handle=INVALID_HANDLE_VALUE then
  //   ComException('can not write to a closed port.');
   result:= FSynSer.SendBuffer(Pointer(@buf), size);
@@ -629,6 +666,7 @@ end;
 
 function TLazSerial.WriteData(data: string): integer;
 begin
+  CheckMainThread('TLazSerial.WriteData');
   result:=length(data);
   FSynSer.SendString(data);
 end;
@@ -636,6 +674,7 @@ end;
 
 function TLazSerial.ModemSignals: TModemSignals;
 begin
+  CheckMainThread('TLazSerial.ModemSignals');
   result:=[];
   if FSynSer.CTS then result := result + [ msCTS ];
   if FSynSer.carrier then result := result + [ msCD ];
@@ -645,21 +684,25 @@ end;
 
 function TLazSerial.GetDSR: boolean;
 begin
+  CheckMainThread('TLazSerial.GetDSR');
   result := FSynSer.DSR;
 end;
 
 function TLazSerial.GetCTS: boolean;
 begin
+  CheckMainThread('TLazSerial.GetCTS');
   result := FSynSer.CTS;
 end;
 
 function TLazSerial.GetRing: boolean;
 begin
+  CheckMainThread('TLazSerial.GetRing');
   result := FSynSer.ring;
 end;
 
 function TLazSerial.GetCarrier: boolean;
 begin
+  CheckMainThread('TLazSerial.GetCarrier');
   result := FSynSer.carrier;
 end;
 
@@ -674,18 +717,27 @@ end;  }
 
 procedure TLazSerial.SetDTR(OnOff: boolean);
 begin
+  CheckMainThread('TLazSerial.SetDTR');
   FSynSer.DTR := OnOff;
 end;
 
 
 procedure TLazSerial.SetRTS(OnOff: boolean);
 begin
+  CheckMainThread('TLazSerial.SetRTS');
   FSynSer.RTS := OnOff;
 end;
 
 procedure TLazSerial.ComException(str: string);
 begin
   raise Exception.Create('ComPort error: '+str);
+end;
+
+procedure TLazSerial.CheckMainThread(const AOperation: string);
+begin
+  if GetCurrentThreadID <> MainThreadID then
+    raise ELazSerialThreadError.CreateFmt(
+      '%s must be called from the main thread', [AOperation]);
 end;
 
 procedure TLazSerial.SynSerStatus(Sender: TObject;

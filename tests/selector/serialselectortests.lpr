@@ -11,6 +11,7 @@ uses
   Forms,
   ConsoleTestRunner,
   LazSerialLifecycleTests,
+  LazSerialThreadContractTests,
   SerialSelectorComponentTests,
   SerialWatcherComponentTests;
 

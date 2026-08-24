@@ -47,6 +47,20 @@ main thread. A handler may close or destroy its `TLazSerial` component; an
 exception raised by a handler remains a main-thread exception and does not stop
 the serial reader.
 
+## Threading contract
+
+Create, configure, use and destroy each `TLazSerial` instance on the main
+thread. This includes opening and closing the port, reading and writing data,
+changing serial settings and accessing the low-level `SynSer` object. Calls to
+the transport API from another thread raise `ELazSerialThreadError`.
+
+The reader thread is an internal implementation detail. It only waits for data;
+the corresponding callbacks are delivered on the main thread. Worker threads
+that need to use `TLazSerial` must queue their work to the main thread.
+
+`SynSer` is read-only as a `TLazSerial` property: its settings remain available,
+but the owned `TBlockSerial` instance cannot be replaced.
+
 ## Structured device enumeration
 
 `LazSerialDevices` returns the connectable device name separately from optional

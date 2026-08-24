@@ -18,6 +18,7 @@ type
     procedure Failed;
     procedure DoStart; virtual; abstract;
     procedure DoStop; virtual; abstract;
+    function GetRequiresSettling: Boolean; virtual;
   public
     destructor Destroy; override;
     procedure Start(
@@ -26,6 +27,7 @@ type
     );
     procedure Stop;
     property Active: Boolean read FActive;
+    property RequiresSettling: Boolean read GetRequiresSettling;
   end;
 
   TSerialFallbackChangeSource = class(TSerialChangeSource)
@@ -39,6 +41,7 @@ type
   protected
     procedure DoStart; override;
     procedure DoStop; override;
+    function GetRequiresSettling: Boolean; override;
   public
     constructor Create(const ACandidates: array of TSerialChangeSource);
     destructor Destroy; override;
@@ -94,6 +97,11 @@ type
   end;
 
 implementation
+
+function TSerialChangeSource.GetRequiresSettling: Boolean;
+begin
+  Result := False;
+end;
 
 procedure TSerialChangeSource.Changed;
 begin
@@ -176,6 +184,14 @@ begin
   if (FCurrentIndex < 0) or (FCurrentIndex >= FCandidates.Count) then
     Exit(nil);
   Result := TSerialChangeSource(FCandidates[FCurrentIndex]);
+end;
+
+function TSerialFallbackChangeSource.GetRequiresSettling: Boolean;
+var
+  Source: TSerialChangeSource;
+begin
+  Source := CurrentSource;
+  Result := (Source <> nil) and Source.RequiresSettling;
 end;
 
 procedure TSerialFallbackChangeSource.CandidateChanged(Sender: TObject);

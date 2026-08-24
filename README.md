@@ -104,6 +104,11 @@ On Linux, serial-device changes are detected through a dynamically loaded
 automatically falls back to `inotify(/dev)` and then to periodic polling;
 `libudev` is not a required link-time dependency.
 
+On Windows, TLazSerial listens for the COM-port device-interface class through
+`RegisterDeviceNotification`. Notifications use a short debounce and bounded
+settling retries while SetupAPI finishes publishing a new port. If native
+notification registration fails, the watcher falls back to periodic polling.
+
 ## Serial selector
 
 `TSerialSelector` displays the structured snapshot without mixing the friendly

@@ -13,6 +13,7 @@ uses
   LazSerialLifecycleTests,
   LazSerialThreadContractTests,
   SerialLinuxChangeSourceTests,
+  SerialWindowsChangeSourceTests,
   SerialSelectorComponentTests,
   SerialWatcherComponentTests;
 

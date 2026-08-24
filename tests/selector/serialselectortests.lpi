@@ -25,7 +25,7 @@
         <PackageName Value="IDEIntf"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="6">
+    <Units Count="7">
       <Unit0>
         <Filename Value="serialselectortests.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -55,6 +55,11 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="SerialLinuxChangeSourceTests"/>
       </Unit5>
+      <Unit6>
+        <Filename Value="serialwindowschangesourcetests.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="SerialWindowsChangeSourceTests"/>
+      </Unit6>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

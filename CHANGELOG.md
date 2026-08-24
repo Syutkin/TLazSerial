@@ -25,6 +25,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   contract, and its owned `SynSer` object can no longer be replaced.
 - Linux serial-device watching now prefers dynamically loaded `libudev`, with
   automatic `inotify` and polling fallbacks.
+- Windows serial-device watching now filters COM-port notifications, uses a
+  short debounce with bounded settling retries, and falls back to polling.
 
 ### Fixed
 

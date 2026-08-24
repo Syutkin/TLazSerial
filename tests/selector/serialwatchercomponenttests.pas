@@ -11,20 +11,25 @@ uses
 type
   TFakeSerialChangeSource = class(TSerialChangeSource)
   private
+    FRequiresSettling: Boolean;
     FStartCount: Integer;
     FStopCount: Integer;
   protected
     procedure DoStart; override;
     procedure DoStop; override;
+    function GetRequiresSettling: Boolean; override;
   public
     procedure Signal;
     property StartCount: Integer read FStartCount;
     property StopCount: Integer read FStopCount;
+    property RequiresSettlingValue: Boolean
+      read FRequiresSettling write FRequiresSettling;
   end;
 
   TFakeSerialRefreshScheduler = class(TSerialRefreshScheduler)
   private
     FCancelCount: Integer;
+    FLastDelayMs: Cardinal;
     FScheduleCount: Integer;
   protected
     procedure DoCancel; override;
@@ -32,6 +37,7 @@ type
   public
     procedure Fire;
     property CancelCount: Integer read FCancelCount;
+    property LastDelayMs: Cardinal read FLastDelayMs;
     property ScheduleCount: Integer read FScheduleCount;
   end;
 
@@ -62,19 +68,29 @@ type
 
   TOrchestratedTestSerialWatcher = class(TSerialWatcher)
   private
+    FApplyCount: Integer;
     FLoadCount: Integer;
     FLoadStarted: TEvent;
     FReleaseLoad: TEvent;
     FSnapshot: TSerialDeviceInfoArray;
   protected
+    procedure ApplyDevices(
+      const ADevices: TSerialDeviceInfoArray
+    ); override;
     function LoadDevices: TSerialDeviceInfoArray; override;
   public
     constructor Create(
       AChangeSource: TSerialChangeSource;
       AScheduler: TSerialRefreshScheduler
     ); reintroduce;
+    procedure ConfigureTiming(
+      const AChangeDelayMs: Cardinal;
+      const ASettleRetryDelayMs: Cardinal;
+      const ASettleRetryCount: Cardinal
+    );
     procedure SetSnapshot(const ADevices: array of TSerialDeviceInfo);
     procedure StopNow;
+    property ApplyCount: Integer read FApplyCount;
     property LoadCount: Integer read FLoadCount;
     property LoadStarted: TEvent read FLoadStarted write FLoadStarted;
     property ReleaseLoad: TEvent read FReleaseLoad write FReleaseLoad;
@@ -111,6 +127,9 @@ type
     procedure RefreshLoadsDevicesInBackground;
     procedure RepeatedRefreshDoesNotStartSecondLoad;
     procedure BurstSignalsCoalesceIntoOneRefresh;
+    procedure NativeSignalUsesBoundedSettlingBackoff;
+    procedure ChangedSnapshotStopsSettlingRetries;
+    procedure PollingSignalDoesNotStartSettlingRetries;
     procedure SignalDuringRefreshSchedulesOneFollowUp;
     procedure StopCancelsSignalsAndScheduledRefresh;
     procedure DestroyStopsSourceAndCancelsScheduledRefresh;
@@ -129,6 +148,11 @@ begin
   Inc(FStopCount);
 end;
 
+function TFakeSerialChangeSource.GetRequiresSettling: Boolean;
+begin
+  Result := FRequiresSettling;
+end;
+
 procedure TFakeSerialChangeSource.Signal;
 begin
   Changed;
@@ -142,6 +166,7 @@ end;
 procedure TFakeSerialRefreshScheduler.DoSchedule(const ADelayMs: Cardinal);
 begin
   Inc(FScheduleCount);
+  FLastDelayMs := ADelayMs;
 end;
 
 procedure TFakeSerialRefreshScheduler.Fire;
@@ -162,6 +187,19 @@ begin
   );
 end;
 
+procedure TOrchestratedTestSerialWatcher.ConfigureTiming(
+  const AChangeDelayMs: Cardinal;
+  const ASettleRetryDelayMs: Cardinal;
+  const ASettleRetryCount: Cardinal
+);
+begin
+  ConfigureChangeTiming(
+    AChangeDelayMs,
+    ASettleRetryDelayMs,
+    ASettleRetryCount
+  );
+end;
+
 function TOrchestratedTestSerialWatcher.LoadDevices: TSerialDeviceInfoArray;
 var
   I: Integer;
@@ -176,6 +214,14 @@ begin
   SetLength(Result, Length(FSnapshot));
   for I := Low(FSnapshot) to High(FSnapshot) do
     Result[I] := FSnapshot[I];
+end;
+
+procedure TOrchestratedTestSerialWatcher.ApplyDevices(
+  const ADevices: TSerialDeviceInfoArray
+);
+begin
+  inherited ApplyDevices(ADevices);
+  Inc(FApplyCount);
 end;
 
 procedure TOrchestratedTestSerialWatcher.SetSnapshot(
@@ -499,6 +545,125 @@ begin
     AssertTrue(Watcher.ContainsDevice(DeviceB.Device));
     AssertEquals(1, Watcher.LoadCount);
     AssertEquals(1, FConnectedCount);
+  finally
+    Watcher.Free;
+    Scheduler.Free;
+    Source.Free;
+  end;
+end;
+
+procedure RunOrchestratedRefresh(
+  AWatcher: TOrchestratedTestSerialWatcher;
+  AScheduler: TFakeSerialRefreshScheduler;
+  const AExpectedApplyCount: Integer
+);
+var
+  Deadline: QWord;
+begin
+  Deadline := GetTickCount64 + 1000;
+  repeat
+    if AScheduler.Scheduled then
+      AScheduler.Fire;
+    CheckSynchronize(10);
+  until (AWatcher.ApplyCount >= AExpectedApplyCount) or
+    (GetTickCount64 >= Deadline);
+end;
+
+procedure TSerialWatcherComponentTests.NativeSignalUsesBoundedSettlingBackoff;
+var
+  DeviceA: TSerialDeviceInfo;
+  Scheduler: TFakeSerialRefreshScheduler;
+  Source: TFakeSerialChangeSource;
+  Watcher: TOrchestratedTestSerialWatcher;
+begin
+  DeviceA := CreateDevice('COM1');
+  Source := TFakeSerialChangeSource.Create;
+  Source.RequiresSettlingValue := True;
+  Scheduler := TFakeSerialRefreshScheduler.Create;
+  Watcher := TOrchestratedTestSerialWatcher.Create(Source, Scheduler);
+  try
+    Watcher.ConfigureTiming(150, 250, 3);
+    Watcher.AdoptSnapshot([DeviceA]);
+    Watcher.SetSnapshot([DeviceA]);
+
+    Source.Signal;
+    AssertEquals(150, Scheduler.LastDelayMs);
+
+    RunOrchestratedRefresh(Watcher, Scheduler, 1);
+    AssertEquals(1, Watcher.LoadCount);
+    AssertTrue(Scheduler.Scheduled);
+    AssertEquals(250, Scheduler.LastDelayMs);
+
+    RunOrchestratedRefresh(Watcher, Scheduler, 2);
+    AssertTrue(Scheduler.Scheduled);
+    AssertEquals(500, Scheduler.LastDelayMs);
+
+    RunOrchestratedRefresh(Watcher, Scheduler, 3);
+    AssertTrue(Scheduler.Scheduled);
+    AssertEquals(1000, Scheduler.LastDelayMs);
+
+    RunOrchestratedRefresh(Watcher, Scheduler, 4);
+    AssertEquals(4, Watcher.LoadCount);
+    AssertFalse(Scheduler.Scheduled);
+  finally
+    Watcher.Free;
+    Scheduler.Free;
+    Source.Free;
+  end;
+end;
+
+procedure TSerialWatcherComponentTests.ChangedSnapshotStopsSettlingRetries;
+var
+  DeviceA: TSerialDeviceInfo;
+  DeviceB: TSerialDeviceInfo;
+  Scheduler: TFakeSerialRefreshScheduler;
+  Source: TFakeSerialChangeSource;
+  Watcher: TOrchestratedTestSerialWatcher;
+begin
+  DeviceA := CreateDevice('COM1');
+  DeviceB := CreateDevice('COM2');
+  Source := TFakeSerialChangeSource.Create;
+  Source.RequiresSettlingValue := True;
+  Scheduler := TFakeSerialRefreshScheduler.Create;
+  Watcher := TOrchestratedTestSerialWatcher.Create(Source, Scheduler);
+  try
+    Watcher.ConfigureTiming(150, 250, 3);
+    Watcher.AdoptSnapshot([DeviceA]);
+    Watcher.SetSnapshot([DeviceA, DeviceB]);
+
+    Source.Signal;
+    RunOrchestratedRefresh(Watcher, Scheduler, 1);
+
+    AssertTrue(Watcher.ContainsDevice(DeviceB.Device));
+    AssertFalse(Scheduler.Scheduled);
+  finally
+    Watcher.Free;
+    Scheduler.Free;
+    Source.Free;
+  end;
+end;
+
+procedure TSerialWatcherComponentTests.PollingSignalDoesNotStartSettlingRetries;
+var
+  DeviceA: TSerialDeviceInfo;
+  Scheduler: TFakeSerialRefreshScheduler;
+  Source: TFakeSerialChangeSource;
+  Watcher: TOrchestratedTestSerialWatcher;
+begin
+  DeviceA := CreateDevice('COM1');
+  Source := TFakeSerialChangeSource.Create;
+  Scheduler := TFakeSerialRefreshScheduler.Create;
+  Watcher := TOrchestratedTestSerialWatcher.Create(Source, Scheduler);
+  try
+    Watcher.ConfigureTiming(150, 250, 3);
+    Watcher.AdoptSnapshot([DeviceA]);
+    Watcher.SetSnapshot([DeviceA]);
+
+    Source.Signal;
+    RunOrchestratedRefresh(Watcher, Scheduler, 1);
+
+    AssertEquals(1, Watcher.LoadCount);
+    AssertFalse(Scheduler.Scheduled);
   finally
     Watcher.Free;
     Scheduler.Free;

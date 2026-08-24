@@ -7,12 +7,12 @@ interface
 
 uses
   {$IFDEF Windows}
-  Windows, JwaWinUser, JwaDbt,
+  SerialWindowsChangeSource,
   {$ENDIF}
   {$IFDEF Linux}
   SerialLinuxChangeSource,
   {$ENDIF}
-  Classes, SysUtils, Controls, LCLIntf, LResources, LazSerialDevices,
+  Classes, SysUtils, Controls, LResources, LazSerialDevices,
   SerialWatcherSupport, SerialDeviceRefresh;
 
 type
@@ -25,18 +25,17 @@ type
     FDeviceRefreshThread: TSerialDeviceRefreshThread;
     FDevices: TSerialDeviceInfoArray;
     FInitialized: Boolean;
+    FLastRefreshChanged: Boolean;
     FOwnInfrastructure: Boolean;
     FRefreshDirty: Boolean;
     FRefreshOnLoaded: Boolean;
     FRefreshPending: Boolean;
     FRefreshScheduler: TSerialRefreshScheduler;
+    FSettleRetryCount: Cardinal;
+    FSettleRetryDelayMs: Cardinal;
+    FSettleRetriesRemaining: Cardinal;
+    FSettlingActive: Boolean;
     FWatching: Boolean;
-    {$IFDEF Windows}
-    FDeviceNotification: HDEVNOTIFY;
-    FWindowHandle: HWND;
-    procedure InitializeWindowsNotifications;
-    procedure WndProcNew(var Message: TMessage);
-    {$ENDIF}
     procedure ChangeDetected(Sender: TObject);
     procedure InitializeInfrastructure(
       AChangeSource: TSerialChangeSource;
@@ -45,6 +44,7 @@ type
     );
     procedure RefreshFinished;
     procedure ScheduledRefresh(Sender: TObject);
+    function SettleRetryDelay: Cardinal;
     procedure StartWatching;
     procedure StartBackgroundRefresh;
   protected
@@ -52,6 +52,11 @@ type
       AChangeSource: TSerialChangeSource;
       ARefreshScheduler: TSerialRefreshScheduler;
       const AOwnInfrastructure: Boolean
+    );
+    procedure ConfigureChangeTiming(
+      const AChangeDelayMs: Cardinal;
+      const ASettleRetryDelayMs: Cardinal;
+      const ASettleRetryCount: Cardinal
     );
     procedure ApplyDevices(const ADevices: TSerialDeviceInfoArray); virtual;
     function LoadDevices: TSerialDeviceInfoArray; virtual;
@@ -79,6 +84,11 @@ implementation
 
 const
   SerialRefreshSettleRetryMs = 1;
+  {$IFDEF Windows}
+  WindowsChangeDebounceMs = 150;
+  WindowsSettleRetryDelayMs = 250;
+  WindowsSettleRetryCount = 3;
+  {$ENDIF}
 
 function CopyDevices(
   const ADevices: TSerialDeviceInfoArray
@@ -128,6 +138,8 @@ begin
     Exit;
   FRefreshScheduler.Cancel;
   FRefreshDirty := False;
+  FSettleRetriesRemaining := 0;
+  FSettlingActive := False;
   StartBackgroundRefresh;
 end;
 
@@ -142,11 +154,13 @@ begin
   begin
     FDevices := CopyDevices(ADevices);
     FInitialized := True;
+    FLastRefreshChanged := False;
   end
   else
   begin
     AddedDevices := SnapshotHasAddedDevices(FDevices, ADevices);
     RemovedDevices := SnapshotHasRemovedDevices(FDevices, ADevices);
+    FLastRefreshChanged := AddedDevices or RemovedDevices;
     FDevices := CopyDevices(ADevices);
 
     if AddedDevices and Assigned(FComConnected) then
@@ -190,6 +204,7 @@ begin
   end;
 
   FRefreshPending := True;
+  FLastRefreshChanged := False;
   try
     FDeviceRefreshThread := TSerialDeviceRefreshThread.Create(
       @LoadDevices,
@@ -204,6 +219,8 @@ begin
 end;
 
 procedure TSerialWatcher.RefreshFinished;
+var
+  RetryDelayMs: Cardinal;
 begin
   if not FRefreshPending then
     Exit;
@@ -212,19 +229,53 @@ begin
   begin
     FRefreshDirty := False;
     FRefreshScheduler.Schedule(FChangeDelayMs, @ScheduledRefresh);
+    Exit;
   end;
+  if not FWatching or not FSettlingActive then
+    Exit;
+  if FLastRefreshChanged or (FSettleRetriesRemaining = 0) then
+  begin
+    FSettleRetriesRemaining := 0;
+    FSettlingActive := False;
+    Exit;
+  end;
+
+  RetryDelayMs := SettleRetryDelay;
+  Dec(FSettleRetriesRemaining);
+  FRefreshScheduler.Schedule(RetryDelayMs, @ScheduledRefresh);
 end;
 
 procedure TSerialWatcher.ChangeDetected(Sender: TObject);
 begin
   if not FWatching then
     Exit;
+  FSettlingActive := FChangeSource.RequiresSettling and
+    (FSettleRetryCount > 0);
+  if FSettlingActive then
+    FSettleRetriesRemaining := FSettleRetryCount
+  else
+    FSettleRetriesRemaining := 0;
   if FRefreshPending then
   begin
     FRefreshDirty := True;
     Exit;
   end;
   FRefreshScheduler.Schedule(FChangeDelayMs, @ScheduledRefresh);
+end;
+
+function TSerialWatcher.SettleRetryDelay: Cardinal;
+var
+  Attempt: Cardinal;
+begin
+  Result := FSettleRetryDelayMs;
+  Attempt := FSettleRetryCount - FSettleRetriesRemaining;
+  while Attempt > 0 do
+  begin
+    if Result > High(Cardinal) div 2 then
+      Exit(High(Cardinal));
+    Result := Result * 2;
+    Dec(Attempt);
+  end;
 end;
 
 procedure TSerialWatcher.ScheduledRefresh(Sender: TObject);
@@ -250,15 +301,35 @@ begin
   FDevices := nil;
   FDeviceRefreshThread := nil;
   FInitialized := False;
+  FLastRefreshChanged := False;
   FRefreshDirty := False;
   FRefreshOnLoaded := True;
   FRefreshPending := False;
+  FSettleRetriesRemaining := 0;
+  FSettlingActive := False;
   FWatching := False;
   {$IFDEF Windows}
-  FChangeDelayMs := 3000;
+  ConfigureChangeTiming(
+    WindowsChangeDebounceMs,
+    WindowsSettleRetryDelayMs,
+    WindowsSettleRetryCount
+  );
   {$ELSE}
-  FChangeDelayMs := 0;
+  ConfigureChangeTiming(0, 0, 0);
   {$ENDIF}
+end;
+
+procedure TSerialWatcher.ConfigureChangeTiming(
+  const AChangeDelayMs: Cardinal;
+  const ASettleRetryDelayMs: Cardinal;
+  const ASettleRetryCount: Cardinal
+);
+begin
+  FChangeDelayMs := AChangeDelayMs;
+  FSettleRetryDelayMs := ASettleRetryDelayMs;
+  FSettleRetryCount := ASettleRetryCount;
+  FSettleRetriesRemaining := 0;
+  FSettlingActive := False;
 end;
 
 procedure TSerialWatcher.SetInfrastructure(
@@ -291,7 +362,7 @@ var
 begin
   inherited Create(AOwner);
   {$IFDEF Windows}
-  ChangeSource := TSerialManualChangeSource.Create;
+  ChangeSource := CreateWindowsSerialChangeSource;
   {$ELSE}
   {$IFDEF Linux}
   ChangeSource := CreateLinuxSerialChangeSource;
@@ -309,10 +380,6 @@ begin
     ChangeSource.Free;
     raise;
   end;
-
-  {$IFDEF Windows}
-  InitializeWindowsNotifications;
-  {$ENDIF}
 end;
 
 procedure TSerialWatcher.StartWatching;
@@ -332,6 +399,8 @@ procedure TSerialWatcher.StopWatching;
 begin
   FWatching := False;
   FRefreshDirty := False;
+  FSettleRetriesRemaining := 0;
+  FSettlingActive := False;
   if FRefreshScheduler <> nil then
     FRefreshScheduler.Cancel;
   if FChangeSource <> nil then
@@ -355,12 +424,6 @@ end;
 destructor TSerialWatcher.Destroy;
 begin
   StopWatching;
-  {$IFDEF Windows}
-  if FDeviceNotification <> nil then
-    UnregisterDeviceNotification(FDeviceNotification);
-  if FWindowHandle <> 0 then
-    DeallocateHWnd(FWindowHandle);
-  {$ENDIF}
   if FOwnInfrastructure then
   begin
     FRefreshScheduler.Free;
@@ -368,39 +431,6 @@ begin
   end;
   inherited Destroy;
 end;
-
-{$IFDEF Windows}
-procedure TSerialWatcher.InitializeWindowsNotifications;
-const
-  GuidDeviceInterfaceUsbDevice: TGUID =
-    '{A5DCBF10-6530-11D2-901F-00C04FB951ED}';
-var
-  DeviceInterface: DEV_BROADCAST_DEVICEINTERFACE_W;
-begin
-  FWindowHandle := LCLIntf.AllocateHWnd(@WndProcNew);
-  ZeroMemory(@DeviceInterface, SizeOf(DeviceInterface));
-  DeviceInterface.dbcc_size := SizeOf(DeviceInterface);
-  DeviceInterface.dbcc_devicetype := DBT_DEVTYP_DEVICEINTERFACE;
-  DeviceInterface.dbcc_classguid := GuidDeviceInterfaceUsbDevice;
-  FDeviceNotification := RegisterDeviceNotification(
-    FWindowHandle,
-    @DeviceInterface,
-    DEVICE_NOTIFY_WINDOW_HANDLE or DEVICE_NOTIFY_ALL_INTERFACE_CLASSES
-  );
-  Win32Check(FDeviceNotification <> nil);
-end;
-
-procedure TSerialWatcher.WndProcNew(var Message: TMessage);
-begin
-  if Message.Msg = WM_DEVICECHANGE then
-    case Message.WParam of
-      DBT_DEVICEARRIVAL,
-      DBT_DEVICEREMOVECOMPLETE,
-      DBT_DEVNODES_CHANGED:
-        ChangeDetected(Self);
-    end;
-end;
-{$ENDIF}
 
 procedure Register;
 begin

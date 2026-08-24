@@ -17,6 +17,11 @@ msgstr ""
 msgid "Even"
 msgstr ""
 
+#: lazserialcommon.lngmanualdevice
+#, object-pascal-format
+msgid "Manual device: %s"
+msgstr ""
+
 #: lazserialcommon.lngmark
 msgid "Mark"
 msgstr ""

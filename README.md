@@ -102,19 +102,18 @@ Platform metadata sources are:
 ## Serial selector
 
 `TSerialSelector` displays the structured snapshot without mixing the friendly
-text with the connectable name:
+text with the connectable name. `Device` always returns the connectable name:
 
 ```pascal
-var
-  Device: TSerialDeviceInfo;
-begin
-  if SerialSelector.TryGetSelectedDevice(Device) then
-    Serial.Device := Device.Device;
-end;
+SerialSelector.AllowCustomDevice := True;
+Serial.Device := SerialSelector.Device;
 ```
 
 Use `ShowFriendlyName` to switch friendly text on or off. `DisplayOptions`
-independently controls Vendor, Model, SerialShort and ErrorCode output.
+independently controls Vendor, Model, SerialShort and ErrorCode output. With
+`AllowCustomDevice = True`, the user can enter a port or alias that is absent
+from the current snapshot. `TryGetSelectedDevice` returns `False` for such a
+manual value because no structured metadata record exists for it.
 
 ## Platform notes
 

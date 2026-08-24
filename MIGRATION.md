@@ -36,14 +36,23 @@ owns one structured snapshot and exposes:
 - `Device` — the connectable name for the current selection;
 - `Devices[Index]` and `DeviceCount` — structured snapshot access;
 - `TryGetSelectedDevice` — safe access to the selected record;
+- `AllowCustomDevice` — opt-in manual entry of a connectable name that is not
+  present in the current snapshot;
 - `ShowFriendlyName` and `DisplayOptions` — display-only configuration.
 
 Example:
 
 ```pascal
+SerialSelector.AllowCustomDevice := True;
+LazSerial.Device := SerialSelector.Device;
+
 if SerialSelector.TryGetSelectedDevice(DeviceInfo) then
-  LazSerial.Device := DeviceInfo.Device;
+  WriteLn(DeviceInfo.Model);
 ```
+
+`Device` works for both a selected snapshot record and a manual value.
+`TryGetSelectedDevice` only succeeds when metadata for the selected record is
+available.
 
 The old `ssoAppendFriendlyNames`, `ssoUseWMI`, `ssoHide_tty_usbserial`,
 `ssoAppendSerialNumber` and `ssoAppendErrorCode` options are removed. Use

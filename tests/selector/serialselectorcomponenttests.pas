@@ -6,7 +6,7 @@ interface
 
 uses
   Classes, SysUtils, SyncObjs, TypInfo, FpcUnit, TestRegistry, StdCtrls,
-  LazSerialDevices, SerialSelector;
+  LazSerialCommon, LazSerialDevices, LazSerialSetup, SerialSelector;
 
 type
   TTestSerialSelector = class(TSerialSelector)
@@ -18,6 +18,7 @@ type
   public
     procedure SetSnapshot(const ADevices: array of TSerialDeviceInfo);
     function DisplayItem(const AIndex: Integer): string;
+    function HintFirstLine: string;
     function IsSorted: Boolean;
   end;
 
@@ -56,6 +57,18 @@ type
     procedure DisplayOptionsPreserveSelection;
     procedure SelectorKeepsItemsUnsorted;
     procedure ObjectInspectorContractContainsDisplayProperties;
+    procedure CustomDeviceDefaultsToDisabledAndReadOnly;
+    procedure EnablingCustomDeviceMakesSelectorEditable;
+    procedure DisabledCustomDeviceKeepsExistingSelectionRules;
+    procedure CustomDeviceSetBeforeAndAfterRefreshIsPreserved;
+    procedure CustomDeviceSurvivesRebuildAndEmptySnapshot;
+    procedure CustomDeviceHasNoSelectedMetadata;
+    procedure CustomDevicePromotesWhenEnumerated;
+    procedure DisablingCustomDeviceRestoresReadOnlySelection;
+    procedure SetupDialogAllowsCustomDevice;
+    procedure SelectedDeviceHintStartsWithDeviceMetadata;
+    procedure CustomDeviceHintStartsWithManualDevice;
+    procedure EmptySelectorHintReportsNoDevices;
     procedure InternalListPropertiesAreNotPublished;
     procedure BackgroundRefreshAppliesSnapshotOnMainThread;
     procedure QueuedBackgroundRefreshDoesNotDeliverAfterDestroy;
@@ -101,6 +114,19 @@ end;
 function TTestSerialSelector.UseBackgroundRefresh: Boolean;
 begin
   Result := False;
+end;
+
+function TTestSerialSelector.HintFirstLine: string;
+var
+  HintText: string;
+  LineBreakIndex: Integer;
+begin
+  HintText := BuildHintCaption;
+  LineBreakIndex := Pos(LineEnding, HintText);
+  if LineBreakIndex > 0 then
+    Result := Copy(HintText, 1, LineBreakIndex - 1)
+  else
+    Result := HintText;
 end;
 
 procedure TTestSerialSelector.SetSnapshot(
@@ -342,6 +368,9 @@ begin
   AssertNotNull(
     GetPropInfo(TSerialSelector.ClassInfo, 'DisplayOptions')
   );
+  AssertNotNull(
+    GetPropInfo(TSerialSelector.ClassInfo, 'AllowCustomDevice')
+  );
   AssertNotNull(GetPropInfo(TSerialSelector.ClassInfo, 'ShowHint'));
   AssertNotNull(GetPropInfo(TSerialSelector.ClassInfo, 'Hint'));
   AssertTrue(FSelector.ShowFriendlyName);
@@ -350,6 +379,204 @@ begin
   );
   AssertTrue(FSelector.ShowHint);
   AssertEquals('', FSelector.Hint);
+end;
+
+procedure TSerialSelectorComponentTests.CustomDeviceDefaultsToDisabledAndReadOnly;
+begin
+  AssertFalse(FSelector.AllowCustomDevice);
+  AssertTrue(FSelector.ReadOnly);
+end;
+
+procedure TSerialSelectorComponentTests.EnablingCustomDeviceMakesSelectorEditable;
+begin
+  FSelector.AllowCustomDevice := True;
+
+  AssertEquals(Ord(csDropDown), Ord(FSelector.Style));
+  AssertFalse(FSelector.ReadOnly);
+end;
+
+procedure TSerialSelectorComponentTests.
+  DisabledCustomDeviceKeepsExistingSelectionRules;
+var
+  DeviceA: TSerialDeviceInfo;
+begin
+  DeviceA := CreateDevice('/dev/ttyACM0', '', '', '');
+  FSelector.SetSnapshot([DeviceA]);
+  FSelector.Refresh;
+
+  FSelector.Device := '/tmp/manual-port';
+  AssertEquals('', FSelector.Device);
+
+  FSelector.Refresh;
+  AssertEquals(DeviceA.Device, FSelector.Device);
+  AssertEquals(0, FSelector.ItemIndex);
+end;
+
+procedure TSerialSelectorComponentTests.
+  CustomDeviceSetBeforeAndAfterRefreshIsPreserved;
+var
+  DeviceA: TSerialDeviceInfo;
+begin
+  DeviceA := CreateDevice('/dev/ttyACM0', '', '', '');
+  FSelector.AllowCustomDevice := True;
+  FSelector.Device := '/tmp/manual-before-refresh';
+  FSelector.SetSnapshot([DeviceA]);
+
+  FSelector.Refresh;
+  AssertEquals('/tmp/manual-before-refresh', FSelector.Device);
+  AssertEquals('/tmp/manual-before-refresh', FSelector.Text);
+  AssertEquals(-1, FSelector.ItemIndex);
+
+  FSelector.Device := '/tmp/manual-after-refresh';
+  FSelector.Refresh;
+  AssertEquals('/tmp/manual-after-refresh', FSelector.Device);
+  AssertEquals('/tmp/manual-after-refresh', FSelector.Text);
+  AssertEquals(-1, FSelector.ItemIndex);
+end;
+
+procedure TSerialSelectorComponentTests.
+  CustomDeviceSurvivesRebuildAndEmptySnapshot;
+var
+  DeviceA: TSerialDeviceInfo;
+  DeviceB: TSerialDeviceInfo;
+begin
+  DeviceA := CreateDevice('/dev/ttyACM0', 'Espressif', 'ESP32', 'ABC123');
+  DeviceB := CreateDevice('/dev/ttyUSB0', 'QinHeng', 'CH343', 'XYZ');
+  FSelector.AllowCustomDevice := True;
+  FSelector.SetSnapshot([DeviceA, DeviceB]);
+  FSelector.Refresh;
+  FSelector.Text := '/tmp/typed-port';
+  FSelector.ItemIndex := -1;
+
+  FSelector.SetSnapshot([DeviceB, DeviceA]);
+  FSelector.Refresh;
+  AssertEquals('/tmp/typed-port', FSelector.Device);
+  AssertEquals('/tmp/typed-port', FSelector.Text);
+
+  FSelector.DisplayOptions := [sddoModel];
+  FSelector.ShowFriendlyName := False;
+  AssertEquals('/tmp/typed-port', FSelector.Device);
+  AssertEquals('/tmp/typed-port', FSelector.Text);
+
+  FSelector.SetSnapshot([]);
+  FSelector.Refresh;
+  AssertEquals('/tmp/typed-port', FSelector.Device);
+  AssertEquals('/tmp/typed-port', FSelector.Text);
+  AssertEquals(-1, FSelector.ItemIndex);
+end;
+
+procedure TSerialSelectorComponentTests.CustomDeviceHasNoSelectedMetadata;
+var
+  DeviceA: TSerialDeviceInfo;
+  SelectedDevice: TSerialDeviceInfo;
+begin
+  DeviceA := CreateDevice('/dev/ttyACM0', 'Espressif', 'ESP32', 'ABC123');
+  FSelector.AllowCustomDevice := True;
+  FSelector.SetSnapshot([DeviceA]);
+  FSelector.Refresh;
+
+  FSelector.Device := '/tmp/manual-port';
+
+  AssertEquals('/tmp/manual-port', FSelector.Device);
+  AssertFalse(FSelector.TryGetSelectedDevice(SelectedDevice));
+  AssertEquals('', SelectedDevice.Device);
+end;
+
+procedure TSerialSelectorComponentTests.CustomDevicePromotesWhenEnumerated;
+var
+  DeviceA: TSerialDeviceInfo;
+  CustomDevice: TSerialDeviceInfo;
+  SelectedDevice: TSerialDeviceInfo;
+begin
+  DeviceA := CreateDevice('/dev/ttyACM0', '', '', '');
+  CustomDevice := CreateDevice('/tmp/manual-port', 'Virtual', 'PTY', '');
+  FSelector.AllowCustomDevice := True;
+  FSelector.SetSnapshot([DeviceA]);
+  FSelector.Refresh;
+  FSelector.Device := CustomDevice.Device;
+
+  FSelector.SetSnapshot([DeviceA, CustomDevice]);
+  FSelector.Refresh;
+
+  AssertEquals(CustomDevice.Device, FSelector.Device);
+  AssertEquals(1, FSelector.ItemIndex);
+  AssertTrue(FSelector.TryGetSelectedDevice(SelectedDevice));
+  AssertEquals('PTY', SelectedDevice.Model);
+end;
+
+procedure TSerialSelectorComponentTests.
+  DisablingCustomDeviceRestoresReadOnlySelection;
+var
+  DeviceA: TSerialDeviceInfo;
+  DeviceB: TSerialDeviceInfo;
+begin
+  DeviceA := CreateDevice('/dev/ttyACM0', '', '', '');
+  DeviceB := CreateDevice('/dev/ttyUSB0', '', '', '');
+  FSelector.AllowCustomDevice := True;
+  FSelector.SetSnapshot([DeviceA, DeviceB]);
+  FSelector.Refresh;
+  FSelector.Device := '/tmp/manual-port';
+
+  FSelector.AllowCustomDevice := False;
+
+  AssertFalse(FSelector.AllowCustomDevice);
+  AssertTrue(FSelector.ReadOnly);
+  AssertEquals(DeviceA.Device, FSelector.Device);
+  AssertEquals(0, FSelector.ItemIndex);
+end;
+
+procedure TSerialSelectorComponentTests.SetupDialogAllowsCustomDevice;
+var
+  SetupForm: TComSetupFrm;
+begin
+  SetupForm := TComSetupFrm.Create(nil);
+  try
+    AssertTrue(SetupForm.SerialSelector1.AllowCustomDevice);
+  finally
+    SetupForm.Free;
+  end;
+end;
+
+procedure TSerialSelectorComponentTests.
+  SelectedDeviceHintStartsWithDeviceMetadata;
+var
+  DeviceA: TSerialDeviceInfo;
+begin
+  DeviceA := CreateDevice(
+    '/dev/ttyACM0',
+    'Espressif',
+    'ESP32',
+    'ABC123'
+  );
+  FSelector.SetSnapshot([DeviceA]);
+  FSelector.Refresh;
+
+  AssertEquals(
+    FormatSerialDeviceDisplayName(
+      DeviceA,
+      DefaultSerialDeviceDisplayOptions
+    ),
+    FSelector.HintFirstLine
+  );
+end;
+
+procedure TSerialSelectorComponentTests.
+  CustomDeviceHintStartsWithManualDevice;
+const
+  CUSTOM_DEVICE = '/tmp/gps-a';
+begin
+  FSelector.AllowCustomDevice := True;
+  FSelector.Device := CUSTOM_DEVICE;
+
+  AssertEquals(
+    Format(lngManualDevice, [CUSTOM_DEVICE]),
+    FSelector.HintFirstLine
+  );
+end;
+
+procedure TSerialSelectorComponentTests.EmptySelectorHintReportsNoDevices;
+begin
+  AssertEquals(lngNoDevicesAvailable, FSelector.HintFirstLine);
 end;
 
 procedure TSerialSelectorComponentTests.InternalListPropertiesAreNotPublished;

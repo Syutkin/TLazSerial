@@ -8,6 +8,7 @@ resourcestring
   lngAddedPorts = 'Added ports: ';
   lngRemovedPorts = 'Removed ports: ';
   lngNoDevicesAvailable = 'No devices available';
+  lngManualDevice = 'Manual device: %s';
 
   lngNone = 'None';
   lngXonXoff_DTR = 'XonXoff w DTR';

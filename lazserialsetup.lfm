@@ -206,6 +206,7 @@ object ComSetupFrm: TComSetupFrm
       AnchorSideTop.Control = GroupBox1
       AnchorSideRight.Control = GroupBox1
       AnchorSideRight.Side = asrBottom
+      AllowCustomDevice = True
       Left = 100
       Height = 32
       Top = 2
@@ -232,6 +233,7 @@ object ComSetupFrm: TComSetupFrm
     BorderSpacing.InnerBorder = 4
     Caption = 'OK'
     Constraints.MaxWidth = 100
+    Constraints.MinHeight = 32
     Constraints.MinWidth = 100
     Default = True
     Font.CharSet = ANSI_CHARSET
@@ -261,6 +263,7 @@ object ComSetupFrm: TComSetupFrm
     BorderSpacing.InnerBorder = 4
     Caption = 'Cancel'
     Constraints.MaxWidth = 100
+    Constraints.MinHeight = 32
     Constraints.MinWidth = 100
     Font.CharSet = ANSI_CHARSET
     Font.Height = -13

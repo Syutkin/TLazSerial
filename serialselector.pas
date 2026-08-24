@@ -12,6 +12,7 @@ uses
 type
   TSerialSelector = class(TCustomComboBox)
   private
+    FAllowCustomDevice: Boolean;
     FDevices: TSerialDeviceInfoArray;
     FRequestedDevice: string;
     FSerialWatcher: TSerialWatcher;
@@ -28,6 +29,8 @@ type
     function GetDevice: string;
     function GetDeviceCount: Integer;
     function GetDeviceInfo(const AIndex: Integer): TSerialDeviceInfo;
+    procedure ApplyCustomDeviceMode;
+    procedure SetAllowCustomDevice(const AValue: Boolean);
     procedure SetDevice(const AValue: string);
     procedure SetDisplayOptions(const AValue: TSerialDeviceDisplayOptions);
     procedure SetShowFriendlyName(const AValue: Boolean);
@@ -44,6 +47,7 @@ type
   protected
     procedure ApplyDevices(const ADevices: TSerialDeviceInfoArray); virtual;
     function BackgroundRefreshFinished: Boolean;
+    function BuildHintCaption: string;
     function LoadDevices: TSerialDeviceInfoArray; virtual;
     procedure StartBackgroundRefresh;
     function UseBackgroundRefresh: Boolean; virtual;
@@ -61,6 +65,8 @@ type
       read GetDeviceInfo;
     property Text;
   published
+    property AllowCustomDevice: Boolean
+      read FAllowCustomDevice write SetAllowCustomDevice default False;
     property ShowFriendlyName: Boolean
       read FShowFriendlyName write SetShowFriendlyName default True;
     property DisplayOptions: TSerialDeviceDisplayOptions
@@ -174,6 +180,8 @@ function TSerialSelector.GetDevice: string;
 begin
   if (ItemIndex >= Low(FDevices)) and (ItemIndex <= High(FDevices)) then
     Result := FDevices[ItemIndex].Device
+  else if FAllowCustomDevice then
+    Result := Text
   else
     Result := '';
 end;
@@ -192,6 +200,35 @@ begin
   Result := FDevices[AIndex];
 end;
 
+procedure TSerialSelector.ApplyCustomDeviceMode;
+begin
+  if FAllowCustomDevice then
+  begin
+    Style := csDropDown;
+    ReadOnly := False;
+  end
+  else
+    ReadOnly := True;
+end;
+
+procedure TSerialSelector.SetAllowCustomDevice(const AValue: Boolean);
+var
+  SelectedDevice: string;
+begin
+  if FAllowCustomDevice = AValue then
+  begin
+    ApplyCustomDeviceMode;
+    Exit;
+  end;
+
+  SelectedDevice := Device;
+  if SelectedDevice = '' then
+    SelectedDevice := FRequestedDevice;
+  FAllowCustomDevice := AValue;
+  ApplyCustomDeviceMode;
+  RebuildItems(SelectedDevice);
+end;
+
 procedure TSerialSelector.SetDevice(const AValue: string);
 var
   Index: Integer;
@@ -199,9 +236,18 @@ begin
   FRequestedDevice := AValue;
   Index := IndexOfSerialDevice(FDevices, AValue);
   if Index >= 0 then
+  begin
     ItemIndex := Index
+  end
   else
+  begin
     ItemIndex := -1;
+    if FAllowCustomDevice then
+      Text := AValue
+    else
+      Text := '';
+  end;
+  SelLength := 0;
 end;
 
 procedure TSerialSelector.SetDisplayOptions(
@@ -252,7 +298,9 @@ begin
   end;
 
   SelectedIndex := IndexOfSerialDevice(FDevices, ASelectedDevice);
-  if (SelectedIndex < 0) and (Length(FDevices) > 0) then
+  if (SelectedIndex < 0) and
+    not (FAllowCustomDevice and (ASelectedDevice <> '')) and
+    (Length(FDevices) > 0) then
     SelectedIndex := 0;
   ItemIndex := SelectedIndex;
 
@@ -260,6 +308,11 @@ begin
   begin
     FRequestedDevice := FDevices[ItemIndex].Device;
     Text := Items[ItemIndex];
+  end
+  else if FAllowCustomDevice then
+  begin
+    FRequestedDevice := ASelectedDevice;
+    Text := ASelectedDevice;
   end
   else
     Text := '';
@@ -290,7 +343,7 @@ var
   SelectedDevice: string;
 begin
   SelectedDevice := Device;
-  if SelectedDevice = '' then
+  if (SelectedDevice = '') and not FAllowCustomDevice then
     SelectedDevice := FRequestedDevice;
   OldDevices := CopyDevices(FDevices);
   FDevices := CopyDevices(ADevices);
@@ -351,6 +404,7 @@ end;
 constructor TSerialSelector.Create(AOwner: TComponent);
 begin
   inherited Create(AOwner);
+  FAllowCustomDevice := False;
   FDevices := nil;
   FRequestedDevice := '';
   FAddedPorts := '';
@@ -363,7 +417,7 @@ begin
 
   Sorted := False;
   ItemIndex := -1;
-  ReadOnly := True;
+  ApplyCustomDeviceMode;
   Text := '';
   Width := 256;
 
@@ -391,27 +445,34 @@ begin
     ADevice := Default(TSerialDeviceInfo);
 end;
 
-procedure TSerialSelector.UpdateHintCaption;
+function TSerialSelector.BuildHintCaption: string;
 begin
   if FHint <> '' then
-    FHintCaption := FHint
+    Result := FHint
   else if (ItemIndex >= Low(FDevices)) and (ItemIndex <= High(FDevices)) then
-    FHintCaption := FormatSerialDeviceDisplayName(
+    Result := FormatSerialDeviceDisplayName(
       FDevices[ItemIndex],
       DefaultSerialDeviceDisplayOptions
     )
+  else if FAllowCustomDevice and (Device <> '') then
+    Result := Format(lngManualDevice, [Device])
   else
-    FHintCaption := lngNoDevicesAvailable;
+    Result := lngNoDevicesAvailable;
 
   if FHint = '' then
   begin
     if FAddedPorts <> '' then
-      FHintCaption := FHintCaption + LineEnding + ' ' + LineEnding +
+      Result := Result + LineEnding + ' ' + LineEnding +
         lngAddedPorts + LineEnding + FAddedPorts;
     if FRemovedPorts <> '' then
-      FHintCaption := FHintCaption + LineEnding + ' ' + LineEnding +
+      Result := Result + LineEnding + ' ' + LineEnding +
         lngRemovedPorts + LineEnding + FRemovedPorts;
   end;
+end;
+
+procedure TSerialSelector.UpdateHintCaption;
+begin
+  FHintCaption := BuildHintCaption;
 end;
 
 procedure TSerialSelector.UpdateHint;
@@ -471,6 +532,7 @@ end;
 procedure TSerialSelector.Loaded;
 begin
   inherited Loaded;
+  ApplyCustomDeviceMode;
   if not (csDesigning in ComponentState) then
     Refresh;
 end;

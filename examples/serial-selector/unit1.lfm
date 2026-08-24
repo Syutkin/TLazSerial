@@ -255,6 +255,7 @@ object Form1: TForm1
     AnchorSideLeft.Control = Owner
     AnchorSideTop.Control = Owner
     AnchorSideRight.Control = cmdConnect
+    AllowCustomDevice = True
     Left = 7
     Height = 32
     Top = 7

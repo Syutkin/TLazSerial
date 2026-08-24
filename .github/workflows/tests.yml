@@ -159,6 +159,46 @@ jobs:
             --file=ci-artifacts/selector-results.xml \
             2>&1 | tee ci-artifacts/run-selector-tests.log
 
+      - name: Validate test reports
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo '### FPCUnit results' >> "$GITHUB_STEP_SUMMARY"
+          echo '| Project | Tests | Errors | Failures |' >> "$GITHUB_STEP_SUMMARY"
+          echo '| --- | ---: | ---: | ---: |' >> "$GITHUB_STEP_SUMMARY"
+
+          validate_report() {
+            report="$1"
+            project="$2"
+            test -s "$report"
+            tests="$(sed -n 's:.*<NumberOfRunTests>\([0-9][0-9]*\)</NumberOfRunTests>.*:\1:p' "$report" | tail -n 1)"
+            errors="$(sed -n 's:.*<NumberOfErrors>\([0-9][0-9]*\)</NumberOfErrors>.*:\1:p' "$report" | tail -n 1)"
+            failures="$(sed -n 's:.*<NumberOfFailures>\([0-9][0-9]*\)</NumberOfFailures>.*:\1:p' "$report" | tail -n 1)"
+            test -n "$tests"
+            test -n "$errors"
+            test -n "$failures"
+            printf '| %s | %s | %s | %s |\n' \
+              "$project" "$tests" "$errors" "$failures" \
+              >> "$GITHUB_STEP_SUMMARY"
+            test "$tests" -gt 0
+            test "$errors" -eq 0
+            test "$failures" -eq 0
+          }
+
+          validate_report ci-artifacts/deviceinfo-results.xml deviceinfo
+          validate_report ci-artifacts/selector-results.xml selector
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: tlazserial-linux-test-reports
+          path: ci-artifacts/*-results.xml
+          if-no-files-found: warn
+          retention-days: 14
+
       - name: Upload failure diagnostics
         if: failure()
         uses: actions/upload-artifact@v7
@@ -317,6 +357,51 @@ jobs:
           if ($LASTEXITCODE -ne 0) {
             throw "Selector tests failed: exit code $LASTEXITCODE"
           }
+
+      - name: Validate test reports
+        if: always()
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          Add-Content $env:GITHUB_STEP_SUMMARY '### FPCUnit results'
+          Add-Content $env:GITHUB_STEP_SUMMARY '| Project | Tests | Errors | Failures |'
+          Add-Content $env:GITHUB_STEP_SUMMARY '| --- | ---: | ---: | ---: |'
+
+          function Test-FpcUnitReport {
+            param(
+              [string] $Report,
+              [string] $Project
+            )
+
+            if (-not (Test-Path -LiteralPath $Report -PathType Leaf)) {
+              throw "Missing FPCUnit report: $Report"
+            }
+            [xml] $Document = Get-Content -LiteralPath $Report -Raw
+            [int] $Tests = $Document.TestResults.NumberOfRunTests
+            [int] $Errors = $Document.TestResults.NumberOfErrors
+            [int] $Failures = $Document.TestResults.NumberOfFailures
+            Add-Content $env:GITHUB_STEP_SUMMARY `
+              "| $Project | $Tests | $Errors | $Failures |"
+            if ($Tests -le 0) {
+              throw "FPCUnit report contains no executed tests: $Report"
+            }
+            if (($Errors -ne 0) -or ($Failures -ne 0)) {
+              throw "FPCUnit report contains errors or failures: $Report"
+            }
+          }
+
+          Test-FpcUnitReport 'ci-artifacts/deviceinfo-results.xml' 'deviceinfo'
+          Test-FpcUnitReport 'ci-artifacts/selector-results.xml' 'selector'
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: tlazserial-windows-test-reports
+          path: ci-artifacts/*-results.xml
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Upload failure diagnostics
         if: failure()
@@ -498,6 +583,46 @@ jobs:
             --all --format=xml \
             --file=ci-artifacts/selector-results.xml \
             2>&1 | tee ci-artifacts/run-selector-tests.log
+
+      - name: Validate test reports
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo '### FPCUnit results' >> "$GITHUB_STEP_SUMMARY"
+          echo '| Project | Tests | Errors | Failures |' >> "$GITHUB_STEP_SUMMARY"
+          echo '| --- | ---: | ---: | ---: |' >> "$GITHUB_STEP_SUMMARY"
+
+          validate_report() {
+            report="$1"
+            project="$2"
+            test -s "$report"
+            tests="$(sed -n 's:.*<NumberOfRunTests>\([0-9][0-9]*\)</NumberOfRunTests>.*:\1:p' "$report" | tail -n 1)"
+            errors="$(sed -n 's:.*<NumberOfErrors>\([0-9][0-9]*\)</NumberOfErrors>.*:\1:p' "$report" | tail -n 1)"
+            failures="$(sed -n 's:.*<NumberOfFailures>\([0-9][0-9]*\)</NumberOfFailures>.*:\1:p' "$report" | tail -n 1)"
+            test -n "$tests"
+            test -n "$errors"
+            test -n "$failures"
+            printf '| %s | %s | %s | %s |\n' \
+              "$project" "$tests" "$errors" "$failures" \
+              >> "$GITHUB_STEP_SUMMARY"
+            test "$tests" -gt 0
+            test "$errors" -eq 0
+            test "$failures" -eq 0
+          }
+
+          validate_report ci-artifacts/deviceinfo-results.xml deviceinfo
+          validate_report ci-artifacts/selector-results.xml selector
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: tlazserial-macos-test-reports
+          path: ci-artifacts/*-results.xml
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Upload failure diagnostics
         if: failure()

@@ -5,8 +5,8 @@ unit LazSerialTransportTests;
 interface
 
 uses
-  Classes, FpcUnit, TestRegistry, LazSerial, LazSerialCommon,
-  LazSerialTransport, LazSynaSer;
+  Classes, SyncObjs, FpcUnit, TestRegistry, LazSerial, LazSerialCommon,
+  LazSerialDevices, LazSerialTransport, LazSynaSer;
 
 type
   TSerialConfigCall = record
@@ -33,13 +33,20 @@ type
     FLastConfig: TSerialConfigCall;
     FLastConnectedDevice: string;
     FLeaveClosedOnConnect: Boolean;
+    FLock: TCriticalSection;
     FOpen: Boolean;
-    FReadPacket: AnsiString;
-    FReadString: AnsiString;
+    FReadEvent: TEvent;
+    FReadPacketCount: Integer;
+    FReadQueue: array of AnsiString;
+    FReadStringCount: Integer;
     FRing: Boolean;
     FRTS: Boolean;
     FStatusHandler: THookSerialStatus;
+    FWrittenData: AnsiString;
+    function PopReadData: AnsiString;
   public
+    constructor Create;
+    destructor Destroy; override;
     procedure Close; override;
     procedure Configure(ABaudRate, ADataBits: Integer; AParity: Char;
       AStopBits: Integer; AFlowControl: TFlowControl); override;
@@ -59,6 +66,7 @@ type
     function GetCTS: Boolean; override;
     function GetDSR: Boolean; override;
     function GetRing: Boolean; override;
+    procedure QueueIncoming(const AData: AnsiString);
     property CanReadValue: Boolean read FCanRead write FCanRead;
     property CarrierValue: Boolean read FCarrier write FCarrier;
     property CloseCount: Integer read FCloseCount;
@@ -74,14 +82,18 @@ type
     property LeaveClosedOnConnect: Boolean
       read FLeaveClosedOnConnect write FLeaveClosedOnConnect;
     property OpenValue: Boolean read FOpen write FOpen;
-    property ReadPacketValue: AnsiString read FReadPacket write FReadPacket;
-    property ReadStringValue: AnsiString read FReadString write FReadString;
+    property ReadPacketCount: Integer read FReadPacketCount;
+    property ReadStringCount: Integer read FReadStringCount;
     property RingValue: Boolean read FRing write FRing;
     property RTSValue: Boolean read FRTS;
+    property WrittenData: AnsiString read FWrittenData;
   end;
 
   TTestableLazSerial = class(TLazSerial)
   public
+    procedure AdoptWatcherSnapshot(
+      const ADevices: TSerialDeviceInfoArray);
+    procedure CheckForDisconnectedDevice;
     procedure InstallTransport(ATransport: TLazSerialTransport);
   end;
 
@@ -107,10 +119,31 @@ implementation
 uses
   SysUtils;
 
+constructor TFakeSerialTransport.Create;
+begin
+  inherited Create;
+  FLock := TCriticalSection.Create;
+  FReadEvent := TEvent.Create(nil, True, False, '');
+end;
+
+destructor TFakeSerialTransport.Destroy;
+begin
+  FReadEvent.SetEvent;
+  FReadEvent.Free;
+  FLock.Free;
+  inherited Destroy;
+end;
+
 procedure TFakeSerialTransport.Close;
 begin
   Inc(FCloseCount);
-  FOpen := False;
+  FLock.Acquire;
+  try
+    FOpen := False;
+    FReadEvent.SetEvent;
+  finally
+    FLock.Release;
+  end;
 end;
 
 procedure TFakeSerialTransport.Configure(ABaudRate, ADataBits: Integer;
@@ -133,14 +166,34 @@ begin
   FDeviceName := ADevice;
   if FFailConnect then
     raise EInvalidOperation.Create('Simulated Connect failure');
-  FOpen := not FLeaveClosedOnConnect;
+  FLock.Acquire;
+  try
+    FOpen := not FLeaveClosedOnConnect;
+    if FOpen and (Length(FReadQueue) > 0) then
+      FReadEvent.SetEvent;
+  finally
+    FLock.Release;
+  end;
 end;
 
 function TFakeSerialTransport.CanRead(const ATimeout: Integer): Boolean;
+var
+  Handler: THookSerialStatus;
 begin
-  if ATimeout > 0 then
-    Sleep(1);
-  Result := FOpen and FCanRead;
+  Result := FReadEvent.WaitFor(ATimeout) = wrSignaled;
+  if not Result then
+    Exit;
+  FLock.Acquire;
+  try
+    Result := FOpen and (FCanRead or (Length(FReadQueue) > 0));
+    if not Result then
+      FReadEvent.ResetEvent;
+    Handler := FStatusHandler;
+  finally
+    FLock.Release;
+  end;
+  if Result and Assigned(Handler) then
+    Handler(Self, HR_CanRead, '');
 end;
 
 function TFakeSerialTransport.DeviceName: string;
@@ -161,25 +214,68 @@ end;
 function TFakeSerialTransport.ReadPacket(
   const ATimeout: Integer): AnsiString;
 begin
-  Result := FReadPacket;
+  Inc(FReadPacketCount);
+  Result := PopReadData;
 end;
 
 function TFakeSerialTransport.ReadString(
   const ATimeout: Integer): AnsiString;
 begin
-  Result := FReadString;
+  Inc(FReadStringCount);
+  Result := PopReadData;
 end;
 
 function TFakeSerialTransport.SendBuffer(ABuffer: Pointer;
   ASize: Integer): Integer;
 begin
+  if ASize > 0 then
+  begin
+    SetLength(FWrittenData, Length(FWrittenData) + ASize);
+    Move(ABuffer^, FWrittenData[Length(FWrittenData) - ASize + 1], ASize);
+  end;
   Result := ASize;
 end;
 
 function TFakeSerialTransport.SendString(
   const AData: AnsiString): Integer;
 begin
+  FWrittenData := FWrittenData + AData;
   Result := Length(AData);
+end;
+
+function TFakeSerialTransport.PopReadData: AnsiString;
+var
+  I: Integer;
+begin
+  Result := '';
+  FLock.Acquire;
+  try
+    if Length(FReadQueue) = 0 then
+      Exit;
+    Result := FReadQueue[0];
+    for I := 1 to High(FReadQueue) do
+      FReadQueue[I - 1] := FReadQueue[I];
+    SetLength(FReadQueue, Length(FReadQueue) - 1);
+    if not FCanRead and (Length(FReadQueue) = 0) then
+      FReadEvent.ResetEvent;
+  finally
+    FLock.Release;
+  end;
+end;
+
+procedure TFakeSerialTransport.QueueIncoming(const AData: AnsiString);
+var
+  Index: Integer;
+begin
+  FLock.Acquire;
+  try
+    Index := Length(FReadQueue);
+    SetLength(FReadQueue, Index + 1);
+    FReadQueue[Index] := AData;
+    FReadEvent.SetEvent;
+  finally
+    FLock.Release;
+  end;
 end;
 
 procedure TFakeSerialTransport.SetDTR(const AEnabled: Boolean);
@@ -222,6 +318,17 @@ procedure TTestableLazSerial.InstallTransport(
   ATransport: TLazSerialTransport);
 begin
   ReplaceTransportForTesting(ATransport);
+end;
+
+procedure TTestableLazSerial.AdoptWatcherSnapshot(
+  const ADevices: TSerialDeviceInfoArray);
+begin
+  AdoptWatcherSnapshotForTesting(ADevices);
+end;
+
+procedure TTestableLazSerial.CheckForDisconnectedDevice;
+begin
+  TriggerDisconnected;
 end;
 
 procedure TLazSerialTransportTests.AssertLastConfig(

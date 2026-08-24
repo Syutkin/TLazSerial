@@ -60,7 +60,8 @@ uses
   Windows, Classes,
 {$ENDIF}
   SysUtils, SyncObjs, lazsynaser,  LResources, Forms, Controls, Graphics, Dialogs,
-  PropEdits, SerialWatcher, LazSerialCommon, LazSerialTransport;
+  PropEdits, SerialWatcher, LazSerialCommon, LazSerialDevices,
+  LazSerialTransport;
 
 
 type
@@ -179,11 +180,12 @@ type
       Reason: THookSerialReason; const Value: string);
     procedure SynSerStatus(Sender: TObject; Reason: THookSerialReason;
       const Value: string);
-    procedure TriggerDisconnected;
     function AppliedBaudrate: integer;
     function GetSynSer: TBlockSerial;
 
   protected
+    procedure AdoptWatcherSnapshotForTesting(
+      const ADevices: TSerialDeviceInfoArray);
     procedure ReplaceTransportForTesting(ATransport: TLazSerialTransport);
     procedure SetActive(state: boolean);
     procedure SetBaudRate(br: TBaudRate);
@@ -194,6 +196,7 @@ type
     procedure SetStopBits(sb: TStopBits);
     procedure SetDevice(const ADevice: string);
     procedure SetRcvLineCRLF(AValue: Boolean);
+    procedure TriggerDisconnected;
 
   public
     constructor Create(AOwner: TComponent); override;
@@ -546,6 +549,13 @@ begin
   FTransport := ATransport;
 end;
 
+procedure TLazSerial.AdoptWatcherSnapshotForTesting(
+  const ADevices: TSerialDeviceInfoArray);
+begin
+  CheckMainThread('TLazSerial.AdoptWatcherSnapshotForTesting');
+  FSerialWatcher.AdoptSnapshot(ADevices);
+end;
+
 procedure TLazSerial.SetActive(state: boolean);
 begin
   CheckMainThread('TLazSerial.Active');
@@ -675,14 +685,16 @@ end;
 function TLazSerial.WriteBuffer(var buf; size: integer): integer;
 begin
   CheckMainThread('TLazSerial.WriteBuffer');
-//  if FSynSer.Handle=INVALID_HANDLE_VALUE then
- //   ComException('can not write to a closed port.');
+  if not FTransport.IsOpen then
+    ComException('can not write to a closed port.');
   result:= FTransport.SendBuffer(Pointer(@buf), size);
 end;
 
 function TLazSerial.WriteData(data: string): integer;
 begin
   CheckMainThread('TLazSerial.WriteData');
+  if not FTransport.IsOpen then
+    ComException('can not write to a closed port.');
   result:=FTransport.SendString(data);
 end;
 

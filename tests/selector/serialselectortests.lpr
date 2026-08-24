@@ -19,7 +19,8 @@ uses
   SerialWatcherComponentTests,
   LazSerialSetupTests,
   SerialInfrastructureTests,
-  LazSerialTransportTests;
+  LazSerialTransportTests,
+  LazSerialIoLifecycleTests;
 
 var
   Runner: TTestRunner;

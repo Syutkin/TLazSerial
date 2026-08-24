@@ -20,7 +20,8 @@ uses
   LazSerialSetupTests,
   SerialInfrastructureTests,
   LazSerialTransportTests,
-  LazSerialIoLifecycleTests;
+  LazSerialIoLifecycleTests,
+  SerialPlatformChangeSourceSmokeTests;
 
 var
   Runner: TTestRunner;

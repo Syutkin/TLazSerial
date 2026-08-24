@@ -25,7 +25,7 @@
         <PackageName Value="IDEIntf"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="12">
+    <Units Count="13">
       <Unit0>
         <Filename Value="serialselectortests.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -85,6 +85,11 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="LazSerialIoLifecycleTests"/>
       </Unit11>
+      <Unit12>
+        <Filename Value="serialplatformchangesourcesmoketests.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="SerialPlatformChangeSourceSmokeTests"/>
+      </Unit12>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

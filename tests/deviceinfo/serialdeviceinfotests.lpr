@@ -13,6 +13,7 @@ uses
   SerialDeviceFormatTests,
   SerialDeviceParserTests,
   SerialDeviceCollectorTests,
+  SerialPlatformCollectorSmokeTests,
   SerialWindowsDeviceTests;
 
 procedure RunCommandRunnerHelper;

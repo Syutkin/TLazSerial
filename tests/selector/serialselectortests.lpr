@@ -18,7 +18,8 @@ uses
   SerialSelectorComponentTests,
   SerialWatcherComponentTests,
   LazSerialSetupTests,
-  SerialInfrastructureTests;
+  SerialInfrastructureTests,
+  LazSerialTransportTests;
 
 var
   Runner: TTestRunner;

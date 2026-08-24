@@ -12,7 +12,8 @@ uses
   LazSerialDeviceParsers, LazSerialDeviceCollectors, SerialDeviceRefresh,
   SerialCommandRunner, LazSerialWindowsDevices, LazSynaFpc, LazSynaUtil,
   LazSynaSer, lazserialsetup, SerialWatcherSupport, SerialLinuxChangeSource,
-  SerialWindowsChangeSource, SerialMacChangeSource, LazarusPackageIntf;
+  SerialWindowsChangeSource, SerialMacChangeSource, LazSerialTransport,
+  LazarusPackageIntf;
 
 implementation
 

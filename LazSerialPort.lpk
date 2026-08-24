@@ -26,7 +26,7 @@
   along with This library; if not, Write to the Free Software Foundation,
   Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA. }"/>
     <Version Minor="8"/>
-    <Files Count="22">
+    <Files Count="23">
       <Item1>
         <Filename Value="lazserial.pas"/>
         <HasRegisterProc Value="True"/>
@@ -118,6 +118,10 @@
         <Filename Value="serialmacchangesource.pas"/>
         <UnitName Value="SerialMacChangeSource"/>
       </Item22>
+      <Item23>
+        <Filename Value="lazserialtransport.pas"/>
+        <UnitName Value="LazSerialTransport"/>
+      </Item23>
     </Files>
     <CompatibilityMode Value="True"/>
     <i18n>

@@ -50,7 +50,7 @@ begin
   begin
     Write('partial');
     Flush(Output);
-    Sleep(1000);
+    Sleep(StrToIntDef(ParamStr(4), 1000));
     AssignFile(MarkerFile, ParamStr(3));
     Rewrite(MarkerFile);
     WriteLn(MarkerFile, 'child survived');

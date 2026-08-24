@@ -120,8 +120,8 @@ begin
   StartedAt := GetTickCount64;
   AssertFalse(RunSerialCommand(
     CurrentExecutable,
-    ['--command-runner-helper', 'partial-timeout', MarkerPath],
-    100,
+    ['--command-runner-helper', 'partial-timeout', MarkerPath, '2000'],
+    1000,
     Output
   ));
   Elapsed := GetTickCount64 - StartedAt;
@@ -129,9 +129,9 @@ begin
   AssertEquals('partial', Output);
   AssertTrue(
     'Timed-out command must be terminated without waiting for normal exit',
-    Elapsed < 1000
+    Elapsed < 2000
   );
-  Sleep(1100);
+  Sleep(1500);
   AssertFalse(
     'Timed-out child process must not continue after RunSerialCommand returns',
     FileExists(MarkerPath)

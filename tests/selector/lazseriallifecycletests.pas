@@ -410,7 +410,7 @@ begin
     SlaveHandle := -1;
 
     FCanReadStatusCount := 0;
-    FStatusThreadId := 0;
+    FStatusThreadId := Default(TThreadID);
     MainThreadId := GetCurrentThreadID;
     Serial := TLazSerial.Create(nil);
     try

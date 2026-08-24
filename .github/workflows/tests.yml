@@ -99,11 +99,20 @@ jobs:
             "${lazarus_dir#/}"
           sudo chown "$(id -u):$(id -g)" "$archive"
 
+      - name: Configure toolchain paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          lazbuild_path="$(readlink -f "$(command -v lazbuild)")"
+          lazarus_dir="$(dirname "$lazbuild_path")"
+          test -d "$lazarus_dir/lcl"
+          echo "LAZARUS_DIR=$lazarus_dir" >> "$GITHUB_ENV"
+
       - name: Verify toolchain
         shell: bash
         run: |
           set -euo pipefail
-          test "$(lazbuild --version)" = '4.8'
+          test "$(lazbuild --lazarusdir="$LAZARUS_DIR" --version)" = '4.8'
           test "$(fpc -iV)" = '3.2.2'
 
       - name: Save Lazarus toolchain cache
@@ -119,18 +128,19 @@ jobs:
           set -euo pipefail
           mkdir -p ci-artifacts
 
-          lazbuild --build-all --ws=gtk2 LazSerialPort.lpk \
+          lazbuild --lazarusdir="$LAZARUS_DIR" \
+            --build-all --ws=gtk2 LazSerialPort.lpk \
             2>&1 | tee ci-artifacts/build-package.log
-          lazbuild --build-all --ws=gtk2 \
+          lazbuild --lazarusdir="$LAZARUS_DIR" --build-all --ws=gtk2 \
             tests/deviceinfo/serialdeviceinfotests.lpi \
             2>&1 | tee ci-artifacts/build-deviceinfo-tests.log
-          lazbuild --build-all --ws=gtk2 \
+          lazbuild --lazarusdir="$LAZARUS_DIR" --build-all --ws=gtk2 \
             tests/selector/serialselectortests.lpi \
             2>&1 | tee ci-artifacts/build-selector-tests.log
-          lazbuild --build-all --ws=gtk2 \
+          lazbuild --lazarusdir="$LAZARUS_DIR" --build-all --ws=gtk2 \
             examples/serial-selector/serialselectorexample.lpi \
             2>&1 | tee ci-artifacts/build-serial-selector-example.log
-          lazbuild --build-all --ws=gtk2 \
+          lazbuild --lazarusdir="$LAZARUS_DIR" --build-all --ws=gtk2 \
             examples/serial-gps/serialgpsexample.lpi \
             2>&1 | tee ci-artifacts/build-serial-gps-example.log
 
@@ -342,6 +352,7 @@ jobs:
         run: |
           set -euo pipefail
           archive="$RUNNER_TOOL_CACHE/tlazserial/lazarus-4.8-macos-arm64.tar"
+          sudo rm -f /etc/fpc.cfg
           sudo tar --extract --file "$archive" --directory /
 
       - name: Install Lazarus 4.8

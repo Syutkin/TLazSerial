@@ -344,7 +344,7 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: ${{ runner.tool_cache }}/tlazserial/lazarus-4.8-macos-arm64.tar
-          key: tlazserial-macos-latest-arm64-lazarus-4.8-fpc-3.2.4rc1-v1
+          key: tlazserial-macos-latest-arm64-lazarus-4.8-fpc-3.2.4rc1-v2
 
       - name: Restore cached Lazarus toolchain
         if: steps.toolchain-cache.outputs.cache-hit == 'true'
@@ -352,7 +352,6 @@ jobs:
         run: |
           set -euo pipefail
           archive="$RUNNER_TOOL_CACHE/tlazserial/lazarus-4.8-macos-arm64.tar"
-          sudo rm -f /etc/fpc.cfg
           sudo tar --extract --file "$archive" --directory /
 
       - name: Install Lazarus 4.8
@@ -402,9 +401,12 @@ jobs:
           set -euo pipefail
           archive="$RUNNER_TOOL_CACHE/tlazserial/lazarus-4.8-macos-arm64.tar"
           lazarus_dir="$RUNNER_TOOL_CACHE/tlazserial/installed/lazarus-4.8"
+          fpc_config_dir="$RUNNER_TOOL_CACHE/tlazserial/installed/fpc-config"
+          mkdir -p "$fpc_config_dir"
+          cp -L /etc/fpc.cfg "$fpc_config_dir/fpc.cfg"
           paths=(
-            etc/fpc.cfg
             usr/local/lib/fpc
+            "${fpc_config_dir#/}"
             "${lazarus_dir#/}"
           )
 
@@ -429,6 +431,8 @@ jobs:
         run: |
           set -euo pipefail
           lazarus_dir="$RUNNER_TOOL_CACHE/tlazserial/installed/lazarus-4.8"
+          fpc_config_dir="$RUNNER_TOOL_CACHE/tlazserial/installed/fpc-config"
+          test -f "$fpc_config_dir/fpc.cfg"
           lazbuild_path=''
           while IFS= read -r candidate; do
             lazbuild_path="$candidate"
@@ -440,6 +444,7 @@ jobs:
           echo '/usr/local/bin' >> "$GITHUB_PATH"
           echo "$lazarus_root" >> "$GITHUB_PATH"
           echo "LAZARUS_DIR=$lazarus_root" >> "$GITHUB_ENV"
+          echo "PPC_CONFIG_PATH=$fpc_config_dir" >> "$GITHUB_ENV"
 
       - name: Verify toolchain
         shell: bash
@@ -456,7 +461,7 @@ jobs:
         uses: actions/cache/save@v6
         with:
           path: ${{ runner.tool_cache }}/tlazserial/lazarus-4.8-macos-arm64.tar
-          key: tlazserial-macos-latest-arm64-lazarus-4.8-fpc-3.2.4rc1-v1
+          key: tlazserial-macos-latest-arm64-lazarus-4.8-fpc-3.2.4rc1-v2
 
       - name: Build package, tests and examples
         shell: bash

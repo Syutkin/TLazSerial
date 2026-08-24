@@ -207,7 +207,7 @@ begin
   {$IFDEF Windows}
   if FDeviceNotification <> nil then
     UnregisterDeviceNotification(FDeviceNotification);
-  if FWindowHandle <> nil then
+  if FWindowHandle <> 0 then
     DeallocateHWnd(FWindowHandle);
   {$ENDIF}
   inherited Destroy;

@@ -561,6 +561,11 @@ procedure TSerialDeviceCollectorTests.DeviceLookupUsesLinuxCaseSensitiveNames;
 var
   Devices: TSerialDeviceInfoArray;
 begin
+  {$IFNDEF Linux}
+  Ignore('This test verifies Linux device-name case sensitivity');
+  Exit;
+  {$ENDIF}
+
   Devices := nil;
   SetLength(Devices, 2);
   Devices[0].Device := '/dev/ttyACM0';

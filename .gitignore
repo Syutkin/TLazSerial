@@ -48,6 +48,7 @@ Temporary Items
 
 # Lazarus build output
 *.lps
+/backup/
 /lib/
 /packagefiles.xml
 /examples/serial-gps/lib/

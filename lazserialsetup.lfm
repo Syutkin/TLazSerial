@@ -1,19 +1,22 @@
 object ComSetupFrm: TComSetupFrm
   Left = 857
-  Height = 272
+  Height = 250
   Top = 119
-  Width = 310
+  Width = 300
   HorzScrollBar.Page = 230
   VertScrollBar.Page = 271
   ActiveControl = Button1
+  AutoSize = True
   BorderStyle = bsDialog
   Caption = 'Setup'
-  ClientHeight = 272
-  ClientWidth = 310
+  ClientHeight = 250
+  ClientWidth = 300
+  Constraints.MinHeight = 250
+  Constraints.MinWidth = 300
   Font.Height = -11
   Font.Name = 'MS Sans Serif'
   Position = poMainFormCenter
-  LCLVersion = '4.6.0.0'
+  LCLVersion = '4.8.0.0'
   OnCreate = FormCreate
   object Button1: TButton
     Left = 104
@@ -51,13 +54,21 @@ object ComSetupFrm: TComSetupFrm
     TabOrder = 2
   end
   object GroupBox1: TGroupBox
+    AnchorSideLeft.Control = Owner
+    AnchorSideTop.Control = Owner
+    AnchorSideRight.Control = Owner
+    AnchorSideRight.Side = asrBottom
+    AnchorSideBottom.Control = Owner
+    AnchorSideBottom.Side = asrBottom
     Left = 0
-    Height = 216
-    Top = 8
-    Width = 309
+    Height = 250
+    Top = 0
+    Width = 300
+    Anchors = [akTop, akLeft, akRight, akBottom]
+    AutoSize = True
     Caption = ' Settings '
-    ClientHeight = 195
-    ClientWidth = 305
+    ClientHeight = 221
+    ClientWidth = 296
     Font.CharSet = ANSI_CHARSET
     Font.Height = -13
     Font.Name = 'MS Sans Serif'
@@ -67,113 +78,181 @@ object ComSetupFrm: TComSetupFrm
     ParentFont = False
     TabOrder = 0
     object Label1: TLabel
-      Left = 6
-      Height = 16
-      Top = 15
-      Width = 29
+      AnchorSideLeft.Control = GroupBox1
+      AnchorSideTop.Control = SerialSelector1
+      AnchorSideTop.Side = asrCenter
+      Left = 8
+      Height = 18
+      Top = 9
+      Width = 28
+      BorderSpacing.Left = 8
       Caption = 'Port'
       ParentColor = False
     end
     object Label2: TLabel
-      Left = 6
-      Height = 16
-      Top = 48
-      Width = 68
+      AnchorSideLeft.Control = GroupBox1
+      AnchorSideTop.Control = ComComboBox2
+      AnchorSideTop.Side = asrCenter
+      Left = 8
+      Height = 18
+      Top = 43
+      Width = 64
+      BorderSpacing.Left = 8
       Caption = 'Baud rate'
       ParentColor = False
     end
     object Label3: TLabel
-      Left = 6
-      Height = 16
-      Top = 79
-      Width = 63
+      AnchorSideLeft.Control = GroupBox1
+      AnchorSideTop.Control = ComComboBox3
+      AnchorSideTop.Side = asrCenter
+      Left = 8
+      Height = 18
+      Top = 77
+      Width = 59
+      BorderSpacing.Left = 8
       Caption = 'Data bits'
       ParentColor = False
     end
     object Label4: TLabel
-      Left = 6
-      Height = 16
+      AnchorSideLeft.Control = GroupBox1
+      AnchorSideTop.Control = ComComboBox4
+      AnchorSideTop.Side = asrCenter
+      Left = 8
+      Height = 18
       Top = 111
-      Width = 62
+      Width = 57
+      BorderSpacing.Left = 8
       Caption = 'Stop bits'
       ParentColor = False
     end
     object Label5: TLabel
-      Left = 6
-      Height = 16
-      Top = 135
-      Width = 41
+      AnchorSideLeft.Control = GroupBox1
+      AnchorSideTop.Control = ComComboBox5
+      AnchorSideTop.Side = asrCenter
+      Left = 8
+      Height = 18
+      Top = 145
+      Width = 40
+      BorderSpacing.Left = 8
       Caption = 'Parity'
       ParentColor = False
     end
     object Label6: TLabel
-      Left = 6
-      Height = 16
-      Top = 167
-      Width = 84
+      AnchorSideLeft.Control = GroupBox1
+      AnchorSideTop.Control = ComComboBox6
+      AnchorSideTop.Side = asrCenter
+      Left = 8
+      Height = 18
+      Top = 179
+      Width = 80
+      BorderSpacing.Left = 8
       Caption = 'Flow control'
       ParentColor = False
     end
     object ComComboBox2: TComboBox
-      Left = 102
-      Height = 24
-      Top = 41
-      Width = 200
-      ItemHeight = 16
+      AnchorSideLeft.Control = SerialSelector1
+      AnchorSideTop.Control = SerialSelector1
+      AnchorSideTop.Side = asrBottom
+      AnchorSideRight.Control = GroupBox1
+      AnchorSideRight.Side = asrBottom
+      Left = 100
+      Height = 32
+      Top = 36
+      Width = 188
+      Anchors = [akTop, akLeft, akRight]
+      BorderSpacing.Top = 2
+      BorderSpacing.Right = 8
+      BorderSpacing.Bottom = 2
+      ItemHeight = 25
       Style = csDropDownList
       TabOrder = 0
     end
     object ComComboBox3: TComboBox
-      Left = 102
-      Height = 24
-      Top = 71
-      Width = 200
-      ItemHeight = 16
+      AnchorSideLeft.Control = SerialSelector1
+      AnchorSideTop.Control = ComComboBox2
+      AnchorSideTop.Side = asrBottom
+      AnchorSideRight.Control = GroupBox1
+      AnchorSideRight.Side = asrBottom
+      AnchorSideBottom.Control = ComComboBox4
+      Left = 100
+      Height = 32
+      Top = 70
+      Width = 188
+      Anchors = [akTop, akLeft, akRight]
+      BorderSpacing.Top = 2
+      BorderSpacing.Right = 8
+      BorderSpacing.Bottom = 2
+      ItemHeight = 25
       Style = csDropDownList
       TabOrder = 1
     end
     object ComComboBox4: TComboBox
-      Left = 102
-      Height = 24
-      Top = 101
-      Width = 200
-      ItemHeight = 16
+      AnchorSideLeft.Control = SerialSelector1
+      AnchorSideTop.Control = ComComboBox3
+      AnchorSideTop.Side = asrBottom
+      AnchorSideRight.Control = GroupBox1
+      AnchorSideRight.Side = asrBottom
+      Left = 100
+      Height = 32
+      Top = 104
+      Width = 188
+      Anchors = [akTop, akLeft, akRight]
+      BorderSpacing.Top = 2
+      BorderSpacing.Right = 8
+      BorderSpacing.Bottom = 2
+      ItemHeight = 25
       Style = csDropDownList
       TabOrder = 2
     end
     object ComComboBox5: TComboBox
-      Left = 102
-      Height = 24
-      Top = 131
-      Width = 200
-      ItemHeight = 16
+      AnchorSideLeft.Control = SerialSelector1
+      AnchorSideTop.Control = ComComboBox4
+      AnchorSideTop.Side = asrBottom
+      AnchorSideRight.Control = GroupBox1
+      AnchorSideRight.Side = asrBottom
+      Left = 100
+      Height = 32
+      Top = 138
+      Width = 188
+      Anchors = [akTop, akLeft, akRight]
+      BorderSpacing.Top = 2
+      BorderSpacing.Right = 8
+      BorderSpacing.Bottom = 2
+      ItemHeight = 25
       Style = csDropDownList
       TabOrder = 3
     end
     object ComComboBox6: TComboBox
-      Left = 102
-      Height = 24
-      Top = 161
-      Width = 200
-      ItemHeight = 16
+      AnchorSideLeft.Control = SerialSelector1
+      AnchorSideTop.Control = ComComboBox5
+      AnchorSideTop.Side = asrBottom
+      AnchorSideRight.Control = GroupBox1
+      AnchorSideRight.Side = asrBottom
+      Left = 100
+      Height = 32
+      Top = 172
+      Width = 188
+      Anchors = [akTop, akLeft, akRight]
+      BorderSpacing.Top = 2
+      BorderSpacing.Right = 8
+      BorderSpacing.Bottom = 2
+      ItemHeight = 25
       Style = csDropDownList
       TabOrder = 4
     end
     object SerialSelector1: TSerialSelector
-      Left = 102
-      Height = 21
-      Top = 11
-      Width = 200
-      Font.CharSet = ANSI_CHARSET
-      Font.Color = clBlack
-      Font.Height = -11
-      Font.Name = 'MS Sans Serif'
-      Font.Pitch = fpVariable
-      Font.Quality = fqDraft
-      Font.Style = [fsBold]
-      ItemHeight = 13
-      ParentFont = False
-      ShowHint = True
+      AnchorSideTop.Control = GroupBox1
+      AnchorSideRight.Control = GroupBox1
+      AnchorSideRight.Side = asrBottom
+      Left = 100
+      Height = 32
+      Top = 2
+      Width = 188
+      Anchors = [akTop, akLeft, akRight]
+      BorderSpacing.Top = 2
+      BorderSpacing.Right = 8
+      BorderSpacing.Bottom = 2
+      ItemHeight = 31
       TabOrder = 5
     end
   end

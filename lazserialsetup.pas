@@ -15,7 +15,7 @@ interface
 
 uses
   LCLIntf, SysUtils, Classes, Graphics, Controls, Forms, Dialogs,
-  StdCtrls, ExtCtrls, Buttons, LResources,lazSerial,
+  StdCtrls, ExtCtrls, Buttons, lazSerial,
   SerialSelector, LazSerialCommon;
 
 type
@@ -63,6 +63,8 @@ function FlowControlToStr(FlowControl: TFlowControl): string;
 implementation
 
 uses lazsynaser;
+
+{$R *.lfm}
 
 const
 {$IFDEF UNIX}
@@ -253,6 +255,4 @@ begin
   StringArrayToList(ComComboBox6.Items,FlowControlStrings) ;
 end;
 
-initialization
-  {$i lazSerialSetup.lrs}
 end.

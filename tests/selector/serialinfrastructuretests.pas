@@ -282,6 +282,7 @@ begin
     AssertEquals(1, Length(Probe.DeliveredDevices));
     AssertEquals('COM42', Probe.DeliveredDevices[0].Device);
     AssertTrue(Probe.CallbackThreadId = MainThreadID);
+    AssertTrue(Refresh.LoadSucceeded);
   finally
     CancelSerialDeviceRefresh(Refresh);
     Probe.Free;
@@ -310,6 +311,7 @@ begin
     AssertEquals(1, Probe.DeliveredCount);
     AssertEquals(0, Length(Probe.DeliveredDevices));
     AssertEquals(1, Probe.FinishedCount);
+    AssertFalse(Refresh.LoadSucceeded);
   finally
     CancelSerialDeviceRefresh(Refresh);
     Probe.Free;

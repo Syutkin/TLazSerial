@@ -19,6 +19,7 @@ type
     FDelivering: Boolean;
     FDevices: TSerialDeviceInfoArray;
     FLoadDevices: TLoadSerialDevicesMethod;
+    FLoadSucceeded: Boolean;
     FOnDevicesLoaded: TSerialDevicesLoadedMethod;
     FOnFinished: TSerialDeviceRefreshFinishedMethod;
     FStarted: Boolean;
@@ -34,6 +35,7 @@ type
     procedure DetachCallbacks;
     procedure Start; reintroduce;
     property Delivering: Boolean read FDelivering;
+    property LoadSucceeded: Boolean read FLoadSucceeded;
   end;
 
 procedure CancelSerialDeviceRefresh(
@@ -52,6 +54,7 @@ begin
   FreeOnTerminate := False;
   FDelivering := False;
   FLoadDevices := ALoadDevices;
+  FLoadSucceeded := False;
   FOnDevicesLoaded := AOnDevicesLoaded;
   FOnFinished := AOnFinished;
   FStarted := False;
@@ -74,9 +77,13 @@ procedure TSerialDeviceRefreshThread.Execute;
 begin
   try
     if not Terminated and Assigned(FLoadDevices) then
+    begin
       FDevices := FLoadDevices();
+      FLoadSucceeded := True;
+    end;
   except
     FDevices := nil;
+    FLoadSucceeded := False;
   end;
 
   if not Terminated and Assigned(FOnDevicesLoaded) then

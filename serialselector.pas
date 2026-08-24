@@ -342,6 +342,10 @@ var
   OldDevices: TSerialDeviceInfoArray;
   SelectedDevice: string;
 begin
+  if (FDeviceRefreshThread <> nil) and
+    FDeviceRefreshThread.Delivering and
+    not FDeviceRefreshThread.LoadSucceeded then
+    Exit;
   SelectedDevice := Device;
   if (SelectedDevice = '') and not FAllowCustomDevice then
     SelectedDevice := FRequestedDevice;

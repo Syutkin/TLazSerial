@@ -19,6 +19,15 @@ uses
   SerialSelector, LazSerialCommon;
 
 type
+  TComPortSettings = record
+    Device: string;
+    BaudRate: TBaudRate;
+    DataBits: TDataBits;
+    StopBits: TStopBits;
+    Parity: TParity;
+    FlowControl: TFlowControl;
+  end;
+
   // TLazSerial setup dialog
 
   { TComSetupFrm }
@@ -43,10 +52,14 @@ type
   private
     { Private declarations }
   public
-    { Public declarations }
+    procedure LoadSettings(const ASettings: TComPortSettings);
+    function ReadSettings: TComPortSettings;
   end;
 
 procedure EditComPort(ComPort: TLazSerial);
+procedure ApplyComPortSetupResult(ComPort: TLazSerial;
+  SetupForm: TComSetupFrm; const AModalResult: TModalResult);
+function ReadComPortSettings(ComPort: TLazSerial): TComPortSettings;
 
 // conversion functions
 function StrToBaudRate(Str: string): TBaudRate;
@@ -182,29 +195,43 @@ begin
 end;
 
 procedure EditComPort(ComPort: TLazSerial);
+var
+  SetupForm: TComSetupFrm;
 begin
-  with TComSetupFrm.Create(nil) do
-  begin
-    SerialSelector1.Device :=  ComPort.Device;
-    ComComboBox2.Text :=  BaudRateToStr(ComPort.BaudRate);
-    ComComboBox3.Text :=  DataBitsToStr(ComPort.DataBits);
-    ComComBoBox4.Text :=  StopBitsToStr(ComPort.StopBits);
-    ComComBoBox5.Text :=  ParityToStr(ComPort.Parity);
-    ComComBoBox6.Text :=  FlowControlToStr(ComPort.FlowControl);
-
- if ShowModal = mrOK then
-    begin
-      ComPort.Close;
-      ComPort.Device := SerialSelector1.Device;
-      ComPort.BaudRate := StrToBaudRate(ComComboBox2.Text);
-      ComPort.DataBits := StrToDataBits(ComComboBox3.Text);
-      ComPort.StopBits := StrToStopBits(ComComboBox4.Text);
-      ComPort.Parity := StrToParity(ComComboBox5.Text);
-      ComPort.FlowCOntrol := StrToFlowControl(ComComboBox6.Text);
-      // ComPort.Open;
-    end;
-    Free;
+  SetupForm := TComSetupFrm.Create(nil);
+  try
+    SetupForm.LoadSettings(ReadComPortSettings(ComPort));
+    ApplyComPortSetupResult(ComPort, SetupForm, SetupForm.ShowModal);
+  finally
+    SetupForm.Free;
   end;
+end;
+
+function ReadComPortSettings(ComPort: TLazSerial): TComPortSettings;
+begin
+  Result.Device := ComPort.Device;
+  Result.BaudRate := ComPort.BaudRate;
+  Result.DataBits := ComPort.DataBits;
+  Result.StopBits := ComPort.StopBits;
+  Result.Parity := ComPort.Parity;
+  Result.FlowControl := ComPort.FlowControl;
+end;
+
+procedure ApplyComPortSetupResult(ComPort: TLazSerial;
+  SetupForm: TComSetupFrm; const AModalResult: TModalResult);
+var
+  Settings: TComPortSettings;
+begin
+  if AModalResult <> mrOK then
+    Exit;
+  Settings := SetupForm.ReadSettings;
+  ComPort.Close;
+  ComPort.Device := Settings.Device;
+  ComPort.BaudRate := Settings.BaudRate;
+  ComPort.DataBits := Settings.DataBits;
+  ComPort.StopBits := Settings.StopBits;
+  ComPort.Parity := Settings.Parity;
+  ComPort.FlowControl := Settings.FlowControl;
 end;
 
 { TComSetupFrm }
@@ -213,11 +240,36 @@ end;
 procedure TComSetupFrm.FormCreate(Sender: TObject);
 begin
   SerialSelector1.ShowHint := true;
+  ComComboBox2.Items.Clear;
+  ComComboBox3.Items.Clear;
+  ComComboBox4.Items.Clear;
+  ComComboBox5.Items.Clear;
+  ComComboBox6.Items.Clear;
   StringArrayToList(ComComboBox2.Items,BaudRateStrings) ;
   StringArrayToList(ComComboBox3.Items,DataBitsStrings) ;
   StringArrayToList(ComComboBox4.Items,StopBitsStrings) ;
   StringArrayToList(ComComboBox5.Items,ParityBitsStrings) ;
   StringArrayToList(ComComboBox6.Items,FlowControlStrings) ;
+end;
+
+procedure TComSetupFrm.LoadSettings(const ASettings: TComPortSettings);
+begin
+  SerialSelector1.Device := ASettings.Device;
+  ComComboBox2.Text := BaudRateToStr(ASettings.BaudRate);
+  ComComboBox3.Text := DataBitsToStr(ASettings.DataBits);
+  ComComboBox4.Text := StopBitsToStr(ASettings.StopBits);
+  ComComboBox5.Text := ParityToStr(ASettings.Parity);
+  ComComboBox6.Text := FlowControlToStr(ASettings.FlowControl);
+end;
+
+function TComSetupFrm.ReadSettings: TComPortSettings;
+begin
+  Result.Device := SerialSelector1.Device;
+  Result.BaudRate := StrToBaudRate(ComComboBox2.Text);
+  Result.DataBits := StrToDataBits(ComComboBox3.Text);
+  Result.StopBits := StrToStopBits(ComComboBox4.Text);
+  Result.Parity := StrToParity(ComComboBox5.Text);
+  Result.FlowControl := StrToFlowControl(ComComboBox6.Text);
 end;
 
 end.

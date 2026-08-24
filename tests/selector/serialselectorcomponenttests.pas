@@ -25,14 +25,25 @@ type
   TBackgroundTestSerialSelector = class(TSerialSelector)
   private
     FApplyCount: PInteger;
+    FLoadCount: Integer;
     FLoadStarted: TEvent;
+    FRaiseOnLoad: Boolean;
+    FRefreshDuringApply: Boolean;
+    FSnapshot: TSerialDeviceInfoArray;
+    FSnapshotAssigned: Boolean;
   protected
     procedure ApplyDevices(const ADevices: TSerialDeviceInfoArray); override;
     function LoadDevices: TSerialDeviceInfoArray; override;
   public
+    procedure ApplySnapshot(const ADevices: array of TSerialDeviceInfo);
     function RefreshFinished: Boolean;
+    procedure SetSnapshot(const ADevices: array of TSerialDeviceInfo);
     property ApplyCount: PInteger read FApplyCount write FApplyCount;
+    property LoadCount: Integer read FLoadCount;
     property LoadStarted: TEvent read FLoadStarted write FLoadStarted;
+    property RaiseOnLoad: Boolean read FRaiseOnLoad write FRaiseOnLoad;
+    property RefreshDuringApply: Boolean
+      read FRefreshDuringApply write FRefreshDuringApply;
   end;
 
   TSerialSelectorComponentTests = class(TTestCase)
@@ -73,6 +84,10 @@ type
     procedure BackgroundRefreshAppliesSnapshotOnMainThread;
     procedure QueuedBackgroundRefreshDoesNotDeliverAfterDestroy;
     procedure BackgroundRefreshDoesNotDeliverAfterDestroy;
+    procedure InvalidIndexAndNoSelectionAreSafe;
+    procedure BackgroundRefreshFailurePreservesKnownAndCustomSelection;
+    procedure SuccessfulEmptyBackgroundRefreshClearsKnownSelection;
+    procedure RepeatedBackgroundRefreshDoesNotOverlapOrReenter;
   end;
 
 implementation
@@ -83,17 +98,54 @@ procedure TBackgroundTestSerialSelector.ApplyDevices(
 begin
   if FApplyCount <> nil then
     Inc(FApplyCount^);
+  if FRefreshDuringApply then
+    Refresh;
   inherited ApplyDevices(ADevices);
 end;
 
 function TBackgroundTestSerialSelector.LoadDevices: TSerialDeviceInfoArray;
+var
+  I: Integer;
 begin
+  Inc(FLoadCount);
   if FLoadStarted <> nil then
     FLoadStarted.SetEvent;
   Sleep(50);
-  Result := nil;
-  SetLength(Result, 1);
-  Result[0].Device := 'COM1';
+  if FRaiseOnLoad then
+    raise EInvalidOperation.Create('Simulated selector load failure');
+  if not FSnapshotAssigned then
+  begin
+    Result := nil;
+    SetLength(Result, 1);
+    Result[0].Device := 'COM1';
+    Exit;
+  end;
+  SetLength(Result, Length(FSnapshot));
+  for I := Low(FSnapshot) to High(FSnapshot) do
+    Result[I] := FSnapshot[I];
+end;
+
+procedure TBackgroundTestSerialSelector.ApplySnapshot(
+  const ADevices: array of TSerialDeviceInfo);
+var
+  SnapshotDevices: TSerialDeviceInfoArray;
+  I: Integer;
+begin
+  SetLength(SnapshotDevices, Length(ADevices));
+  for I := Low(ADevices) to High(ADevices) do
+    SnapshotDevices[I] := ADevices[I];
+  ApplyDevices(SnapshotDevices);
+end;
+
+procedure TBackgroundTestSerialSelector.SetSnapshot(
+  const ADevices: array of TSerialDeviceInfo);
+var
+  I: Integer;
+begin
+  FSnapshotAssigned := True;
+  SetLength(FSnapshot, Length(ADevices));
+  for I := Low(ADevices) to High(ADevices) do
+    FSnapshot[I] := ADevices[I];
 end;
 
 function TBackgroundTestSerialSelector.RefreshFinished: Boolean;
@@ -687,6 +739,146 @@ begin
 
   CheckSynchronize(100);
   AssertEquals(0, ApplyCount);
+end;
+
+procedure TSerialSelectorComponentTests.InvalidIndexAndNoSelectionAreSafe;
+var
+  DeviceInfo: TSerialDeviceInfo;
+  Raised: Boolean;
+begin
+  FSelector.SetSnapshot([]);
+  FSelector.Refresh;
+  FSelector.ItemIndex := 42;
+
+  AssertEquals('', FSelector.Device);
+  AssertFalse(FSelector.TryGetSelectedDevice(DeviceInfo));
+  AssertEquals('', DeviceInfo.Device);
+
+  Raised := False;
+  try
+    DeviceInfo := FSelector.Devices[-1];
+  except
+    on E: EListError do
+      Raised := True;
+  end;
+  AssertTrue(Raised);
+  Raised := False;
+  try
+    DeviceInfo := FSelector.Devices[0];
+  except
+    on E: EListError do
+      Raised := True;
+  end;
+  AssertTrue(Raised);
+end;
+
+procedure TSerialSelectorComponentTests.
+  BackgroundRefreshFailurePreservesKnownAndCustomSelection;
+var
+  ApplyCount: Integer;
+  Deadline: QWord;
+  DeviceA: TSerialDeviceInfo;
+  DeviceB: TSerialDeviceInfo;
+  SelectedDevice: TSerialDeviceInfo;
+  Selector: TBackgroundTestSerialSelector;
+begin
+  ApplyCount := 0;
+  DeviceA := CreateDevice('COM1', 'Vendor A', 'Model A', 'A');
+  DeviceB := CreateDevice('COM2', 'Vendor B', 'Model B', 'B');
+  Selector := TBackgroundTestSerialSelector.Create(nil);
+  try
+    Selector.ApplyCount := @ApplyCount;
+    Selector.ApplySnapshot([DeviceA, DeviceB]);
+    Selector.Device := DeviceB.Device;
+    Selector.RaiseOnLoad := True;
+    Selector.Refresh;
+    Deadline := GetTickCount64 + 1000;
+    repeat
+      CheckSynchronize(10);
+    until (ApplyCount >= 2) or (GetTickCount64 >= Deadline);
+
+    AssertEquals(DeviceB.Device, Selector.Device);
+    AssertEquals(1, Selector.ItemIndex);
+    AssertTrue(Selector.TryGetSelectedDevice(SelectedDevice));
+    AssertEquals('Model B', SelectedDevice.Model);
+
+    Selector.AllowCustomDevice := True;
+    Selector.Device := 'custom-device';
+    Selector.Refresh;
+    Deadline := GetTickCount64 + 1000;
+    repeat
+      CheckSynchronize(10);
+    until (ApplyCount >= 3) or (GetTickCount64 >= Deadline);
+
+    AssertEquals('custom-device', Selector.Device);
+    AssertEquals('custom-device', Selector.Text);
+    AssertEquals(-1, Selector.ItemIndex);
+    AssertFalse(Selector.TryGetSelectedDevice(SelectedDevice));
+  finally
+    Selector.Free;
+  end;
+end;
+
+procedure TSerialSelectorComponentTests.
+  SuccessfulEmptyBackgroundRefreshClearsKnownSelection;
+var
+  ApplyCount: Integer;
+  Deadline: QWord;
+  DeviceA: TSerialDeviceInfo;
+  Selector: TBackgroundTestSerialSelector;
+begin
+  ApplyCount := 0;
+  DeviceA := CreateDevice('COM1', '', '', '');
+  Selector := TBackgroundTestSerialSelector.Create(nil);
+  try
+    Selector.ApplyCount := @ApplyCount;
+    Selector.ApplySnapshot([DeviceA]);
+    Selector.SetSnapshot([]);
+    Selector.Refresh;
+    Deadline := GetTickCount64 + 1000;
+    repeat
+      CheckSynchronize(10);
+    until (ApplyCount >= 2) or (GetTickCount64 >= Deadline);
+
+    AssertEquals(0, Selector.DeviceCount);
+    AssertEquals('', Selector.Device);
+    AssertEquals(-1, Selector.ItemIndex);
+  finally
+    Selector.Free;
+  end;
+end;
+
+procedure TSerialSelectorComponentTests.
+  RepeatedBackgroundRefreshDoesNotOverlapOrReenter;
+var
+  ApplyCount: Integer;
+  Deadline: QWord;
+  LoadStarted: TEvent;
+  Selector: TBackgroundTestSerialSelector;
+begin
+  ApplyCount := 0;
+  LoadStarted := TEvent.Create(nil, True, False, '');
+  Selector := TBackgroundTestSerialSelector.Create(nil);
+  try
+    Selector.ApplyCount := @ApplyCount;
+    Selector.LoadStarted := LoadStarted;
+    Selector.RefreshDuringApply := True;
+    Selector.Refresh;
+    AssertEquals(Ord(wrSignaled), Ord(LoadStarted.WaitFor(1000)));
+    Selector.Refresh;
+    Selector.Refresh;
+
+    Deadline := GetTickCount64 + 1000;
+    repeat
+      CheckSynchronize(10);
+    until (ApplyCount > 0) or (GetTickCount64 >= Deadline);
+    AssertEquals(1, ApplyCount);
+    AssertEquals(1, Selector.LoadCount);
+    AssertEquals(1, Selector.DeviceCount);
+  finally
+    Selector.Free;
+    LoadStarted.Free;
+  end;
 end;
 
 initialization

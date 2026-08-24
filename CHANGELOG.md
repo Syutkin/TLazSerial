@@ -15,6 +15,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   Windows and macOS.
 - Optional manual device entry in `TSerialSelector` through
   `AllowCustomDevice`.
+- Internal serial transport abstraction for deterministic testing.
 
 ### Changed
 
@@ -31,6 +32,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   short debounce with bounded settling retries, and falls back to polling.
 - macOS serial-device watching now uses IOKit notifications for
   `IOSerialBSDClient`, with automatic polling fallback.
+- Serial-port setup now separates form state from applying settings.
 
 ### Fixed
 
@@ -45,6 +47,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Linux and macOS metadata commands now have bounded execution time and are
   cancelled when their selector or watcher is destroyed.
 - Windows device enumeration now uses SetupAPI instead of WMI.
+- Failed open or configuration no longer leaves a partially active port.
+- Live `FlowControl` changes now apply the newly selected value.
+- Cancelling a device refresh before its worker starts no longer hangs.
+- Enumeration failures preserve the current device list and selection.
+- Exhausted watcher fallbacks now report failure without leaking an exception
+  into the LCL event loop.
 
 ### Removed
 

@@ -11,6 +11,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Structured serial-device enumeration and display formatting.
 - Linux, Windows and macOS metadata collectors with device-only fallback.
 - Deterministic device and selector test suites.
+- Manual GitHub Actions test workflow for Linux, Windows and macOS.
 - Optional manual device entry in `TSerialSelector` through
   `AllowCustomDevice`.
 

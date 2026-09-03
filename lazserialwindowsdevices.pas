@@ -151,6 +151,9 @@ function CMGetDeviceNodeStatus(
 
 function RefreshTerminated: Boolean;
 begin
+  Result := False;
+  if GetCurrentThreadID = MainThreadID then
+    Exit;
   try
     Result := TThread.CheckTerminated;
   except

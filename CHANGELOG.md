@@ -4,6 +4,14 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.8.1] - 2026-09-29
+
+### Fixed
+
+- Windows serial-device enumeration no longer raises
+  `EThreadExternalException` when called from the main thread, avoiding
+  debugger interruptions while opening the COM-port menu.
+
 ## [0.8.0] - 2026-08-23
 
 ### Added
@@ -58,4 +66,5 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - Legacy string enumeration, friendly-name helpers and selector option lists.
 
+[0.8.1]: https://github.com/Syutkin/TLazSerial/releases/tag/0.8.1
 [0.8.0]: https://github.com/Syutkin/TLazSerial/releases/tag/0.8.0

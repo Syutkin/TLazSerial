@@ -4,8 +4,8 @@ TLazSerial is a serial-port component for Free Pascal and Lazarus. It provides
 the visual `TLazSerial` transport component, a serial-port setup dialog and a
 structured API for enumerating serial devices.
 
-The current public API version is 0.8.0. This release intentionally removes the
-legacy string-based device enumeration API; see [MIGRATION.md](MIGRATION.md).
+The current public API version is 0.8.1. Version 0.8.0 removed the legacy
+string-based device enumeration API; see [MIGRATION.md](MIGRATION.md).
 
 ## Features
 

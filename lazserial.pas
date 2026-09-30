@@ -63,6 +63,12 @@ uses
   PropEdits, SerialWatcher, LazSerialCommon, LazSerialDevices,
   LazSerialTransport;
 
+const
+  { Version of this TLazSerial package, matching LazSerialPort.lpk. It is
+    available without creating a serial port or loading a native library.
+    Update it together with the package version when releasing TLazSerial. }
+  LazSerialPackageVersion = '0.8.1';
+
 
 type
 {$IFDEF UNIX}
@@ -250,10 +256,18 @@ type
     property OnRemoved : TNotifyEvent read FOnRemoved write FOnRemoved;
   end;
 
+{ Returns the version of TLazSerial itself, not TBlockSerial.GetVersion's
+  version string for the bundled SynaSer implementation. }
+function LazSerialGetVersion: string;
 procedure Register;
 
 implementation
 uses LazSerialSetup;
+
+function LazSerialGetVersion: string;
+begin
+  Result := LazSerialPackageVersion;
+end;
 
 type
   TSerialReaderEventKind = (srekReceive, srekStatus);

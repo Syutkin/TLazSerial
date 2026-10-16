@@ -33,6 +33,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   cancelled before Windows thread waits can deliver them.
 - Windows reads and writes use separate operation events, preserve completion
   errors and wait for cancelled I/O to finish before releasing buffers.
+- Serial timeouts and bandwidth waits handle midnight and 32-bit timer wrap
+  without spurious long delays.
 - `WriteData` now returns the actual buffer-write result instead of the
   requested string length, preserving short writes and failures.
 - Packet reads return only received bytes, returning an empty string on a

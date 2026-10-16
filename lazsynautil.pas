@@ -365,9 +365,10 @@ var
   CustomMonthNames: array[1..12] of string;
 
 {$IFDEF LAZSERIAL_TESTING}
-{ Test-only input for the wall clock. Production builds always use Now. }
+{ Test-only clock inputs. GetTick no longer uses the legacy wall-clock input. }
 var
   SerialTestWallClock: function: TDateTime = nil;
+  SerialTestTickCount: function: UInt64 = nil;
 {$ENDIF}
 
 implementation
@@ -848,16 +849,12 @@ end;
 
 {$IFNDEF MSWINDOWS}
 function GetTick: LongWord;
-var
-  Stamp: TTimeStamp;
 begin
   {$IFDEF LAZSERIAL_TESTING}
-  if Assigned(SerialTestWallClock) then
-    Stamp := DateTimeToTimeStamp(SerialTestWallClock())
-  else
+  if Assigned(SerialTestTickCount) then
+    Exit(LongWord(SerialTestTickCount() and High(LongWord)));
   {$ENDIF}
-  Stamp := DateTimeToTimeStamp(Now);
-  Result := Stamp.Time;
+  Result := LongWord(SysUtils.GetTickCount64 and High(LongWord));
 end;
 {$ELSE}
 function GetTick: LongWord;
@@ -867,6 +864,10 @@ var
   x: TLargeInteger;
 {$ENDIF}
 begin
+  {$IFDEF LAZSERIAL_TESTING}
+  if Assigned(SerialTestTickCount) then
+    Exit(LongWord(SerialTestTickCount() and High(LongWord)));
+  {$ENDIF}
   if Windows.QueryPerformanceFrequency(freq) then
   begin
     Windows.QueryPerformanceCounter(tick);
@@ -886,21 +887,8 @@ end;
 
 function TickDelta(TickOld, TickNew: LongWord): LongWord;
 begin
-//if DWord is signed type (older Deplhi),
-// then it not work properly on differencies larger then maxint!
-  Result := 0;
-  if TickOld <> TickNew then
-  begin
-    if TickNew < TickOld then
-    begin
-      TickNew := TickNew + LongWord(MaxInt) + 1;
-      TickOld := TickOld + LongWord(MaxInt) + 1;
-    end;
-    Result := TickNew - TickOld;
-    if TickNew < TickOld then
-      if Result > 0 then
-        Result := 0 - Result;
-  end;
+  // Explicit modulo 2^32, also safe with overflow and range checks enabled.
+  Result := LongWord((UInt64(TickNew) + $100000000 - TickOld) and High(LongWord));
 end;
 
 {==============================================================================}

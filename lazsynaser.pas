@@ -945,22 +945,27 @@ end;
 
 procedure TBlockSerial.LimitBandwidth(Length: Integer; MaxB: integer; var Next: LongWord);
 var
-  x: LongWord;
-  y: LongWord;
+  WaitMs: LongWord;
+  Interval: Int64;
 begin
   if MaxB > 0 then
   begin
-    y := GetTick;
-    if Next > y then
+    WaitMs := TickDelta(GetTick, Next);
+    // Zero is an unset deadline. Modular ordering is valid within half a cycle.
+    if (Next <> 0) and (WaitMs > 0) and (WaitMs <= High(LongInt)) then
     begin
-      x := Next - y;
-      if x > 0 then
-      begin
-        DoStatus(HR_Wait, IntToStr(x));
-        sleep(x);
-      end;
+      DoStatus(HR_Wait, IntToStr(WaitMs));
+      Sleep(WaitMs);
     end;
-    Next := GetTick + Trunc((Length / MaxB) * 1000);
+    Interval := (Int64(Length) * 1000) div MaxB;
+    if Interval < 0 then
+      Interval := 0;
+    if Interval > High(LongInt) then
+      Interval := High(LongInt);
+    Next := LongWord((UInt64(GetTick) + UInt64(Interval)) and High(LongWord));
+    // Reserve zero for the initial state, rounding this deadline down by 1 ms.
+    if Next = 0 then
+      Next := High(LongWord);
   end;
 end;
 

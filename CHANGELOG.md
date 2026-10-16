@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Added
 
 - Expose the TLazSerial package version through `LazSerialGetVersion`.
+- Add `OnError` to report terminal reader failures after closing the port.
 
 ### Fixed
 
@@ -25,6 +26,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Closing a port bounds output draining by `SynSer.DeadlockTimeout`, releases
   its handle and resets `Active` even after I/O errors, preserving the first
   error. Destruction completes cleanup without propagating serial-close errors.
+  Terminal reader failures also deactivate the port; ordinary readiness
+  timeouts keep the reader running.
 - `WriteData` now returns the actual buffer-write result instead of the
   requested string length, preserving short writes and failures.
 - Packet reads return only received bytes, returning an empty string on a

@@ -93,6 +93,8 @@ type
   TModemSignal = (msRI,msCD,msCTS,msDSR);
   TModemSignals = Set of TModemSignal;
   TStatusEvent = procedure(Sender: TObject; Reason: THookSerialReason; const Value: string) of object;
+  TSerialErrorEvent = procedure(Sender: TObject; ErrorCode: Integer;
+    const ErrorMessage: string) of object;
 
 const
 {$IFDEF UNIX}
@@ -132,9 +134,12 @@ type
   TComPortReadThread=class(TThread)
   private
     FSession: ISerialReaderSession;
+    FFailureDelivery: TObject;
     procedure QueueReceive;
     procedure QueueStatus(Sender: TObject; Reason: THookSerialReason;
       const Value: string);
+    procedure QueueFailure(const AErrorCode: Integer;
+      const AErrorMessage: string);
     procedure WaitForDelivery;
   protected
     procedure Execute; override;
@@ -173,6 +178,7 @@ type
 
     FOnRxData: TNotifyEvent;
     FOnStatus: TStatusEvent;
+    FOnError: TSerialErrorEvent;
     FOnRemoved: TNotifyEvent;
     FClosing: Boolean;
     FDestroying: Boolean;
@@ -190,12 +196,15 @@ type
     procedure ComException(str: string);
     procedure ComDisconnected(Sender: TObject);
     procedure DeliverReaderReceive;
+    procedure DeliverReaderError(const AErrorCode: Integer;
+      const AErrorMessage: string);
     procedure DeliverReaderStatus(Sender: TObject;
       Reason: THookSerialReason; const Value: string);
     procedure SynSerStatus(Sender: TObject; Reason: THookSerialReason;
       const Value: string);
     function AppliedBaudrate: integer;
-    function CanReadData(const ATimeout: Integer): Boolean;
+    function CanReadData(const ATimeout: Integer;
+      const ACheckError: Boolean = False): Boolean;
     function GetSynSer: TBlockSerial;
 
   protected
@@ -263,6 +272,8 @@ type
 
     property OnRxData: TNotifyEvent read FOnRxData write FOnRxData;
     property OnStatus: TStatusEvent read FOnStatus write FOnStatus;
+    // Reports a terminal reader error on the main thread after closing the port.
+    property OnError: TSerialErrorEvent read FOnError write FOnError;
     // Triggers if the device is removed during an active connection.
     property OnRemoved : TNotifyEvent read FOnRemoved write FOnRemoved;
   end;
@@ -281,9 +292,18 @@ begin
 end;
 
 type
-  TSerialReaderEventKind = (srekReceive, srekStatus);
+  ISerialReaderFailureSession = interface
+    ['{DDAA11B3-5038-4492-AC34-E81CC2105381}']
+    procedure DeliverFailure(const AErrorCode: Integer;
+      const AErrorMessage: string);
+    procedure NotifyFailure(const AErrorCode: Integer;
+      const AErrorMessage: string);
+  end;
 
-  TSerialReaderSession = class(TInterfacedObject, ISerialReaderSession)
+  TSerialReaderEventKind = (srekReceive, srekStatus, srekFailure);
+
+  TSerialReaderSession = class(TInterfacedObject, ISerialReaderSession,
+    ISerialReaderFailureSession)
   private
     FActive: Boolean;
     FCompletionEvent: TEvent;
@@ -295,6 +315,10 @@ type
     procedure DeliverReceive;
     procedure DeliverStatus(Sender: TObject; Reason: THookSerialReason;
       const Value: string);
+    procedure DeliverFailure(const AErrorCode: Integer;
+      const AErrorMessage: string);
+    procedure NotifyFailure(const AErrorCode: Integer;
+      const AErrorMessage: string);
     procedure Detach;
     procedure SignalReader;
     function WaitForReader(const ATimeout: Cardinal): TWaitResult;
@@ -303,6 +327,7 @@ type
   TSerialReaderEventDelivery = class
   private
     FKind: TSerialReaderEventKind;
+    FErrorCode: Integer;
     FReason: THookSerialReason;
     FSender: TObject;
     FSession: ISerialReaderSession;
@@ -312,6 +337,8 @@ type
     constructor CreateReceive(const ASession: ISerialReaderSession);
     constructor CreateStatus(const ASession: ISerialReaderSession;
       ASender: TObject; AReason: THookSerialReason; const AValue: string);
+    constructor CreateFailure(const ASession: ISerialReaderSession;
+      const AErrorCode: Integer; const AErrorMessage: string);
   end;
 
 constructor TSerialReaderSession.Create(AOwner: TLazSerial);
@@ -363,6 +390,37 @@ begin
   Cancel;
 end;
 
+procedure TSerialReaderSession.DeliverFailure(const AErrorCode: Integer;
+  const AErrorMessage: string);
+var
+  Lifetime: ISerialReaderFailureSession;
+begin
+  if not FActive or (FOwner = nil) then
+    Exit;
+  // Delivery owns itself while running; Close must not free it with the reader.
+  FOwner.ReadThread.FFailureDelivery := nil;
+  Supports(FOwner.FStatusSession, ISerialReaderFailureSession, Lifetime);
+  try
+    try
+      FOwner.Close;
+    except
+      // Close has released the port; the reader error is the original failure.
+      on E: ESynaSerError do ;
+    end;
+  finally
+    // A close-status callback may have destroyed the component.
+    if Lifetime <> nil then
+      Lifetime.NotifyFailure(AErrorCode, AErrorMessage);
+  end;
+end;
+
+procedure TSerialReaderSession.NotifyFailure(const AErrorCode: Integer;
+  const AErrorMessage: string);
+begin
+  if FActive and (FOwner <> nil) then
+    FOwner.DeliverReaderError(AErrorCode, AErrorMessage);
+end;
+
 procedure TSerialReaderSession.SignalReader;
 begin
   FCompletionEvent.SetEvent;
@@ -399,9 +457,21 @@ begin
   FValue := AValue;
 end;
 
+constructor TSerialReaderEventDelivery.CreateFailure(
+  const ASession: ISerialReaderSession; const AErrorCode: Integer;
+  const AErrorMessage: string);
+begin
+  inherited Create;
+  FSession := ASession;
+  FKind := srekFailure;
+  FErrorCode := AErrorCode;
+  FValue := AErrorMessage;
+end;
+
 procedure TSerialReaderEventDelivery.Deliver;
 var
   Session: ISerialReaderSession;
+  FailureSession: ISerialReaderFailureSession;
 begin
   Session := FSession;
   try
@@ -410,6 +480,9 @@ begin
         Session.DeliverReceive;
       srekStatus:
         Session.DeliverStatus(FSender, FReason, FValue);
+      srekFailure:
+        if Supports(Session, ISerialReaderFailureSession, FailureSession) then
+          FailureSession.DeliverFailure(FErrorCode, FValue);
     end;
   finally
     Session.SignalReader;
@@ -507,6 +580,8 @@ begin
 end;
 
 procedure TLazSerial.DeviceClose;
+var
+  FailureDelivery: TObject;
 begin
   FClosing := True;
   try
@@ -520,8 +595,11 @@ begin
       while not ReadThread.Finished do
         Sleep(1);
       ReadThread.WaitFor;
+      FailureDelivery := ReadThread.FFailureDelivery;
       ReadThread.Free;
       ReadThread := nil;
+      // TThread.Destroy removes queued methods without freeing their targets.
+      FailureDelivery.Free;
     end;
     FReaderSession := nil;
   except
@@ -570,7 +648,11 @@ begin
   Result := CanReadData(0);
 end;
 
-function TLazSerial.CanReadData(const ATimeout: Integer): Boolean;
+function TLazSerial.CanReadData(const ATimeout: Integer;
+  const ACheckError: Boolean): Boolean;
+var
+  Serial: TBlockSerial;
+  Error: ESynaSerError;
 begin
   BeginTransport;
   try
@@ -580,6 +662,18 @@ begin
       Result := FTransport.CanReadLine(ATimeout)
     else
       Result := FTransport.CanRead(ATimeout);
+    if ACheckError and not Result then
+    begin
+      Serial := FTransport.NativeSerial;
+      if (Serial <> nil) and (Serial.LastError <> 0) and
+        (Serial.LastError <> ErrTimeout) then
+      begin
+        Error := ESynaSerError.Create(Serial.LastErrorDesc);
+        Error.ErrorCode := Serial.LastError;
+        Error.ErrorMessage := Serial.LastErrorDesc;
+        raise Error;
+      end;
+    end;
   finally
     EndTransport;
   end;
@@ -1030,14 +1124,49 @@ begin
     FSession.SignalReader;
 end;
 
+procedure TComPortReadThread.QueueFailure(const AErrorCode: Integer;
+  const AErrorMessage: string);
+var
+  Delivery: TSerialReaderEventDelivery;
+begin
+  if Terminated then
+    Exit;
+  Delivery := TSerialReaderEventDelivery.CreateFailure(FSession,
+    AErrorCode, AErrorMessage);
+  FFailureDelivery := Delivery;
+  try
+    TThread.Queue(nil, @Delivery.Deliver);
+  except
+    FFailureDelivery := nil;
+    Delivery.Free;
+    raise;
+  end;
+  // Exit without waiting: the main thread must be able to join this reader.
+end;
+
 procedure TComPortReadThread.Execute;
 begin
   try
     while not Terminated do begin
-      if Owner.CanReadData(10) then
-        QueueReceive
-      else if not Terminated then
-        FSession.WaitForReader(1);
+      try
+        if Owner.CanReadData(10, True) then
+          QueueReceive
+        else if not Terminated then
+          FSession.WaitForReader(1);
+      except
+        on E: ESynaSerError do
+        begin
+          if E.ErrorCode = ErrTimeout then
+            Continue;
+          QueueFailure(E.ErrorCode, E.ErrorMessage);
+          Exit;
+        end;
+        on E: Exception do
+        begin
+          QueueFailure(0, E.Message);
+          Exit;
+        end;
+      end;
     end;
   finally
     Terminate;
@@ -1048,6 +1177,13 @@ procedure TLazSerial.DeliverReaderReceive;
 begin
   if not FClosing and not FDestroying and Assigned(FOnRxData) then
     FOnRxData(Self);
+end;
+
+procedure TLazSerial.DeliverReaderError(const AErrorCode: Integer;
+  const AErrorMessage: string);
+begin
+  if not FDestroying and Assigned(FOnError) then
+    FOnError(Self, AErrorCode, AErrorMessage);
 end;
 
 procedure TLazSerial.DeliverReaderStatus(Sender: TObject;

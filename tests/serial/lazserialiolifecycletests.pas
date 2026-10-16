@@ -69,6 +69,16 @@ type
     procedure ReaderErrorWithoutExceptionClosesConnection;
     procedure OrdinaryReadTimeoutKeepsConnectionOpen;
     procedure DestroyBeforeReaderErrorDeliveryCancelsCallbacks;
+    procedure StaleReaderFailureDoesNotCloseReopenedConnection;
+    procedure NativeTimeoutKeepsConnectionOpen;
+    procedure ReaderErrorNotifiesAfterClose;
+    procedure ReaderErrorHandlerCanDestroyComponent;
+    procedure ReaderErrorHandlerCanReopenConnection;
+    procedure DestroyCancelsReaderErrorNotification;
+    procedure CloseStatusCanDestroyBeforeErrorNotification;
+    procedure ReaderErrorSurvivesCloseError;
+    procedure ReopenCancelsReaderErrorNotification;
+    procedure ReaderExceptionWithoutNativeCodeIsReported;
   end;
 
 implementation
@@ -94,6 +104,352 @@ type
     function CanRead(const ATimeout: Integer): Boolean; override;
     procedure Close; override;
   end;
+
+type
+  TTimeoutReadinessTransport = class(TFailingReadinessTransport)
+  public
+    function CanRead(const ATimeout: Integer): Boolean; override;
+  end;
+
+function TTimeoutReadinessTransport.CanRead(const ATimeout: Integer): Boolean;
+begin
+  InterlockedIncrement(Attempts);
+  if ATimeout > 0 then
+    Sleep(ATimeout);
+  NativeSerial.SetSynaError(ErrTimeout);
+  FailureReported.SetEvent;
+  NativeSerial.ExceptCheck;
+  Result := False;
+end;
+
+procedure TLazSerialIoLifecycleTests.NativeTimeoutKeepsConnectionOpen;
+var
+  Serial: TTestableLazSerial;
+  Transport: TTimeoutReadinessTransport;
+  RaiseNative: Boolean;
+begin
+  for RaiseNative := False to True do
+  begin
+    Serial := TTestableLazSerial.Create(nil);
+    try
+      Transport := TTimeoutReadinessTransport.Create;
+      Transport.NativeSerial.RaiseExcept := RaiseNative;
+      Serial.InstallTransport(Transport);
+      Serial.Open;
+      AssertEquals(Ord(wrSignaled), Ord(Transport.FailureReported.WaitFor(1000)));
+      PumpFor(50);
+      AssertTrue('A timeout must leave the connection active', Serial.Active);
+      AssertTrue(Transport.IsOpen);
+      AssertEquals(0, Transport.CloseCount);
+      AssertTrue('The reader must continue after a timeout', Transport.Attempts > 1);
+    finally
+      Serial.Free;
+    end;
+  end;
+end;
+
+procedure TLazSerialIoLifecycleTests.StaleReaderFailureDoesNotCloseReopenedConnection;
+var
+  Serial: TTestableLazSerial;
+  Transport: TFailingReadinessTransport;
+begin
+  Serial := TTestableLazSerial.Create(nil);
+  try
+    Transport := TFailingReadinessTransport.Create;
+    Serial.InstallTransport(Transport);
+    Serial.Open;
+    AssertEquals(Ord(wrSignaled), Ord(Transport.FailureReported.WaitFor(1000)));
+    // Close joins the old reader without pumping its queued error delivery.
+    Serial.Close;
+    Transport.FailRead := False;
+    Serial.Open;
+    PumpFor(50);
+    AssertTrue('An old reader error must not close the new connection', Serial.Active);
+    AssertTrue(Transport.IsOpen);
+    AssertEquals(1, Transport.CloseCount);
+    AssertEquals(2, Transport.ConnectCount);
+  finally
+    Serial.Free;
+  end;
+end;
+
+type
+  TReaderErrorProbe = class
+  public
+    Serial: TTestableLazSerial;
+    Transport: TFailingReadinessTransport;
+    Count, Code: Integer;
+    ErrorMessage: string;
+    ErrorThread: TThreadID;
+    ActiveOnError, OpenOnError: Boolean;
+    DestroyOnError, ReopenOnError: Boolean;
+    procedure ReaderFailed(Sender: TObject; ErrorCode: Integer;
+      const AErrorMessage: string);
+    procedure DestroyOnClose(Sender: TObject; Reason: THookSerialReason;
+      const Value: string);
+  end;
+
+  TExceptionReadinessTransport = class(TFailingReadinessTransport)
+  public
+    function CanRead(const ATimeout: Integer): Boolean; override;
+  end;
+
+  TErrorClosingTransport = class(TFailingReadinessTransport)
+  private
+    FHandler: THookSerialStatus;
+  public
+    FailClose: Boolean;
+    procedure SetStatusHandler(const AHandler: THookSerialStatus); override;
+    procedure Close; override;
+  end;
+
+function TExceptionReadinessTransport.CanRead(const ATimeout: Integer): Boolean;
+begin
+  if ATimeout > 0 then
+    Sleep(ATimeout);
+  FailureReported.SetEvent;
+  raise Exception.Create('readiness failed');
+end;
+
+procedure TReaderErrorProbe.ReaderFailed(Sender: TObject; ErrorCode: Integer;
+  const AErrorMessage: string);
+begin
+  Inc(Count);
+  Code := ErrorCode;
+  ErrorMessage := AErrorMessage;
+  ErrorThread := GetCurrentThreadID;
+  ActiveOnError := Serial.Active;
+  OpenOnError := Transport.IsOpen;
+  if DestroyOnError then
+    FreeAndNil(Serial)
+  else if ReopenOnError then
+  begin
+    Transport.FailRead := False;
+    Serial.Open;
+  end;
+end;
+
+procedure TReaderErrorProbe.DestroyOnClose(Sender: TObject;
+  Reason: THookSerialReason; const Value: string);
+begin
+  if Reason = HR_SerialClose then
+    FreeAndNil(Serial);
+end;
+
+procedure TErrorClosingTransport.SetStatusHandler(const AHandler: THookSerialStatus);
+begin
+  inherited SetStatusHandler(AHandler);
+  FHandler := AHandler;
+end;
+
+procedure TErrorClosingTransport.Close;
+var
+  Error: ESynaSerError;
+begin
+  inherited Close;
+  NativeSerial.SetSynaError(0);
+  if Assigned(FHandler) then
+    FHandler(Self, HR_SerialClose, DeviceName);
+  if FailClose then
+  begin
+    Error := ESynaSerError.Create('secondary close error');
+    Error.ErrorCode := 6;
+    Error.ErrorMessage := 'secondary close error';
+    raise Error;
+  end;
+end;
+
+procedure TLazSerialIoLifecycleTests.ReaderErrorNotifiesAfterClose;
+var
+  Probe: TReaderErrorProbe;
+  RaiseNative: Boolean;
+begin
+  for RaiseNative := False to True do
+  begin
+    Probe := TReaderErrorProbe.Create;
+    try
+      Probe.Serial := TTestableLazSerial.Create(nil);
+      Probe.Transport := TErrorClosingTransport.Create;
+      Probe.Transport.NativeSerial.RaiseExcept := RaiseNative;
+      Probe.Serial.InstallTransport(Probe.Transport);
+      Probe.Serial.OnError := @Probe.ReaderFailed;
+      Probe.Serial.Open;
+      AssertEquals(Ord(wrSignaled), Ord(Probe.Transport.FailureReported.WaitFor(1000)));
+      AssertEquals('Delivery must wait for the main thread', 0, Probe.Count);
+      PumpFor(50);
+      AssertEquals(1, Probe.Count);
+      AssertEquals(5, Probe.Code);
+      AssertEquals(TBlockSerial.GetErrorDesc(5), Probe.ErrorMessage);
+      AssertTrue(Probe.ErrorThread = MainThreadID);
+      AssertFalse(Probe.ActiveOnError);
+      AssertFalse(Probe.OpenOnError);
+      AssertEquals(1, Probe.Transport.Attempts);
+    finally
+      Probe.Serial.Free;
+      Probe.Free;
+    end;
+  end;
+end;
+
+procedure TLazSerialIoLifecycleTests.ReaderErrorHandlerCanDestroyComponent;
+var
+  Probe: TReaderErrorProbe;
+begin
+  Probe := TReaderErrorProbe.Create;
+  try
+    Probe.Serial := TTestableLazSerial.Create(nil);
+    Probe.Transport := TFailingReadinessTransport.Create;
+    Probe.Serial.InstallTransport(Probe.Transport);
+    Probe.Serial.OnError := @Probe.ReaderFailed;
+    Probe.DestroyOnError := True;
+    Probe.Serial.Open;
+    AssertEquals(Ord(wrSignaled), Ord(Probe.Transport.FailureReported.WaitFor(1000)));
+    PumpFor(50);
+    AssertEquals(1, Probe.Count);
+    AssertNull(Probe.Serial);
+  finally
+    Probe.Serial.Free;
+    Probe.Free;
+  end;
+end;
+
+procedure TLazSerialIoLifecycleTests.ReaderErrorHandlerCanReopenConnection;
+var
+  Probe: TReaderErrorProbe;
+begin
+  Probe := TReaderErrorProbe.Create;
+  try
+    Probe.Serial := TTestableLazSerial.Create(nil);
+    Probe.Transport := TFailingReadinessTransport.Create;
+    Probe.Serial.InstallTransport(Probe.Transport);
+    Probe.Serial.OnError := @Probe.ReaderFailed;
+    Probe.ReopenOnError := True;
+    Probe.Serial.Open;
+    AssertEquals(Ord(wrSignaled), Ord(Probe.Transport.FailureReported.WaitFor(1000)));
+    PumpFor(50);
+    AssertEquals(1, Probe.Count);
+    AssertTrue(Probe.Serial.Active);
+    AssertTrue(Probe.Transport.IsOpen);
+    AssertEquals(2, Probe.Transport.ConnectCount);
+  finally
+    Probe.Serial.Free;
+    Probe.Free;
+  end;
+end;
+
+procedure TLazSerialIoLifecycleTests.DestroyCancelsReaderErrorNotification;
+var
+  Probe: TReaderErrorProbe;
+begin
+  Probe := TReaderErrorProbe.Create;
+  try
+    Probe.Serial := TTestableLazSerial.Create(nil);
+    Probe.Transport := TFailingReadinessTransport.Create;
+    Probe.Serial.InstallTransport(Probe.Transport);
+    Probe.Serial.OnError := @Probe.ReaderFailed;
+    Probe.Serial.Open;
+    AssertEquals(Ord(wrSignaled), Ord(Probe.Transport.FailureReported.WaitFor(1000)));
+    FreeAndNil(Probe.Serial);
+    PumpFor(50);
+    AssertEquals(0, Probe.Count);
+  finally
+    Probe.Serial.Free;
+    Probe.Free;
+  end;
+end;
+
+procedure TLazSerialIoLifecycleTests.CloseStatusCanDestroyBeforeErrorNotification;
+var
+  Probe: TReaderErrorProbe;
+begin
+  Probe := TReaderErrorProbe.Create;
+  try
+    Probe.Serial := TTestableLazSerial.Create(nil);
+    Probe.Transport := TErrorClosingTransport.Create;
+    Probe.Serial.InstallTransport(Probe.Transport);
+    Probe.Serial.OnError := @Probe.ReaderFailed;
+    Probe.Serial.OnStatus := @Probe.DestroyOnClose;
+    Probe.Serial.Open;
+    AssertEquals(Ord(wrSignaled), Ord(Probe.Transport.FailureReported.WaitFor(1000)));
+    PumpFor(50);
+    AssertNull(Probe.Serial);
+    AssertEquals(0, Probe.Count);
+  finally
+    Probe.Serial.Free;
+    Probe.Free;
+  end;
+end;
+
+procedure TLazSerialIoLifecycleTests.ReaderErrorSurvivesCloseError;
+var
+  Probe: TReaderErrorProbe;
+begin
+  Probe := TReaderErrorProbe.Create;
+  try
+    Probe.Serial := TTestableLazSerial.Create(nil);
+    Probe.Transport := TErrorClosingTransport.Create;
+    TErrorClosingTransport(Probe.Transport).FailClose := True;
+    Probe.Serial.InstallTransport(Probe.Transport);
+    Probe.Serial.OnError := @Probe.ReaderFailed;
+    Probe.Serial.Open;
+    AssertEquals(Ord(wrSignaled), Ord(Probe.Transport.FailureReported.WaitFor(1000)));
+    PumpFor(50);
+    AssertEquals(1, Probe.Count);
+    AssertEquals(5, Probe.Code);
+    AssertEquals(TBlockSerial.GetErrorDesc(5), Probe.ErrorMessage);
+    AssertFalse(Probe.Serial.Active);
+  finally
+    Probe.Serial.Free;
+    Probe.Free;
+  end;
+end;
+
+procedure TLazSerialIoLifecycleTests.ReopenCancelsReaderErrorNotification;
+var
+  Probe: TReaderErrorProbe;
+begin
+  Probe := TReaderErrorProbe.Create;
+  try
+    Probe.Serial := TTestableLazSerial.Create(nil);
+    Probe.Transport := TFailingReadinessTransport.Create;
+    Probe.Serial.InstallTransport(Probe.Transport);
+    Probe.Serial.OnError := @Probe.ReaderFailed;
+    Probe.Serial.Open;
+    AssertEquals(Ord(wrSignaled), Ord(Probe.Transport.FailureReported.WaitFor(1000)));
+    Probe.Serial.Close;
+    Probe.Transport.FailRead := False;
+    Probe.Serial.Open;
+    PumpFor(50);
+    AssertEquals(0, Probe.Count);
+    AssertTrue(Probe.Serial.Active);
+  finally
+    Probe.Serial.Free;
+    Probe.Free;
+  end;
+end;
+
+procedure TLazSerialIoLifecycleTests.ReaderExceptionWithoutNativeCodeIsReported;
+var
+  Probe: TReaderErrorProbe;
+begin
+  Probe := TReaderErrorProbe.Create;
+  try
+    Probe.Serial := TTestableLazSerial.Create(nil);
+    Probe.Transport := TExceptionReadinessTransport.Create;
+    Probe.Serial.InstallTransport(Probe.Transport);
+    Probe.Serial.OnError := @Probe.ReaderFailed;
+    Probe.Serial.Open;
+    AssertEquals(Ord(wrSignaled), Ord(Probe.Transport.FailureReported.WaitFor(1000)));
+    PumpFor(50);
+    AssertEquals(1, Probe.Count);
+    AssertEquals(0, Probe.Code);
+    AssertEquals('readiness failed', Probe.ErrorMessage);
+    AssertFalse(Probe.Serial.Active);
+  finally
+    Probe.Serial.Free;
+    Probe.Free;
+  end;
+end;
 
 constructor TFailingReadinessTransport.Create;
 begin

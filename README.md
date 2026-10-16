@@ -13,7 +13,7 @@ string-based device enumeration API; see [MIGRATION.md](MIGRATION.md).
   writing to serial ports;
 - standard and custom baud rates, configurable data bits, parity, flow control
   and one, one-and-a-half or two stop bits;
-- `OnRxData`, `OnStatus` and `OnRemoved` events;
+- `OnRxData`, `OnStatus`, `OnError` and `OnRemoved` events;
 - `RcvLineCRLF`, which makes `ReadData` use line-oriented `RecvString` instead
   of `RecvPacket`;
 - a bundled setup dialog opened with `ShowSetupDialog`;
@@ -53,6 +53,14 @@ Reader-originated `OnRxData` and `OnStatus` callbacks are delivered on the LCL
 main thread. A handler may close or destroy its `TLazSerial` component; an
 exception raised by a handler remains a main-thread exception and does not stop
 the serial reader.
+
+A terminal reader error closes the port, sets `Active = False` and calls
+`OnError(Sender, ErrorCode, ErrorMessage)` on the main thread, regardless of
+`SynSer.RaiseExcept`. The event preserves the original error even if closing
+the port changes `SynSer.LastError`. `ErrorCode = 0` identifies an exception
+without a native serial error code. Readiness timeouts keep the reader running
+and do not trigger `OnError`. The handler may reopen or destroy the component;
+closing or destroying it before delivery cancels the old notification.
 
 ## Threading contract
 

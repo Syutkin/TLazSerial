@@ -824,26 +824,60 @@ begin
 end;
 
 procedure TBlockSerial.CloseSocket;
+var
+  ErrorCode: Integer;
+  RaiseNative: Boolean;
+
+  procedure RememberError;
+  begin
+    if ErrorCode = sOK then
+      ErrorCode := FLastError;
+  end;
+
 begin
-  if Fhandle <> INVALID_HANDLE_VALUE then
-  begin
-    Purge;
-    RTS := False;
-    DTR := False;
-    FileClose(FHandle);
+  ErrorCode := sOK;
+  RaiseNative := FRaiseExcept;
+  FRaiseExcept := False;
+  try
+    if FHandle <> INVALID_HANDLE_VALUE then
+    begin
+      try
+        Purge;
+        RememberError;
+        RTS := False;
+        RememberError;
+        DTR := False;
+        RememberError;
+      finally
+        {$IFDEF UNIX}
+        SerialCheck(fpClose(FHandle));
+        {$ELSE}
+        SetSynaError(sOK);
+        if not CloseHandle(FHandle) then
+          SerialCheck(sErr);
+        {$ENDIF}
+        RememberError;
+      end;
+    end;
+  finally
+    FHandle := INVALID_HANDLE_VALUE;
+    FComNr := PortIsClosed;
+    try
+      if InstanceActive then
+      begin
+        FInstanceActive := False;
+        {$IFDEF UNIX}
+        if FLinuxLock then
+          cpomReleaseComport;
+        {$ENDIF}
+      end;
+    finally
+      FRaiseExcept := RaiseNative;
+      SetSynaError(ErrorCode);
+    end;
   end;
-  if InstanceActive then
-  begin
-    {$IFDEF UNIX}
-    if FLinuxLock then
-      cpomReleaseComport;
-    {$ENDIF}
-    FInstanceActive:= false
-  end;
-  Fhandle := INVALID_HANDLE_VALUE;
-  FComNr:= PortIsClosed;
-  SetSynaError(sOK);
   DoStatus(HR_SerialClose, FDevice);
+  ExceptCheck;
 end;
 
 {$IFDEF MSWINDOWS}

@@ -18,6 +18,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   preserved and reported even with `SynSer.RaiseExcept` disabled. Failed opens
   leave the port closed and `Active` false. Reader activity cannot mask these
   errors, and status callbacks can safely read data or close the port.
+- Closing a port releases its handle and resets `Active` even after I/O
+  errors, preserving the first error. Destruction completes cleanup without
+  propagating serial-close errors.
 - `WriteData` now returns the actual buffer-write result instead of the
   requested string length, preserving short writes and failures.
 - In CRLF mode, incomplete buffered lines no longer cause repeated `OnRxData`

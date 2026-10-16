@@ -45,6 +45,8 @@ type
     procedure UnsupportedLiveSpeedPreservesActualSpeed;
     procedure DisconnectedPtyCloseReleasesHandleWithExceptions;
     procedure DisconnectedPtyCloseReleasesHandleWithoutExceptions;
+    procedure NativeCloseCleansUpAfterEachFailure;
+    procedure DestroyDisconnectedSerialReleasesOwnedComponents;
     procedure ReportedZeroSpeedMatchesPtySettings;
     procedure Reported9600SpeedMatchesPtySettings;
     procedure Reported38400SpeedMatchesPtySettings;
@@ -108,10 +110,157 @@ end;
 
 {$IFDEF LINUX}
 type
+  TCloseFailureSerial = class(TBlockSerial)
+  protected
+    procedure SetRTSF(Value: Boolean); override;
+    procedure SetDTRF(Value: Boolean); override;
+  public
+    FailureStage: Integer;
+    RTSCalls, DTRCalls: Integer;
+    procedure Attach(AHandle: THandle);
+  end;
+
+  TDestructionProbe = class(TComponent)
+  public
+    Destroyed: PBoolean;
+    destructor Destroy; override;
+  end;
+
   TTermiosProbe = class(TBlockSerial)
   public
     function DecodeSpeed(const ASettings: Termios): Integer;
   end;
+
+procedure TCloseFailureSerial.Attach(AHandle: THandle);
+begin
+  FHandle := AHandle;
+  FInstanceActive := True;
+  FLinuxLock := False;
+end;
+
+procedure TCloseFailureSerial.SetRTSF(Value: Boolean);
+begin
+  Inc(RTSCalls);
+  if FailureStage = 1 then
+    RaiseSynaError(ESysEACCES)
+  else
+    SetSynaError(0);
+end;
+
+procedure TCloseFailureSerial.SetDTRF(Value: Boolean);
+begin
+  Inc(DTRCalls);
+  if FailureStage = 3 then
+    fpClose(FHandle);
+  if FailureStage in [1, 2] then
+    RaiseSynaError(ESysEINVAL)
+  else
+    SetSynaError(0);
+end;
+
+destructor TDestructionProbe.Destroy;
+begin
+  Destroyed^ := True;
+  inherited Destroy;
+end;
+
+procedure TLazSerialLifecycleTests.NativeCloseCleansUpAfterEachFailure;
+const
+  ExpectedErrors: array[0..3] of Integer =
+    (ESysEIO, ESysEACCES, ESysEINVAL, ESysEBADF);
+var
+  Driver: TCloseFailureSerial;
+  Master, Slave: cint;
+  Stage, ErrorCode: Integer;
+  RaiseNative: Boolean;
+begin
+  for RaiseNative := False to True do
+    for Stage := 0 to 3 do
+    begin
+      AssertEquals(0, OpenPty(@Master, @Slave, nil, nil, nil));
+      Driver := TCloseFailureSerial.Create;
+      try
+        Driver.Attach(Slave);
+        Driver.FailureStage := Stage;
+        Driver.RaiseExcept := RaiseNative;
+        if Stage = 0 then
+        begin
+          fpClose(Master);
+          Master := -1;
+        end;
+        ErrorCode := 0;
+        try
+          Driver.CloseSocket;
+        except
+          on E: ESynaSerError do
+            ErrorCode := E.ErrorCode;
+        end;
+        AssertTrue('Native close must invalidate its handle',
+          Driver.Handle = INVALID_HANDLE_VALUE);
+        AssertFalse(Driver.InstanceActive);
+        AssertEquals(-1, fpFcntl(Slave, F_GETFD));
+        AssertEquals(ESysEBADF, fpGetErrno);
+        AssertEquals('RTS cleanup must be attempted', 1, Driver.RTSCalls);
+        AssertEquals('DTR cleanup must be attempted', 1, Driver.DTRCalls);
+        AssertEquals('Preserve the first cleanup error',
+          ExpectedErrors[Stage], Driver.LastError);
+        if RaiseNative then
+          AssertEquals(ExpectedErrors[Stage], ErrorCode)
+        else
+          AssertEquals(0, ErrorCode);
+        Driver.CloseSocket;
+        AssertEquals(1, Driver.RTSCalls);
+        AssertEquals(1, Driver.DTRCalls);
+      finally
+        Driver.RaiseExcept := False;
+        Driver.Free;
+        if Master >= 0 then
+          fpClose(Master);
+      end;
+    end;
+end;
+
+procedure TLazSerialLifecycleTests.DestroyDisconnectedSerialReleasesOwnedComponents;
+var
+  Master, Slave, SerialHandle: cint;
+  Name: array[0..255] of Char;
+  Serial: TLazSerial;
+  Probe: TDestructionProbe;
+  ChildDestroyed: Boolean;
+  ErrorCode: Integer;
+begin
+  AssertEquals(0, OpenPty(@Master, @Slave, @Name[0], nil, nil));
+  Serial := TLazSerial.Create(nil);
+  try
+    ChildDestroyed := False;
+    Probe := TDestructionProbe.Create(Serial);
+    Probe.Destroyed := @ChildDestroyed;
+    Serial.Device := StrPas(Name);
+    Serial.Open;
+    SerialHandle := Serial.SynSer.Handle;
+    Serial.SynSer.RaiseExcept := True;
+    fpClose(Master);
+    Master := -1;
+    ErrorCode := 0;
+    try
+      FreeAndNil(Serial);
+    except
+      on E: ESynaSerError do
+        ErrorCode := E.ErrorCode;
+    end;
+    AssertEquals(-1, fpFcntl(SerialHandle, F_GETFD));
+    AssertEquals(ESysEBADF, fpGetErrno);
+    AssertTrue('Close errors must not skip owned component destruction',
+      ChildDestroyed);
+    AssertEquals('Destruction must finish without propagating an I/O error',
+      0, ErrorCode);
+  finally
+    Serial.Free;
+    fpClose(Slave);
+    if Master >= 0 then
+      fpClose(Master);
+  end;
+end;
 
 function TTermiosProbe.DecodeSpeed(const ASettings: Termios): Integer;
 var

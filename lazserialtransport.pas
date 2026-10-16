@@ -94,12 +94,28 @@ begin
 end;
 
 procedure TLazSynapseSerialTransport.Close;
+var
+  ErrorCode: Integer;
+  RaiseNative: Boolean;
 begin
   if not IsOpen then
     Exit;
-  FSerial.Flush;
-  FSerial.Purge;
-  FSerial.CloseSocket;
+  RaiseNative := FSerial.RaiseExcept;
+  FSerial.RaiseExcept := False;
+  ErrorCode := 0;
+  try
+    try
+      FSerial.Flush;
+      ErrorCode := FSerial.LastError;
+    finally
+      FSerial.CloseSocket;
+    end;
+  finally
+    FSerial.RaiseExcept := RaiseNative;
+    if ErrorCode <> 0 then
+      FSerial.SetSynaError(ErrorCode);
+  end;
+  FSerial.ExceptCheck;
 end;
 
 procedure TLazSynapseSerialTransport.Configure(ABaudRate,

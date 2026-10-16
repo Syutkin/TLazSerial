@@ -529,8 +529,8 @@ begin
   BeginTransport;
   try
     FTransport.Close;
-    FActive := False;
   finally
+    FActive := FTransport.IsOpen;
     FClosing := False;
     EndTransport;
   end;
@@ -590,13 +590,24 @@ begin
   FSerialWatcher.OnComDisconnected := nil;
   if FReaderSession <> nil then
     FReaderSession.Detach;
-  Close;
-  FTransport.SetStatusHandler(nil);
-  FTransport.Free;
-  FReaderSession := nil;
-  FStatusSession := nil;
-  FTransportLock.Free;
-  inherited;
+  try
+    try
+      Close;
+    except
+      // Close has released the port. A destructor must finish freeing itself.
+      on E: ESynaSerError do ;
+    end;
+  finally
+    try
+      FTransport.SetStatusHandler(nil);
+      FTransport.Free;
+    finally
+      FReaderSession := nil;
+      FStatusSession := nil;
+      FTransportLock.Free;
+      inherited;
+    end;
+  end;
 end;
 
 procedure TLazSerial.Open;

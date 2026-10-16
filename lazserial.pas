@@ -187,7 +187,9 @@ type
 
     procedure BeginTransport;
     procedure EndTransport;
-    procedure ConfigurePort;
+    procedure ConfigurePort(ABaudRate: TBaudRate; ACustomBaudRate: Integer;
+      ADataBits: TDataBits; AParity: TParity; AStopBits: TStopBits;
+      AFlowControl: TFlowControl);
     function ReadModemSignal(ASignal: TModemSignal): Boolean;
     procedure DeviceOpen;
     procedure DeviceClose;
@@ -546,15 +548,57 @@ begin
   end;
 end;
 
-procedure TLazSerial.ConfigurePort;
+procedure TLazSerial.ConfigurePort(ABaudRate: TBaudRate;
+  ACustomBaudRate: Integer; ADataBits: TDataBits; AParity: TParity;
+  AStopBits: TStopBits; AFlowControl: TFlowControl);
+var
+  Speed: Integer;
+  Lifetime: ISerialReaderSession;
+  Serial: TLazSerial;
 begin
-  BeginTransport;
+  Lifetime := FStatusSession;
   try
-    if FTransport.IsOpen then
-      FTransport.Configure(AppliedBaudrate, ConstsBits[FDataBits],
-        ConstsParity[FParity], ConstsStopBits[FStopBits], FFlowControl);
-  finally
-    EndTransport;
+    BeginTransport;
+    try
+      if ACustomBaudRate < 0 then
+        Speed := ConstsBaud[ABaudRate]
+      else
+        Speed := ACustomBaudRate;
+      try
+        if FTransport.IsOpen then
+          FTransport.Configure(Speed, ConstsBits[ADataBits],
+            ConstsParity[AParity], ConstsStopBits[AStopBits], AFlowControl);
+      except
+        if not FTransport.IsOpen then
+        begin
+          FActive := False;
+          if FReaderSession <> nil then
+            FReaderSession.Cancel;
+          if ReadThread <> nil then
+            ReadThread.Terminate;
+        end;
+        raise;
+      end;
+      FBaudRate := ABaudRate;
+      FCustomBaudRate := ACustomBaudRate;
+      FDataBits := ADataBits;
+      FParity := AParity;
+      FStopBits := AStopBits;
+      FFlowControl := AFlowControl;
+    finally
+      EndTransport;
+    end;
+  except
+    // Failed recovery closes the transport. Join its reader outside the lock;
+    // a status callback may already have destroyed this component.
+    Serial := (Lifetime as TSerialReaderSession).FOwner;
+    if (Serial <> nil) and not Serial.FTransport.IsOpen then
+      try
+        Serial.DeviceClose;
+      except
+        on E: ESynaSerError do ; // Preserve the configuration error.
+      end;
+    raise;
   end;
 end;
 
@@ -809,12 +853,14 @@ end;
 procedure TLazSerial.SetActive(state: boolean);
 begin
   CheckMainThread('TLazSerial.Active');
-  if state = FActive then
+  if (state = FActive) and (state or (ReadThread = nil)) then
     Exit;
   if not state then
     DeviceClose
   else
   begin
+    if ReadThread <> nil then
+      DeviceClose;
     BeginTransport;
     try
       FSerialWatcher.Refresh;
@@ -829,9 +875,10 @@ end;
 procedure TLazSerial.SetBaudRate(br: TBaudRate);
 begin
   CheckMainThread('TLazSerial.BaudRate');
-  FBaudRate := br;
   if FCustomBaudRate < 0 then
-    ConfigurePort;
+    ConfigurePort(br, FCustomBaudRate, FDataBits, FParity, FStopBits, FFlowControl)
+  else
+    FBaudRate := br;
 end;
 
 procedure TLazSerial.SetCustomBaudrate(br: Integer);
@@ -839,18 +886,13 @@ begin
   CheckMainThread('TLazSerial.CustomBaudRate');
   if FCustomBaudRate = br then
     Exit;
-  FCustomBaudRate := br;
-  if FCustomBaudRate < 0 then
-    SetBaudRate(FBaudRate)
-  else
-    ConfigurePort;
+  ConfigurePort(FBaudRate, br, FDataBits, FParity, FStopBits, FFlowControl);
 end;
 
 procedure TLazSerial.SetDataBits(db: TDataBits);
 begin
   CheckMainThread('TLazSerial.DataBits');
-  FDataBits := db;
-  ConfigurePort;
+  ConfigurePort(FBaudRate, FCustomBaudRate, db, FParity, FStopBits, FFlowControl);
 end;
 
 procedure TLazSerial.SetDevice(const ADevice: string);
@@ -887,8 +929,8 @@ begin
   CheckMainThread('TLazSerial.FlowControl');
   if FFlowControl = aFlowControl then
     Exit;
-  FFlowControl := aFlowControl;
-  ConfigurePort;
+  ConfigurePort(FBaudRate, FCustomBaudRate, FDataBits, FParity, FStopBits,
+    aFlowControl);
 end;
 
 
@@ -906,8 +948,7 @@ end;
 procedure TLazSerial.SetParity(pr: TParity);
 begin
   CheckMainThread('TLazSerial.Parity');
-  FParity := pr;
-  ConfigurePort;
+  ConfigurePort(FBaudRate, FCustomBaudRate, FDataBits, pr, FStopBits, FFlowControl);
 end;
 
 procedure TLazSerial.SetRcvLineCRLF(AValue: Boolean);
@@ -919,8 +960,7 @@ end;
 procedure TLazSerial.SetStopBits(sb: TStopBits);
 begin
   CheckMainThread('TLazSerial.StopBits');
-  FStopBits := sb;
-  ConfigurePort;
+  ConfigurePort(FBaudRate, FCustomBaudRate, FDataBits, FParity, sb, FFlowControl);
 end;
 
 function TLazSerial.WriteBuffer(var buf; size: integer): integer;

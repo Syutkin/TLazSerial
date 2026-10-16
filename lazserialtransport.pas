@@ -40,6 +40,8 @@ type
   TLazSynapseSerialTransport = class(TLazSerialTransport)
   private
     FSerial: TBlockSerial;
+    FConfigured: Boolean;
+    function RestoreConfiguration(const APrevious: TDCB): Boolean;
   protected
     function CreateSerial: TBlockSerial; virtual;
   public
@@ -102,6 +104,7 @@ var
   RaiseNative: Boolean;
   Started: QWord;
 begin
+  FConfigured := False;
   if not IsOpen then
     Exit;
   RaiseNative := FSerial.RaiseExcept;
@@ -142,22 +145,60 @@ var
   ErrorCode: Integer;
   ErrorMessage: string;
   Error: ESynaSerError;
+  Previous: TDCB;
 begin
-  FSerial.Config(ABaudRate, ADataBits, AParity, AStopBits, AFlowControl);
-  ErrorCode := FSerial.LastError;
-  if ErrorCode <> 0 then
-  begin
-    ErrorMessage := TBlockSerial.GetErrorDesc(ErrorCode);
-    Error := ESynaSerError.CreateFmt('Could not configure device %s: %s',
-      [FSerial.Device, ErrorMessage]);
-    Error.ErrorCode := ErrorCode;
-    Error.ErrorMessage := ErrorMessage;
-    raise Error;
+  Previous := FSerial.DCB;
+  try
+    FSerial.Config(ABaudRate, ADataBits, AParity, AStopBits, AFlowControl);
+    ErrorCode := FSerial.LastError;
+    if ErrorCode <> 0 then
+    begin
+      ErrorMessage := TBlockSerial.GetErrorDesc(ErrorCode);
+      Error := ESynaSerError.CreateFmt('Could not configure device %s: %s',
+        [FSerial.Device, ErrorMessage]);
+      Error.ErrorCode := ErrorCode;
+      Error.ErrorMessage := ErrorMessage;
+      raise Error;
+    end;
+    FConfigured := True;
+  except
+    on E: ESynaSerError do
+    begin
+      try
+        if FConfigured and not RestoreConfiguration(Previous) then
+        begin
+          FConfigured := False;
+          try
+            Close;
+          except
+            on CloseError: ESynaSerError do ;
+          end;
+        end
+        else
+          FSerial.DCB := Previous;
+      finally
+        FSerial.SetSynaError(E.ErrorCode);
+      end;
+      raise;
+    end;
+  end;
+end;
+
+function TLazSynapseSerialTransport.RestoreConfiguration(
+  const APrevious: TDCB): Boolean;
+begin
+  FSerial.DCB := APrevious;
+  try
+    FSerial.SetCommState;
+    Result := FSerial.LastError = 0;
+  except
+    on E: ESynaSerError do Result := False;
   end;
 end;
 
 procedure TLazSynapseSerialTransport.Connect(const ADevice: string);
 begin
+  FConfigured := False;
   FSerial.Connect(ADevice);
 end;
 

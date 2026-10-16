@@ -5,6 +5,7 @@ unit LazSerialConfigurationTests;
 interface
 
 uses
+  {$IFDEF MSWINDOWS}Windows,{$ENDIF}
   Classes, SysUtils, SyncObjs, TypInfo, FpcUnit, TestRegistry, LazSerial, LazSerialCommon,
   LazSerialTransport, LazSynaSer, LazSerialTransportTests;
 
@@ -29,6 +30,12 @@ type
     procedure FailedFlowControlKeepsPreviousValue;
     procedure FailedCustomBaudRateCanRetrySameValue;
     procedure FailedFlowControlCanRetrySameValue;
+    procedure PartialConfigurationFailureRestoresDriverState;
+    procedure FailedCustomOverrideSwitchCanRetry;
+    procedure FailedRollbackClosesConnectionAndPreservesError;
+    procedure ConfigurationStatusesObserveCommittedValues;
+    procedure ConfigurationCallbackCanDestroyAfterRollbackFailure;
+    procedure ConfigurationCallbackCanReopenAfterRollbackFailure;
   end;
 
 implementation
@@ -507,6 +514,361 @@ begin
     AssertEquals(Ord(fcRTS_CTS), Ord(Transport.LastConfig.FlowControl));
   finally
     Serial.Free;
+  end;
+end;
+
+type
+  TRollbackTestSerial = class(TConfigurationTestSerial)
+  private
+    FRestoring: Boolean;
+  public
+    DriverState: TDCB;
+    FailNextApply, FailRestore, EmitStatus: Boolean;
+    Component: TLazSerial;
+    ObservedProperty: Int64;
+    PropertyName: string;
+    procedure GetCommState; override;
+    procedure SetCommState; override;
+  end;
+
+  TRollbackTestTransport = class(TConfigurationTestTransport)
+  protected
+    function CreateSerial: TBlockSerial; override;
+  public
+    FailClose: Boolean;
+    function Driver: TRollbackTestSerial;
+    function CanRead(const ATimeout: Integer): Boolean; override;
+    procedure Close; override;
+  end;
+
+  TConfigurationStatusProbe = class
+  public
+    Serial: TTestableLazSerial;
+    Count: Integer;
+    ExpectedValue: Int64;
+    Mismatch, DestroyOnStatus, ReopenOnStatus, ActiveOnFirstStatus: Boolean;
+    Transport: TRollbackTestTransport;
+    procedure StatusChanged(Sender: TObject; Reason: THookSerialReason;
+      const Value: string);
+  end;
+
+procedure TRollbackTestSerial.GetCommState;
+begin
+  Inc(ReadCount);
+  DCB := DriverState;
+  RaiseSynaError(0);
+end;
+
+procedure TRollbackTestSerial.SetCommState;
+begin
+  Inc(ApplyCount);
+  if PropertyName <> '' then
+    ObservedProperty := GetOrdProp(Component, PropertyName);
+  if EmitStatus then
+    DoStatus(HR_Connect, 'configuration');
+  if FailNextApply then
+  begin
+    DriverState := DCB;
+    FailNextApply := False;
+    FRestoring := True;
+    RaiseSynaError(ErrWrongParameter);
+    Exit;
+  end;
+  if FRestoring and FailRestore then
+  begin
+    RaiseSynaError(ErrNoDeviceAnswer);
+    Exit;
+  end;
+  DriverState := DCB;
+  FRestoring := False;
+  RaiseSynaError(0);
+end;
+
+function TRollbackTestTransport.CreateSerial: TBlockSerial;
+begin
+  Result := TRollbackTestSerial.Create;
+end;
+
+function TRollbackTestTransport.Driver: TRollbackTestSerial;
+begin
+  Result := TRollbackTestSerial(NativeSerial);
+end;
+
+function TRollbackTestTransport.CanRead(const ATimeout: Integer): Boolean;
+begin
+  Result := inherited CanRead(ATimeout);
+  // Real readiness calls refresh LastError on every attempt.
+  NativeSerial.SetSynaError(0);
+end;
+
+procedure TRollbackTestTransport.Close;
+begin
+  if not IsOpen then
+    Exit;
+  inherited Close;
+  if FailClose then
+    NativeSerial.RaiseSynaError(ErrNoDeviceAnswer);
+end;
+
+procedure TConfigurationStatusProbe.StatusChanged(Sender: TObject;
+  Reason: THookSerialReason; const Value: string);
+begin
+  if Reason <> HR_Connect then
+    Exit;
+  Inc(Count);
+  if Count = 1 then
+    ActiveOnFirstStatus := Serial.Active;
+  if ReopenOnStatus then
+  begin
+    ReopenOnStatus := False;
+    Transport.Driver.FailRestore := False;
+    Transport.Driver.EmitStatus := False;
+    Serial.Open;
+  end
+  else if DestroyOnStatus then
+    FreeAndNil(Serial)
+  else
+    Mismatch := Mismatch or
+      (GetOrdProp(Serial, 'FlowControl') <> ExpectedValue);
+end;
+
+procedure TLazSerialConfigurationTests.PartialConfigurationFailureRestoresDriverState;
+const
+  Names: array[0..5] of string = ('BaudRate', 'CustomBaudRate', 'DataBits',
+    'Parity', 'StopBits', 'FlowControl');
+  Values: array[0..5] of Int64 = (Ord(br_57600), 57600, Ord(db7bits),
+    Ord(pEven), Ord(sbTwo), Ord(fcRTS_CTS));
+var
+  Serial: TTestableLazSerial;
+  Transport: TRollbackTestTransport;
+  PreviousState: TDCB;
+  PreviousValue: Int64;
+  Operation, ErrorCode: Integer;
+  RaiseNative: Boolean;
+begin
+  for RaiseNative := False to True do
+    for Operation := Low(Names) to High(Names) do
+    begin
+      Serial := TTestableLazSerial.Create(nil);
+      try
+        Transport := TRollbackTestTransport.Create;
+        Serial.InstallTransport(Transport);
+        Transport.NativeSerial.RaiseExcept := RaiseNative;
+        Serial.Open;
+        PreviousValue := GetOrdProp(Serial, Names[Operation]);
+        PreviousState := Transport.Driver.DriverState;
+        Transport.Driver.Component := Serial;
+        Transport.Driver.PropertyName := Names[Operation];
+        Transport.Driver.FailNextApply := True;
+        ErrorCode := 0;
+        try
+          SetOrdProp(Serial, Names[Operation], Values[Operation]);
+        except
+          on E: ESynaSerError do ErrorCode := E.ErrorCode;
+        end;
+        AssertEquals(ErrWrongParameter, ErrorCode);
+        AssertEquals(PreviousValue, GetOrdProp(Serial, Names[Operation]));
+        AssertTrue('Restore all previously applied driver settings',
+          CompareMem(@PreviousState, @Transport.Driver.DriverState, SizeOf(TDCB)));
+        AssertTrue(Serial.Active);
+        AssertEquals(RaiseNative, Transport.NativeSerial.RaiseExcept);
+        SetOrdProp(Serial, Names[Operation], Values[Operation]);
+        AssertEquals('Commit properties only after applying the driver settings',
+          PreviousValue, Transport.Driver.ObservedProperty);
+        AssertEquals(Values[Operation], GetOrdProp(Serial, Names[Operation]));
+      finally
+        Serial.Free;
+      end;
+    end;
+end;
+
+procedure TLazSerialConfigurationTests.FailedCustomOverrideSwitchCanRetry;
+var
+  Serial: TTestableLazSerial;
+  Transport: TRollbackTestTransport;
+  RaiseNative: Boolean;
+begin
+  for RaiseNative := False to True do
+  begin
+    Serial := TTestableLazSerial.Create(nil);
+    try
+      Transport := TRollbackTestTransport.Create;
+      Serial.InstallTransport(Transport);
+      Transport.NativeSerial.RaiseExcept := RaiseNative;
+      Serial.CustomBaudRate := 57600;
+      Serial.Open;
+      Serial.BaudRate := br115200;
+      Transport.Driver.FailNextApply := True;
+      try
+        Serial.CustomBaudRate := -1;
+        Fail('Expected a rejected switch to the standard baud rate');
+      except
+        on E: ESynaSerError do AssertEquals(ErrWrongParameter, E.ErrorCode);
+      end;
+      AssertEquals(57600, Serial.CustomBaudRate);
+      AssertEquals(Ord(br115200), Ord(Serial.BaudRate));
+      AssertEquals(57600, Transport.Driver.DriverState.BaudRate);
+      Serial.CustomBaudRate := -1;
+      AssertEquals(115200, Transport.Driver.DriverState.BaudRate);
+      Transport.Driver.FailNextApply := True;
+      try
+        Serial.CustomBaudRate := 38400;
+        Fail('Expected a rejected switch to the custom baud rate');
+      except
+        on E: ESynaSerError do AssertEquals(ErrWrongParameter, E.ErrorCode);
+      end;
+      AssertEquals(-1, Serial.CustomBaudRate);
+      AssertEquals(115200, Transport.Driver.DriverState.BaudRate);
+      Serial.CustomBaudRate := 38400;
+      AssertEquals(38400, Transport.Driver.DriverState.BaudRate);
+    finally
+      Serial.Free;
+    end;
+  end;
+end;
+
+procedure TLazSerialConfigurationTests.FailedRollbackClosesConnectionAndPreservesError;
+var
+  Serial: TTestableLazSerial;
+  Transport: TRollbackTestTransport;
+  PreviousFlow: TFlowControl;
+  ErrorCode: Integer;
+  RaiseNative: Boolean;
+begin
+  for RaiseNative := False to True do
+  begin
+    Serial := TTestableLazSerial.Create(nil);
+    try
+      Transport := TRollbackTestTransport.Create;
+      Serial.InstallTransport(Transport);
+      Transport.NativeSerial.RaiseExcept := RaiseNative;
+      Serial.Open;
+      PreviousFlow := Serial.FlowControl;
+      Transport.Driver.FailNextApply := True;
+      Transport.Driver.FailRestore := True;
+      Transport.FailClose := True;
+      ErrorCode := 0;
+      try
+        Serial.FlowControl := fcRTS_CTS;
+      except
+        on E: ESynaSerError do ErrorCode := E.ErrorCode;
+      end;
+      AssertEquals('Recovery and cleanup must preserve the first error',
+        ErrWrongParameter, ErrorCode);
+      AssertEquals(Ord(PreviousFlow), Ord(Serial.FlowControl));
+      AssertFalse(Serial.Active);
+      AssertFalse(Transport.IsOpen);
+      AssertEquals(1, Transport.CloseCount);
+      AssertEquals(RaiseNative, Transport.NativeSerial.RaiseExcept);
+      Transport.Driver.FailRestore := False;
+      Transport.FailClose := False;
+      Serial.Open;
+      AssertTrue(Serial.Active);
+      AssertEquals(Ord(PreviousFlow), Ord(Serial.FlowControl));
+    finally
+      Serial.Free;
+    end;
+  end;
+end;
+
+procedure TLazSerialConfigurationTests.ConfigurationStatusesObserveCommittedValues;
+var
+  Probe: TConfigurationStatusProbe;
+  Transport: TRollbackTestTransport;
+begin
+  Probe := TConfigurationStatusProbe.Create;
+  try
+    Probe.Serial := TTestableLazSerial.Create(nil);
+    Transport := TRollbackTestTransport.Create;
+    Probe.Serial.InstallTransport(Transport);
+    Probe.Serial.Open;
+    Probe.Serial.OnStatus := @Probe.StatusChanged;
+    Transport.Driver.EmitStatus := True;
+    Probe.ExpectedValue := Ord(fcRTS_CTS);
+    Probe.Serial.FlowControl := fcRTS_CTS;
+    AssertTrue(Probe.Count > 0);
+    AssertFalse(Probe.Mismatch);
+    Probe.Count := 0;
+    Transport.Driver.FailNextApply := True;
+    try
+      Probe.Serial.FlowControl := fcDTR;
+      Fail('Expected configuration failure');
+    except
+      on E: ESynaSerError do AssertEquals(ErrWrongParameter, E.ErrorCode);
+    end;
+    AssertTrue(Probe.Count > 0);
+    AssertFalse('Failed candidates must not be visible in status callbacks', Probe.Mismatch);
+  finally
+    Probe.Serial.Free;
+    Probe.Free;
+  end;
+end;
+
+procedure TLazSerialConfigurationTests.ConfigurationCallbackCanDestroyAfterRollbackFailure;
+var
+  Probe: TConfigurationStatusProbe;
+  Transport: TRollbackTestTransport;
+  ErrorCode: Integer;
+begin
+  Probe := TConfigurationStatusProbe.Create;
+  try
+    Probe.Serial := TTestableLazSerial.Create(nil);
+    Transport := TRollbackTestTransport.Create;
+    Probe.Serial.InstallTransport(Transport);
+    Probe.Serial.Open;
+    Probe.DestroyOnStatus := True;
+    Probe.Serial.OnStatus := @Probe.StatusChanged;
+    Transport.Driver.EmitStatus := True;
+    Transport.Driver.FailNextApply := True;
+    Transport.Driver.FailRestore := True;
+    ErrorCode := 0;
+    try
+      Probe.Serial.FlowControl := fcRTS_CTS;
+    except
+      on E: ESynaSerError do ErrorCode := E.ErrorCode;
+    end;
+    AssertEquals(ErrWrongParameter, ErrorCode);
+    AssertNull(Probe.Serial);
+    AssertEquals(1, Probe.Count);
+  finally
+    Probe.Serial.Free;
+    Probe.Free;
+  end;
+end;
+
+procedure TLazSerialConfigurationTests.ConfigurationCallbackCanReopenAfterRollbackFailure;
+var
+  Probe: TConfigurationStatusProbe;
+  ErrorCode: Integer;
+begin
+  Probe := TConfigurationStatusProbe.Create;
+  try
+    Probe.Serial := TTestableLazSerial.Create(nil);
+    Probe.Transport := TRollbackTestTransport.Create;
+    Probe.Serial.InstallTransport(Probe.Transport);
+    Probe.Serial.Open;
+    Probe.ReopenOnStatus := True;
+    Probe.ExpectedValue := Ord(Probe.Serial.FlowControl);
+    Probe.Serial.OnStatus := @Probe.StatusChanged;
+    Probe.Transport.Driver.EmitStatus := True;
+    Probe.Transport.Driver.FailNextApply := True;
+    Probe.Transport.Driver.FailRestore := True;
+    ErrorCode := 0;
+    try
+      Probe.Serial.FlowControl := fcRTS_CTS;
+    except
+      on E: ESynaSerError do ErrorCode := E.ErrorCode;
+    end;
+    AssertEquals(ErrWrongParameter, ErrorCode);
+    AssertTrue(Probe.Count > 0);
+    AssertFalse('Publish the closed state before status callbacks',
+      Probe.ActiveOnFirstStatus);
+    AssertTrue('The callback must be able to reopen immediately', Probe.Serial.Active);
+    AssertTrue(Probe.Transport.IsOpen);
+    AssertFalse(Probe.Mismatch);
+  finally
+    Probe.Serial.Free;
+    Probe.Free;
   end;
 end;
 

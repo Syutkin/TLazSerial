@@ -364,6 +364,12 @@ var
   {:can be used for your own months strings for @link(getmonthnumber)}
   CustomMonthNames: array[1..12] of string;
 
+{$IFDEF LAZSERIAL_TESTING}
+{ Test-only input for the wall clock. Production builds always use Now. }
+var
+  SerialTestWallClock: function: TDateTime = nil;
+{$ENDIF}
+
 implementation
 
 {==============================================================================}
@@ -845,6 +851,11 @@ function GetTick: LongWord;
 var
   Stamp: TTimeStamp;
 begin
+  {$IFDEF LAZSERIAL_TESTING}
+  if Assigned(SerialTestWallClock) then
+    Stamp := DateTimeToTimeStamp(SerialTestWallClock())
+  else
+  {$ENDIF}
   Stamp := DateTimeToTimeStamp(Now);
   Result := Stamp.Time;
 end;

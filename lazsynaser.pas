@@ -337,6 +337,14 @@ type
 {$IFDEF MSWINDOWS}
     FPortAddr: Word;
     function CanEvent(Event: dword; Timeout: integer): boolean;
+    function StartOverlappedIO(ARead: Boolean; ABuffer: Pointer;
+      ALength: DWord; var ATransferred: DWord;
+      AOverlapped: POverlapped): Boolean; virtual;
+    function WaitOverlappedIO(AHandle: THandle; ATimeout: DWord): DWord; virtual;
+    function FinishOverlappedIO(var AOverlapped: TOverlapped;
+      var ATransferred: DWord; AWait: Boolean): Boolean; virtual;
+    function AbortOverlappedIO(AFlags: DWord): Boolean; virtual;
+    function ClearOverlappedIOError(var AError: DWord): Boolean; virtual;
     procedure DecodeCommError(Error: DWord); virtual;
     function GetPortAddr: Word;  virtual;
     function ReadTxEmpty(PortAddr: Word): Boolean; virtual;
@@ -1053,6 +1061,41 @@ begin
   DoStatus(HR_Connect, FDevice);
 end;
 
+{$IFDEF MSWINDOWS}
+function TBlockSerial.StartOverlappedIO(ARead: Boolean; ABuffer: Pointer;
+  ALength: DWord; var ATransferred: DWord;
+  AOverlapped: POverlapped): Boolean;
+begin
+  if ARead then
+    Result := Windows.ReadFile(FHandle, ABuffer^, ALength,
+      ATransferred, AOverlapped)
+  else
+    Result := Windows.WriteFile(FHandle, ABuffer^, ALength,
+      ATransferred, AOverlapped);
+end;
+
+function TBlockSerial.WaitOverlappedIO(AHandle: THandle; ATimeout: DWord): DWord;
+begin
+  Result := Windows.WaitForSingleObject(AHandle, ATimeout);
+end;
+
+function TBlockSerial.FinishOverlappedIO(var AOverlapped: TOverlapped;
+  var ATransferred: DWord; AWait: Boolean): Boolean;
+begin
+  Result := Windows.GetOverlappedResult(FHandle, AOverlapped, ATransferred, AWait);
+end;
+
+function TBlockSerial.AbortOverlappedIO(AFlags: DWord): Boolean;
+begin
+  Result := Windows.PurgeComm(FHandle, AFlags);
+end;
+
+function TBlockSerial.ClearOverlappedIOError(var AError: DWord): Boolean;
+begin
+  Result := Windows.ClearCommError(FHandle, AError, nil);
+end;
+{$ENDIF}
+
 function TBlockSerial.SendBuffer(buffer: pointer; length: integer): integer;
 {$IFDEF MSWINDOWS}
 var
@@ -1076,21 +1119,21 @@ begin
   FillChar(Overlapped, Sizeof(Overlapped), 0);
   SetSynaError(sOK);
   y := 0;
-  if not WriteFile(FHandle, Buffer^, Length, DWord(Result), @Overlapped) then
+  if not StartOverlappedIO(False, Buffer, Length, DWord(Result), @Overlapped) then
     y := GetLastError;
   if y = ERROR_IO_PENDING then
   begin
-    x := WaitForSingleObject(FHandle, FDeadlockTimeout);
+    x := WaitOverlappedIO(FHandle, FDeadlockTimeout);
     if x = WAIT_TIMEOUT then
     begin
-      PurgeComm(FHandle, PURGE_TXABORT);
+      AbortOverlappedIO(PURGE_TXABORT);
       SetSynaError(ErrTimeout);
     end;
-    GetOverlappedResult(FHandle, Overlapped, Dword(Result), False);
+    FinishOverlappedIO(Overlapped, Dword(Result), False);
   end
   else
     SetSynaError(y);
-  ClearCommError(FHandle, err, nil);
+  ClearOverlappedIOError(err);
   if err <> 0 then
     DecodeCommError(err);
 {$ENDIF}
@@ -1191,21 +1234,21 @@ begin
   FillChar(Overlapped, Sizeof(Overlapped), 0);
   SetSynaError(sOK);
   y := 0;
-  if not ReadFile(FHandle, Buffer^, length, Dword(Result), @Overlapped) then
+  if not StartOverlappedIO(True, Buffer, length, Dword(Result), @Overlapped) then
     y := GetLastError;
   if y = ERROR_IO_PENDING then
   begin
-    x := WaitForSingleObject(FHandle, FDeadlockTimeout);
+    x := WaitOverlappedIO(FHandle, FDeadlockTimeout);
     if x = WAIT_TIMEOUT then
     begin
-      PurgeComm(FHandle, PURGE_RXABORT);
+      AbortOverlappedIO(PURGE_RXABORT);
       SetSynaError(ErrTimeout);
     end;
-    GetOverlappedResult(FHandle, Overlapped, Dword(Result), False);
+    FinishOverlappedIO(Overlapped, Dword(Result), False);
   end
   else
     SetSynaError(y);
-  ClearCommError(FHandle, err, nil);
+  ClearOverlappedIOError(err);
   if err <> 0 then
     DecodeCommError(err);
 {$ENDIF}

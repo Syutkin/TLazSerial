@@ -85,6 +85,33 @@ procedure Register;
 
 implementation
 
+type
+  TSerialWatcherEventGuard = class(TComponent)
+  private
+    FWatcher: TSerialWatcher;
+  protected
+    procedure Notification(AComponent: TComponent;
+      Operation: TOperation); override;
+  public
+    constructor Create(AWatcher: TSerialWatcher); reintroduce;
+    property Watcher: TSerialWatcher read FWatcher;
+  end;
+
+constructor TSerialWatcherEventGuard.Create(AWatcher: TSerialWatcher);
+begin
+  inherited Create(nil);
+  FWatcher := AWatcher;
+  AWatcher.FreeNotification(Self);
+end;
+
+procedure TSerialWatcherEventGuard.Notification(AComponent: TComponent;
+  Operation: TOperation);
+begin
+  inherited Notification(AComponent, Operation);
+  if (Operation = opRemove) and (AComponent = FWatcher) then
+    FWatcher := nil;
+end;
+
 const
   SerialRefreshSettleRetryMs = 1;
   {$IFDEF Windows}
@@ -152,6 +179,7 @@ procedure TSerialWatcher.ApplyDevices(
 var
   AddedDevices: Boolean;
   RemovedDevices: Boolean;
+  Guard: TSerialWatcherEventGuard;
 begin
   if not FInitialized then
   begin
@@ -166,10 +194,19 @@ begin
     FLastRefreshChanged := AddedDevices or RemovedDevices;
     FDevices := CopyDevices(ADevices);
 
-    if AddedDevices and Assigned(FComConnected) then
-      FComConnected(Self);
-    if RemovedDevices and Assigned(FComDisconnected) then
-      FComDisconnected(Self);
+    Guard := TSerialWatcherEventGuard.Create(Self);
+    try
+      if AddedDevices and Assigned(FComConnected) then
+        FComConnected(Self);
+      // The first event may destroy this watcher or its owning component.
+      // Consult the independent guard before accessing any more fields.
+      if Guard.Watcher = nil then
+        Exit;
+      if RemovedDevices and Assigned(FComDisconnected) then
+        FComDisconnected(Self);
+    finally
+      Guard.Free;
+    end;
   end;
 end;
 

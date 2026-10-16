@@ -12,6 +12,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Device-refresh callbacks can safely destroy their watcher, selector or owner
+  without accessing freed memory or delivering further events.
 - Serial configuration failures now raise an error even when
   `SynSer.RaiseExcept` is false, allowing failed opens to close the port and
   leave `Active` false. Errors while reading the current port settings are

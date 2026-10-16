@@ -14,18 +14,25 @@ type
   ) of object;
   TSerialDeviceRefreshFinishedMethod = procedure of object;
 
+  ISerialDeviceRefreshDelivery = interface
+    procedure Cancel;
+    procedure Queue(AThread: TThread);
+    procedure SetResult(const ADevices: TSerialDeviceInfoArray;
+      const ALoadSucceeded: Boolean);
+    function GetDelivering: Boolean;
+    function GetLoadSucceeded: Boolean;
+  end;
+
   TSerialDeviceRefreshThread = class(TThread)
   private
-    FDelivering: Boolean;
-    FDevices: TSerialDeviceInfoArray;
+    FDelivery: ISerialDeviceRefreshDelivery;
     FLoadDevices: TLoadSerialDevicesMethod;
-    FLoadSucceeded: Boolean;
-    FOnDevicesLoaded: TSerialDevicesLoadedMethod;
-    FOnFinished: TSerialDeviceRefreshFinishedMethod;
     FStarted: Boolean;
-    procedure Deliver;
+    function GetDelivering: Boolean;
+    function GetLoadSucceeded: Boolean;
   protected
     procedure Execute; override;
+    procedure TerminatedSet; override;
   public
     constructor Create(
       const ALoadDevices: TLoadSerialDevicesMethod;
@@ -34,8 +41,8 @@ type
     );
     procedure DetachCallbacks;
     procedure Start; reintroduce;
-    property Delivering: Boolean read FDelivering;
-    property LoadSucceeded: Boolean read FLoadSucceeded;
+    property Delivering: Boolean read GetDelivering;
+    property LoadSucceeded: Boolean read GetLoadSucceeded;
   end;
 
 procedure CancelSerialDeviceRefresh(
@@ -43,6 +50,84 @@ procedure CancelSerialDeviceRefresh(
 );
 
 implementation
+
+type
+  TSerialDeviceRefreshDelivery = class(TInterfacedObject,
+    ISerialDeviceRefreshDelivery)
+  private
+    FCancelled: Boolean;
+    FDelivering: Boolean;
+    FDevices: TSerialDeviceInfoArray;
+    FLoadSucceeded: Boolean;
+    FOnDevicesLoaded: TSerialDevicesLoadedMethod;
+    FOnFinished: TSerialDeviceRefreshFinishedMethod;
+    procedure Deliver;
+  public
+    constructor Create(const AOnDevicesLoaded: TSerialDevicesLoadedMethod;
+      const AOnFinished: TSerialDeviceRefreshFinishedMethod);
+    procedure Cancel;
+    procedure Queue(AThread: TThread);
+    procedure SetResult(const ADevices: TSerialDeviceInfoArray;
+      const ALoadSucceeded: Boolean);
+    function GetDelivering: Boolean;
+    function GetLoadSucceeded: Boolean;
+  end;
+
+constructor TSerialDeviceRefreshDelivery.Create(
+  const AOnDevicesLoaded: TSerialDevicesLoadedMethod;
+  const AOnFinished: TSerialDeviceRefreshFinishedMethod);
+begin
+  inherited Create;
+  FOnDevicesLoaded := AOnDevicesLoaded;
+  FOnFinished := AOnFinished;
+end;
+
+procedure TSerialDeviceRefreshDelivery.Cancel;
+begin
+  FCancelled := True;
+  FOnDevicesLoaded := nil;
+  FOnFinished := nil;
+end;
+
+procedure TSerialDeviceRefreshDelivery.Queue(AThread: TThread);
+begin
+  TThread.Queue(AThread, @Deliver);
+end;
+
+procedure TSerialDeviceRefreshDelivery.SetResult(
+  const ADevices: TSerialDeviceInfoArray; const ALoadSucceeded: Boolean);
+begin
+  FDevices := ADevices;
+  FLoadSucceeded := ALoadSucceeded;
+end;
+
+function TSerialDeviceRefreshDelivery.GetDelivering: Boolean;
+begin
+  Result := FDelivering;
+end;
+
+function TSerialDeviceRefreshDelivery.GetLoadSucceeded: Boolean;
+begin
+  Result := FLoadSucceeded;
+end;
+
+procedure TSerialDeviceRefreshDelivery.Deliver;
+var
+  KeepAlive: ISerialDeviceRefreshDelivery;
+begin
+  // A callback may free the owner and its worker. Keep all delivery state
+  // alive independently, and only touch that state after calling user code.
+  KeepAlive := Self;
+  FDelivering := True;
+  try
+    if not FCancelled and Assigned(FOnDevicesLoaded) then
+      FOnDevicesLoaded(FDevices);
+  finally
+    FDelivering := False;
+    if not FCancelled and Assigned(FOnFinished) then
+      FOnFinished();
+  end;
+end;
 
 constructor TSerialDeviceRefreshThread.Create(
   const ALoadDevices: TLoadSerialDevicesMethod;
@@ -52,11 +137,8 @@ constructor TSerialDeviceRefreshThread.Create(
 begin
   inherited Create(True);
   FreeOnTerminate := False;
-  FDelivering := False;
+  FDelivery := TSerialDeviceRefreshDelivery.Create(AOnDevicesLoaded, AOnFinished);
   FLoadDevices := ALoadDevices;
-  FLoadSucceeded := False;
-  FOnDevicesLoaded := AOnDevicesLoaded;
-  FOnFinished := AOnFinished;
   FStarted := False;
 end;
 
@@ -74,40 +156,49 @@ begin
 end;
 
 procedure TSerialDeviceRefreshThread.Execute;
+var
+  Devices: TSerialDeviceInfoArray;
+  Succeeded: Boolean;
 begin
+  Devices := nil;
+  Succeeded := False;
   try
     if not Terminated and Assigned(FLoadDevices) then
     begin
-      FDevices := FLoadDevices();
-      FLoadSucceeded := True;
+      Devices := FLoadDevices();
+      Succeeded := True;
     end;
   except
-    FDevices := nil;
-    FLoadSucceeded := False;
+    Devices := nil;
+    Succeeded := False;
   end;
 
-  if not Terminated and Assigned(FOnDevicesLoaded) then
-    TThread.Queue(Self, @Deliver);
+  FDelivery.SetResult(Devices, Succeeded);
+  if not Terminated then
+    FDelivery.Queue(Self);
 end;
 
-procedure TSerialDeviceRefreshThread.Deliver;
+function TSerialDeviceRefreshThread.GetDelivering: Boolean;
 begin
-  FDelivering := True;
-  try
-    if not Terminated and Assigned(FOnDevicesLoaded) then
-      FOnDevicesLoaded(FDevices);
-  finally
-    FDelivering := False;
-    if not Terminated and Assigned(FOnFinished) then
-      FOnFinished();
-  end;
+  Result := FDelivery.GetDelivering;
+end;
+
+procedure TSerialDeviceRefreshThread.TerminatedSet;
+begin
+  inherited TerminatedSet;
+  if FDelivery <> nil then
+    FDelivery.Cancel;
+end;
+
+function TSerialDeviceRefreshThread.GetLoadSucceeded: Boolean;
+begin
+  Result := FDelivery.GetLoadSucceeded;
 end;
 
 procedure TSerialDeviceRefreshThread.DetachCallbacks;
 begin
   FLoadDevices := nil;
-  FOnDevicesLoaded := nil;
-  FOnFinished := nil;
+  FDelivery.Cancel;
 end;
 
 procedure CancelSerialDeviceRefresh(
@@ -121,12 +212,14 @@ begin
   if Thread = nil then
     Exit;
 
+  // WaitFor may pump queued callbacks on the main thread. Invalidate their
+  // targets before joining, while leaving the loader attached until it exits.
   Thread.Terminate;
   if not Thread.FStarted then
     Thread.Start;
   Thread.WaitFor;
-  TThread.RemoveQueuedEvents(Thread);
   Thread.DetachCallbacks;
+  TThread.RemoveQueuedEvents(Thread);
   Thread.Free;
 end;
 

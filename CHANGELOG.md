@@ -13,43 +13,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
-- Watchers retain the last snapshot and retry failed enumeration up to three
-  times without false disconnections. Device-refresh callbacks can safely
-  destroy their watcher, selector or owner without accessing freed memory
-  or delivering further events.
-- macOS device metadata prefers exact serial and location matches, rejects
-  ambiguous matches and respects identifier boundaries in composite port names.
-- Serial configuration errors, including failed reads of port settings and
-  unsupported Unix baud rates, are preserved and reported even with
-  `SynSer.RaiseExcept` disabled. Failed opens leave the port closed and `Active`
-  false; rejected speeds preserve port settings. Reader activity and failed
-  open cleanup cannot mask these errors, and status callbacks can safely read
-  data or close the port. Failed live updates preserve property values and
-  restore driver settings, closing the port if recovery fails and allowing
-  the same setting to be retried. Unix port-state reads report the actual
-  configured baud rate and preserve the previous DCB if reading settings fails.
-- Closing a port bounds output draining by `SynSer.DeadlockTimeout`, releases
-  its handle and resets `Active` even after I/O errors, preserving the first
-  error. Closed ports are recognized correctly with FPC 3.2.4 on Unix.
-  Destruction completes cleanup without propagating serial-close errors.
-  Terminal reader failures also deactivate the port; ordinary readiness
-  timeouts keep the reader running. Pending receive, status and reader-error
-  deliveries are cancelled and freed before Windows thread waits can deliver
-  them.
-- Windows reads and writes use separate operation events, preserve completion
-  errors and wait for cancelled I/O to finish before releasing buffers.
-- Serial timeouts and bandwidth waits handle midnight and 32-bit timer wrap
-  without spurious long delays.
-- `WriteData` now returns the actual buffer-write result instead of the
-  requested string length, preserving short writes and failures.
-- Packet reads return only received bytes, returning an empty string on a
-  negative read result while preserving the error.
-- CRLF reads preserve incomplete lines across timeouts and read exceptions.
-  Incomplete buffers do not cause repeated `OnRxData` callbacks or keep
-  `DataAvailable` true without new bytes; non-blocking reads also append
-  available bytes when `SynSer.InterPacketTimeout` is false. `MaxLineLength`
-  includes the terminator and bounds new reads; oversized lines are skipped
-  without losing following lines.
+- Failed device refreshes preserve device lists and no longer cause false
+  disconnections.
+- Callbacks can safely close or destroy components; pending notifications are
+  released on shutdown.
+- macOS device metadata is only assigned when the match is unambiguous.
+- Serial configuration errors are reported even with `SynSer.RaiseExcept`
+  disabled; failed live changes restore settings or close the port.
+- Closing a port respects `SynSer.DeadlockTimeout`, releases resources and
+  clears `Active`, including after I/O errors.
+- Windows reads and writes handle cancellation without accessing freed memory.
+- Serial timeouts and bandwidth limits no longer cause unexpectedly long waits.
+- `WriteData` reports partial writes and failures; packet reads return only
+  received bytes.
+- CRLF reads preserve partial lines and enforce `MaxLineLength` without losing
+  following lines or repeatedly firing `OnRxData`.
 
 ## [0.8.1] - 2026-09-29
 

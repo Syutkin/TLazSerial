@@ -114,10 +114,77 @@ type
     procedure ModemLinesDelegateAndSignalsCombine;
   end;
 
+  TLazSerialSendTests = class(TTestCase)
+  published
+    procedure SendStringReportsPartialWrite;
+    procedure SendStringReportsZeroProgress;
+    procedure SendStringReportsClosedPortFailure;
+    procedure SendStringPreservesNativeExceptions;
+    procedure SendStringPreservesBinaryAndEmptyPayloads;
+    procedure WriteDataPropagatesWriteResultsAndErrors;
+  end;
+
 implementation
 
 uses
   SysUtils;
+
+type
+  { Keep the production SendString implementation; simulate the buffer write. }
+  TScriptedSendTransport = class(TLazSynapseSerialTransport)
+  private
+    FOpen: Boolean;
+  public
+    WriteResult: Integer;
+    WriteError: Integer;
+    WriteCount: Integer;
+    RequestedData: AnsiString;
+    procedure Close; override;
+    procedure Connect(const ADevice: string); override;
+    procedure Configure(ABaudRate, ADataBits: Integer; AParity: Char;
+      AStopBits: Integer; AFlowControl: TFlowControl); override;
+    function CanRead(const ATimeout: Integer): Boolean; override;
+    function IsOpen: Boolean; override;
+    function SendBuffer(ABuffer: Pointer; ASize: Integer): Integer; override;
+  end;
+
+procedure TScriptedSendTransport.Close;
+begin
+  FOpen := False;
+end;
+
+procedure TScriptedSendTransport.Connect(const ADevice: string);
+begin
+  FOpen := True;
+end;
+
+procedure TScriptedSendTransport.Configure(ABaudRate, ADataBits: Integer;
+  AParity: Char; AStopBits: Integer; AFlowControl: TFlowControl);
+begin
+end;
+
+function TScriptedSendTransport.CanRead(const ATimeout: Integer): Boolean;
+begin
+  if ATimeout > 0 then
+    Sleep(ATimeout);
+  Result := False;
+end;
+
+function TScriptedSendTransport.IsOpen: Boolean;
+begin
+  Result := FOpen;
+end;
+
+function TScriptedSendTransport.SendBuffer(ABuffer: Pointer;
+  ASize: Integer): Integer;
+begin
+  Inc(WriteCount);
+  SetLength(RequestedData, ASize);
+  if ASize > 0 then
+    Move(ABuffer^, RequestedData[1], ASize);
+  NativeSerial.RaiseSynaError(WriteError);
+  Result := WriteResult;
+end;
 
 constructor TFakeSerialTransport.Create;
 begin
@@ -569,7 +636,130 @@ begin
   end;
 end;
 
+procedure TLazSerialSendTests.SendStringReportsPartialWrite;
+var
+  Transport: TScriptedSendTransport;
+begin
+  Transport := TScriptedSendTransport.Create;
+  try
+    Transport.WriteResult := 2;
+    AssertEquals('Return the short write, not the requested length',
+      2, Transport.SendString('hello'));
+    AssertEquals(0, Transport.NativeSerial.LastError);
+    AssertEquals('hello', Transport.RequestedData);
+    AssertEquals('A short write must not be retried implicitly',
+      1, Transport.WriteCount);
+  finally
+    Transport.Free;
+  end;
+end;
+
+procedure TLazSerialSendTests.SendStringReportsZeroProgress;
+var
+  Transport: TScriptedSendTransport;
+begin
+  Transport := TScriptedSendTransport.Create;
+  try
+    Transport.WriteResult := 0;
+    AssertEquals(0, Transport.SendString('hello'));
+    AssertEquals(0, Transport.NativeSerial.LastError);
+    AssertEquals(1, Transport.WriteCount);
+  finally
+    Transport.Free;
+  end;
+end;
+
+procedure TLazSerialSendTests.SendStringReportsClosedPortFailure;
+var
+  Transport: TLazSynapseSerialTransport;
+begin
+  Transport := TLazSynapseSerialTransport.Create;
+  try
+    AssertFalse(Transport.NativeSerial.RaiseExcept);
+    AssertEquals('A rejected write sends no bytes',
+      0, Transport.SendString('hello'));
+    AssertEquals(ErrPortNotOpen, Transport.NativeSerial.LastError);
+  finally
+    Transport.Free;
+  end;
+end;
+
+procedure TLazSerialSendTests.SendStringPreservesNativeExceptions;
+var
+  Raised: Boolean;
+  Transport: TLazSynapseSerialTransport;
+begin
+  Transport := TLazSynapseSerialTransport.Create;
+  try
+    Transport.NativeSerial.RaiseExcept := True;
+    Raised := False;
+    try
+      Transport.SendString('hello');
+    except
+      on E: ESynaSerError do
+      begin
+        Raised := True;
+        AssertEquals(ErrPortNotOpen, E.ErrorCode);
+      end;
+    end;
+    AssertTrue('Native write exceptions must propagate', Raised);
+    AssertEquals(ErrPortNotOpen, Transport.NativeSerial.LastError);
+  finally
+    Transport.Free;
+  end;
+end;
+
+procedure TLazSerialSendTests.SendStringPreservesBinaryAndEmptyPayloads;
+const
+  Payload = 'A' + #0 + #255 + 'B';
+var
+  Transport: TScriptedSendTransport;
+begin
+  Transport := TScriptedSendTransport.Create;
+  try
+    Transport.WriteResult := Length(Payload);
+    AssertEquals(Length(Payload), Transport.SendString(Payload));
+    AssertEquals(Payload, Transport.RequestedData);
+    AssertEquals(0, Transport.NativeSerial.LastError);
+
+    Transport.WriteResult := 0;
+    AssertEquals(0, Transport.SendString(''));
+    AssertEquals('', Transport.RequestedData);
+    AssertEquals(0, Transport.NativeSerial.LastError);
+  finally
+    Transport.Free;
+  end;
+end;
+
+procedure TLazSerialSendTests.WriteDataPropagatesWriteResultsAndErrors;
+const
+  WriteResults: array[0..3] of Integer = (5, 2, 0, -1);
+  WriteErrors: array[0..3] of Integer = (0, 0, ErrTimeout, ErrTimeout);
+var
+  I: Integer;
+  Serial: TTestableLazSerial;
+  Transport: TScriptedSendTransport;
+begin
+  Serial := TTestableLazSerial.Create(nil);
+  try
+    Transport := TScriptedSendTransport.Create;
+    Serial.InstallTransport(Transport);
+    Serial.Open;
+    for I := Low(WriteResults) to High(WriteResults) do
+    begin
+      Transport.WriteResult := WriteResults[I];
+      Transport.WriteError := WriteErrors[I];
+      AssertEquals('Write attempt ' + IntToStr(I),
+        WriteResults[I], Serial.WriteData('hello'));
+      AssertEquals(WriteErrors[I], Serial.SynSer.LastError);
+    end;
+  finally
+    Serial.Free;
+  end;
+end;
+
 initialization
   RegisterTest(TLazSerialTransportTests);
+  RegisterTest(TLazSerialSendTests);
 
 end.

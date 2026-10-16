@@ -12,6 +12,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- `WriteData` now returns the actual buffer-write result instead of the
+  requested string length, preserving short writes and failures.
 - In CRLF mode, incomplete buffered lines no longer cause repeated `OnRxData`
   callbacks or keep `DataAvailable` true without new bytes.
 - Non-blocking line reads now append available bytes to an incomplete line

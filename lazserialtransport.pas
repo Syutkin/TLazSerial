@@ -155,8 +155,7 @@ end;
 function TLazSynapseSerialTransport.SendString(
   const AData: AnsiString): Integer;
 begin
-  FSerial.SendString(AData);
-  Result := Length(AData);
+  Result := SendBuffer(Pointer(AData), Length(AData));
 end;
 
 procedure TLazSynapseSerialTransport.SetDTR(const AEnabled: Boolean);

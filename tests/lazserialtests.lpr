@@ -91,6 +91,12 @@ begin
     Exit;
   end;
   Application.Initialize;
+  if (ParamCount = 2) and
+    (ParamStr(1) = '--queued-serial-delivery-helper') then
+  begin
+    RunQueuedSerialDeliveryHelper(ParamStr(2));
+    Exit;
+  end;
   {$IF DEFINED(UNIX) AND DEFINED(LAZSERIAL_TESTING)}
   if (ParamCount = 1) and (ParamStr(1) = '--bandwidth-clock-helper') then
   begin

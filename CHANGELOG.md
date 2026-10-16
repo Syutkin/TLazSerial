@@ -32,8 +32,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   its handle and resets `Active` even after I/O errors, preserving the first
   error. Destruction completes cleanup without propagating serial-close errors.
   Terminal reader failures also deactivate the port; ordinary readiness
-  timeouts keep the reader running. Pending reader-error callbacks are safely
-  cancelled before Windows thread waits can deliver them.
+  timeouts keep the reader running. Pending receive, status and reader-error
+  deliveries are cancelled and freed before Windows thread waits can deliver
+  them.
 - Windows reads and writes use separate operation events, preserve completion
   errors and wait for cancelled I/O to finish before releasing buffers.
 - Serial timeouts and bandwidth waits handle midnight and 32-bit timer wrap

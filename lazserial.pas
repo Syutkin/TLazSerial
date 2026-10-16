@@ -134,7 +134,8 @@ type
   TComPortReadThread=class(TThread)
   private
     FSession: ISerialReaderSession;
-    FFailureDelivery: TObject;
+    FQueuedDelivery: TObject;
+    procedure QueueDelivery(ADelivery: TObject);
     procedure QueueReceive;
     procedure QueueStatus(Sender: TObject; Reason: THookSerialReason;
       const Value: string);
@@ -334,6 +335,7 @@ type
     FSender: TObject;
     FSession: ISerialReaderSession;
     FValue: string;
+    FReader: TComPortReadThread;
     procedure Deliver;
   public
     constructor CreateReceive(const ASession: ISerialReaderSession);
@@ -399,8 +401,6 @@ var
 begin
   if not FActive or (FOwner = nil) then
     Exit;
-  // Delivery owns itself while running; Close must not free it with the reader.
-  FOwner.ReadThread.FFailureDelivery := nil;
   Supports(FOwner.FStatusSession, ISerialReaderFailureSession, Lifetime);
   try
     try
@@ -476,6 +476,10 @@ var
   FailureSession: ISerialReaderFailureSession;
 begin
   Session := FSession;
+  // A callback may close the port and free its reader. The running delivery
+  // owns itself; only deliveries still waiting in the queue belong to it.
+  if FReader <> nil then
+    FReader.FQueuedDelivery := nil;
   try
     case FKind of
       srekReceive:
@@ -532,12 +536,7 @@ begin
         Delivery.Deliver
       else
       begin
-        try
-          TThread.Queue(nil, @Delivery.Deliver);
-        except
-          Delivery.Free;
-          raise;
-        end;
+        Reader.QueueDelivery(Delivery);
         Reader.WaitForDelivery;
       end;
     end;
@@ -625,7 +624,7 @@ end;
 
 procedure TLazSerial.DeviceClose;
 var
-  FailureDelivery: TObject;
+  Delivery: TSerialReaderEventDelivery;
 begin
   FClosing := True;
   try
@@ -638,14 +637,13 @@ begin
         FReaderSession.Cancel;
       while not ReadThread.Finished do
         Sleep(1);
-      FailureDelivery := ReadThread.FFailureDelivery;
-      ReadThread.FFailureDelivery := nil;
-      if FailureDelivery <> nil then
+      Delivery := TSerialReaderEventDelivery(ReadThread.FQueuedDelivery);
+      ReadThread.FQueuedDelivery := nil;
+      if Delivery <> nil then
       begin
         // Windows WaitFor can dispatch queued calls before the OS thread exits.
-        TThread.RemoveQueuedEvents(nil,
-          @TSerialReaderEventDelivery(FailureDelivery).Deliver);
-        FailureDelivery.Free;
+        TThread.RemoveQueuedEvents(nil, @Delivery.Deliver);
+        Delivery.Free;
       end;
       ReadThread.WaitFor;
       ReadThread.Free;
@@ -1125,41 +1123,42 @@ begin
       Exit;
 end;
 
-procedure TComPortReadThread.QueueReceive;
+procedure TComPortReadThread.QueueDelivery(ADelivery: TObject);
 var
   Delivery: TSerialReaderEventDelivery;
 begin
-  if Terminated then
-    Exit;
-  Delivery := TSerialReaderEventDelivery.CreateReceive(FSession);
+  Delivery := TSerialReaderEventDelivery(ADelivery);
+  Delivery.FReader := Self;
+  // Ordinary deliveries wait for completion; a failure ends the reader.
+  FQueuedDelivery := Delivery;
   try
     TThread.Queue(nil, @Delivery.Deliver);
   except
+    FQueuedDelivery := nil;
     Delivery.Free;
     raise;
   end;
+end;
+
+procedure TComPortReadThread.QueueReceive;
+begin
+  if Terminated then
+    Exit;
+  QueueDelivery(TSerialReaderEventDelivery.CreateReceive(FSession));
   WaitForDelivery;
 end;
 
 procedure TComPortReadThread.QueueStatus(Sender: TObject;
   Reason: THookSerialReason; const Value: string);
-var
-  Delivery: TSerialReaderEventDelivery;
 begin
   if Terminated then
     Exit;
-  Delivery := TSerialReaderEventDelivery.CreateStatus(
+  QueueDelivery(TSerialReaderEventDelivery.CreateStatus(
     FSession,
     Sender,
     Reason,
     Value
-  );
-  try
-    TThread.Queue(nil, @Delivery.Deliver);
-  except
-    Delivery.Free;
-    raise;
-  end;
+  ));
   WaitForDelivery;
 end;
 
@@ -1172,21 +1171,11 @@ end;
 
 procedure TComPortReadThread.QueueFailure(const AErrorCode: Integer;
   const AErrorMessage: string);
-var
-  Delivery: TSerialReaderEventDelivery;
 begin
   if Terminated then
     Exit;
-  Delivery := TSerialReaderEventDelivery.CreateFailure(FSession,
-    AErrorCode, AErrorMessage);
-  FFailureDelivery := Delivery;
-  try
-    TThread.Queue(nil, @Delivery.Deliver);
-  except
-    FFailureDelivery := nil;
-    Delivery.Free;
-    raise;
-  end;
+  QueueDelivery(TSerialReaderEventDelivery.CreateFailure(FSession,
+    AErrorCode, AErrorMessage));
   // Exit without waiting: the main thread must be able to join this reader.
 end;
 

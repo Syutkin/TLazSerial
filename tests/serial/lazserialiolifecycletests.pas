@@ -58,6 +58,7 @@ type
     procedure WaitForReceive(AProbe: TSerialIoProbe;
       const AExpectedCount: Integer; const ACatchExpectedException: Boolean);
     procedure CheckReaderFailure(const ARaiseNative: Boolean);
+    procedure CheckQueuedDeliveryCleanup(const AMode: string);
   published
     procedure ReadWriteModesBinaryPayloadAndClosedErrors;
     procedure ReaderDeliversStatusAndDataOnceOnMainThread;
@@ -79,12 +80,148 @@ type
     procedure ReaderErrorSurvivesCloseError;
     procedure ReopenCancelsReaderErrorNotification;
     procedure ReaderExceptionWithoutNativeCodeIsReported;
+    procedure CloseReleasesQueuedStatus;
+    procedure CloseReleasesQueuedReceive;
+    procedure DestroyReleasesQueuedStatus;
+    procedure DestroyReleasesQueuedReceive;
   end;
+
+procedure RunQueuedSerialDeliveryHelper(const AMode: string);
 
 implementation
 
 uses
-  SysUtils;
+  SysUtils, SerialCommandRunner;
+
+type
+  TQueuedReadinessTransport = class(TFakeSerialTransport)
+  private
+    FHandler: THookSerialStatus;
+  public
+    Ready: LongInt;
+    EmitStatus: Boolean;
+    function CanRead(const ATimeout: Integer): Boolean; override;
+    procedure SetStatusHandler(const AHandler: THookSerialStatus); override;
+  end;
+
+  TQueuedDeliveryProbe = class
+  public
+    Queued: TEvent;
+    Callbacks: Integer;
+    procedure Wake(Sender: TObject);
+    procedure Receive(Sender: TObject);
+    procedure Status(Sender: TObject; Reason: THookSerialReason;
+      const Value: string);
+  end;
+
+function TQueuedReadinessTransport.CanRead(const ATimeout: Integer): Boolean;
+begin
+  Result := InterlockedExchange(Ready, 0) = 1;
+  if Result then
+  begin
+    if EmitStatus and Assigned(FHandler) then
+      FHandler(Self, HR_CanRead, 'queued status');
+  end
+  else if ATimeout > 0 then
+    Sleep(ATimeout);
+end;
+
+procedure TQueuedReadinessTransport.SetStatusHandler(
+  const AHandler: THookSerialStatus);
+begin
+  FHandler := AHandler;
+end;
+
+procedure TQueuedDeliveryProbe.Wake(Sender: TObject);
+begin
+  // Reader deliveries use Queue(nil); watcher deliveries have their own thread.
+  if Sender = nil then
+    Queued.SetEvent;
+end;
+
+procedure TQueuedDeliveryProbe.Receive(Sender: TObject);
+begin
+  Inc(Callbacks);
+end;
+
+procedure TQueuedDeliveryProbe.Status(Sender: TObject;
+  Reason: THookSerialReason; const Value: string);
+begin
+  Inc(Callbacks);
+end;
+
+procedure RunQueuedSerialDeliveryHelper(const AMode: string);
+var
+  Probe: TQueuedDeliveryProbe;
+  Serial: TTestableLazSerial;
+  Transport: TQueuedReadinessTransport;
+  PreviousWake: TNotifyEvent;
+begin
+  Probe := TQueuedDeliveryProbe.Create;
+  Serial := nil;
+  PreviousWake := WakeMainThread;
+  try
+    Probe.Queued := TEvent.Create(nil, True, False, '');
+    Serial := TTestableLazSerial.Create(nil);
+    Transport := TQueuedReadinessTransport.Create;
+    Transport.EmitStatus := Pos('status', AMode) > 0;
+    Transport.Ready := 1;
+    Serial.InstallTransport(Transport);
+    Serial.OnRxData := @Probe.Receive;
+    Serial.OnStatus := @Probe.Status;
+    WakeMainThread := @Probe.Wake;
+    Serial.Open;
+    // WakeMainThread runs after Queue has inserted the delivery. Do not pump it.
+    TAssert.AssertEquals('Reader did not queue its notification',
+      Ord(wrSignaled), Ord(Probe.Queued.WaitFor(1000)));
+    TAssert.AssertEquals(0, Probe.Callbacks);
+    if Pos('close', AMode) > 0 then
+      Serial.Close;
+    FreeAndNil(Serial);
+    TAssert.AssertEquals('Closing must not dispatch callbacks', 0, Probe.Callbacks);
+  finally
+    Serial.Free;
+    WakeMainThread := PreviousWake;
+    Probe.Queued.Free;
+    Probe.Free;
+  end;
+  // Destruction must release the delivery without pumping the queue.
+  WriteLn('queued delivery cleanup completed');
+end;
+
+procedure TLazSerialIoLifecycleTests.CheckQueuedDeliveryCleanup(const AMode: string);
+var
+  Output: string;
+  Success: Boolean;
+begin
+  Success := RunSerialCommand(ExpandFileName(ParamStr(0)),
+    ['--queued-serial-delivery-helper', AMode], 5000, Output);
+  AssertTrue('Queued delivery helper failed: ' + Output, Success);
+  AssertTrue('Helper did not complete: ' + Output,
+    Pos('queued delivery cleanup completed', Output) > 0);
+  AssertEquals('HeapTrc detected retained queued deliveries: ' + Output,
+    0, Pos('unfreed memory blocks', LowerCase(Output)));
+end;
+
+procedure TLazSerialIoLifecycleTests.CloseReleasesQueuedStatus;
+begin
+  CheckQueuedDeliveryCleanup('close-status');
+end;
+
+procedure TLazSerialIoLifecycleTests.CloseReleasesQueuedReceive;
+begin
+  CheckQueuedDeliveryCleanup('close-receive');
+end;
+
+procedure TLazSerialIoLifecycleTests.DestroyReleasesQueuedStatus;
+begin
+  CheckQueuedDeliveryCleanup('destroy-status');
+end;
+
+procedure TLazSerialIoLifecycleTests.DestroyReleasesQueuedReceive;
+begin
+  CheckQueuedDeliveryCleanup('destroy-receive');
+end;
 
 const
   ExpectedCallbackException = 'expected receive callback exception';

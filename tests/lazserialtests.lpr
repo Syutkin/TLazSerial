@@ -101,26 +101,26 @@ begin
   if (ParamCount = 1) and (ParamStr(1) = '--bandwidth-clock-helper') then
   begin
     RunBandwidthClockHelper;
-    Halt(0);
+    Exit;
   end;
   {$ENDIF}
   if (ParamCount = 2) and (ParamStr(1) = '--watcher-lifetime-helper') then
   begin
     KeepReleased := True;
     RunWatcherLifetimeHelper(ParamStr(2));
-    Halt(0);
+    Exit;
   end;
   if (ParamCount = 2) and (ParamStr(1) = '--selector-lifetime-helper') then
   begin
     KeepReleased := True;
     RunSelectorLifetimeHelper(ParamStr(2) = 'owner');
-    Halt(0);
+    Exit;
   end;
   if (ParamCount = 2) and (ParamStr(1) = '--synchronization-helper') then
   begin
     KeepReleased := True;
     RunSerialSynchronizationHelper(ParamStr(2));
-    Halt(0);
+    Exit;
   end;
   Runner := TTestRunner.Create(nil);
   Runner.Initialize;

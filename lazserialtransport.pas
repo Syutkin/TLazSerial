@@ -221,7 +221,9 @@ end;
 
 function TLazSynapseSerialTransport.IsOpen: Boolean;
 begin
-  Result := FSerial.Handle <> INVALID_HANDLE_VALUE;
+  // FPC 3.2.4's SysUtils.INVALID_HANDLE_VALUE is unsigned on Unix.
+  // Cast -1 to THandle to match Synaser's closed descriptor.
+  Result := FSerial.Handle <> THandle(-1);
 end;
 
 function TLazSynapseSerialTransport.NativeSerial: TBlockSerial;

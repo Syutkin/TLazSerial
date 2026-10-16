@@ -30,7 +30,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   configured baud rate and preserve the previous DCB if reading settings fails.
 - Closing a port bounds output draining by `SynSer.DeadlockTimeout`, releases
   its handle and resets `Active` even after I/O errors, preserving the first
-  error. Destruction completes cleanup without propagating serial-close errors.
+  error. Closed ports are recognized correctly with FPC 3.2.4 on Unix.
+  Destruction completes cleanup without propagating serial-close errors.
   Terminal reader failures also deactivate the port; ordinary readiness
   timeouts keep the reader running. Pending receive, status and reader-error
   deliveries are cancelled and freed before Windows thread waits can deliver

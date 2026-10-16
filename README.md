@@ -191,17 +191,15 @@ sudo rfcomm bind 0 xx:xx:xx:xx:xx:xx 1
 A screenshot of the original GPS example is available
 [here](https://user-images.githubusercontent.com/9909302/160068324-3467fac2-90e4-4625-9bfb-9cc0ef058bad.PNG).
 
-The main suite combines the serial, selector, watcher and infrastructure tests.
-Device-info and command-runner tests use a separate console project. Build both
-with Lazarus:
+All tests use one LCL test runner, including the serial, selector, watcher,
+infrastructure and device-info tests. Build it with Lazarus:
 
 ```text
-lazbuild --ws=qt6 tests/deviceinfo/serialdeviceinfotests.lpi
 lazbuild --ws=qt6 tests/lazserialtests.lpi
 ```
 
-Run the suites with `tests/.test_build/lazserialtests --all` and
-`tests/deviceinfo/.test_build/serialdeviceinfotests --all` (add `.exe` on Windows).
+Run all tests with `tests/.test_build/lazserialtests --all`
+(add `.exe` on Windows).
 
 ## History and license
 

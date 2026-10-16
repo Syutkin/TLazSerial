@@ -354,7 +354,7 @@ begin
   for I := 0 to 8 do
   begin
     Candidate := IncludeTrailingPathDelimiter(Directory) +
-      'fixtures' + DirectorySeparator + AFileName;
+      'deviceinfo' + DirectorySeparator + 'fixtures' + DirectorySeparator + AFileName;
     if FileExists(Candidate) then
       Exit(Candidate);
     Directory := ExtractFileDir(Directory);

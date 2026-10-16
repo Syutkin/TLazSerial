@@ -25,7 +25,7 @@
         <PackageName Value="IDEIntf"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="17">
+    <Units Count="23">
       <Unit0>
         <Filename Value="lazserialtests.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -110,6 +110,36 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="LazSerialWindowsIoTests"/>
       </Unit16>
+      <Unit17>
+        <Filename Value="infrastructure/serialcommandrunnertests.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="SerialCommandRunnerTests"/>
+      </Unit17>
+      <Unit18>
+        <Filename Value="deviceinfo/serialwindowsdevicetests.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="SerialWindowsDeviceTests"/>
+      </Unit18>
+      <Unit19>
+        <Filename Value="deviceinfo/serialplatformcollectorsmoketests.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="SerialPlatformCollectorSmokeTests"/>
+      </Unit19>
+      <Unit20>
+        <Filename Value="deviceinfo/serialdeviceformattests.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="SerialDeviceFormatTests"/>
+      </Unit20>
+      <Unit21>
+        <Filename Value="deviceinfo/serialdeviceparsertests.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="SerialDeviceParserTests"/>
+      </Unit21>
+      <Unit22>
+        <Filename Value="deviceinfo/serialdevicecollectortests.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="SerialDeviceCollectorTests"/>
+      </Unit22>
     </Units>
   </ProjectOptions>
   <CompilerOptions>
@@ -119,7 +149,7 @@
       <Filename Value=".test_build/lazserialtests"/>
     </Target>
     <SearchPaths>
-      <OtherUnitFiles Value="..;serial;selector;watcher;infrastructure"/>
+      <OtherUnitFiles Value="..;serial;selector;watcher;infrastructure;deviceinfo"/>
       <UnitOutputDirectory Value=".test_build/lib/$(TargetCPU)-$(TargetOS)"/>
     </SearchPaths>
     <Parsing>

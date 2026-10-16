@@ -8,6 +8,7 @@ uses
   CThreads,
   cwstring,
   {$ENDIF}
+  SysUtils,
   Interfaces,
   Forms,
   ConsoleTestRunner,
@@ -26,12 +27,69 @@ uses
   LazSerialLineTests,
   LazSynaUtilTimeTests,
   LazSerialWindowsIoTests,
-  SerialPlatformChangeSourceSmokeTests;
+  SerialPlatformChangeSourceSmokeTests,
+  SerialCommandRunnerTests,
+  SerialDeviceFormatTests,
+  SerialDeviceParserTests,
+  SerialDeviceCollectorTests,
+  SerialPlatformCollectorSmokeTests,
+  SerialWindowsDeviceTests;
+
+function RunCommandRunnerHelper: Integer;
+var
+  I: Integer;
+  MarkerFile: TextFile;
+  Mode: string;
+begin
+  if ParamCount < 2 then
+    Exit(64);
+
+  Mode := ParamStr(2);
+  if Mode = 'echo' then
+  begin
+    for I := 3 to ParamCount do
+    begin
+      if I > 3 then
+        Write('|');
+      Write(ParamStr(I));
+    end;
+    Exit(0);
+  end;
+
+  if Mode = 'empty' then
+    Exit(0);
+
+  if Mode = 'fail' then
+  begin
+    Write('failed');
+    Exit(7);
+  end;
+
+  if (Mode = 'partial-timeout') and (ParamCount >= 3) then
+  begin
+    Write('partial');
+    Flush(Output);
+    Sleep(StrToIntDef(ParamStr(4), 1000));
+    AssignFile(MarkerFile, ParamStr(3));
+    Rewrite(MarkerFile);
+    WriteLn(MarkerFile, 'child survived');
+    CloseFile(MarkerFile);
+    Exit(0);
+  end;
+
+  Exit(64);
+end;
 
 var
   Runner: TTestRunner;
 begin
   GlobalSkipIfNoLeaks := True;
+  if (ParamCount > 0) and
+    (ParamStr(1) = '--command-runner-helper') then
+  begin
+    ExitCode := RunCommandRunnerHelper;
+    Exit;
+  end;
   Application.Initialize;
   {$IF DEFINED(UNIX) AND DEFINED(LAZSERIAL_TESTING)}
   if (ParamCount = 1) and (ParamStr(1) = '--bandwidth-clock-helper') then

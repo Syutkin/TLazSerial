@@ -132,9 +132,6 @@ jobs:
             --build-all --ws=gtk2 LazSerialPort.lpk \
             2>&1 | tee ci-artifacts/build-package.log
           lazbuild --lazarusdir="$LAZARUS_DIR" --build-all --ws=gtk2 \
-            tests/deviceinfo/serialdeviceinfotests.lpi \
-            2>&1 | tee ci-artifacts/build-deviceinfo-tests.log
-          lazbuild --lazarusdir="$LAZARUS_DIR" --build-all --ws=gtk2 \
             tests/lazserialtests.lpi \
             2>&1 | tee ci-artifacts/build-lazserial-tests.log
           lazbuild --lazarusdir="$LAZARUS_DIR" --build-all --ws=gtk2 \
@@ -149,10 +146,6 @@ jobs:
         run: |
           set -euo pipefail
 
-          tests/deviceinfo/.test_build/serialdeviceinfotests \
-            --all --format=xml \
-            --file=ci-artifacts/deviceinfo-results.xml \
-            2>&1 | tee ci-artifacts/run-deviceinfo-tests.log
           xvfb-run --auto-servernum \
             tests/.test_build/lazserialtests \
             --all --format=xml \
@@ -187,7 +180,6 @@ jobs:
             test "$failures" -eq 0
           }
 
-          validate_report ci-artifacts/deviceinfo-results.xml deviceinfo
           validate_report ci-artifacts/lazserial-results.xml lazserial
 
       - name: Upload test reports
@@ -206,7 +198,6 @@ jobs:
           name: tlazserial-linux-diagnostics
           path: |
             ci-artifacts/
-            tests/deviceinfo/.test_build/
             tests/.test_build/
           if-no-files-found: warn
           retention-days: 14
@@ -328,8 +319,6 @@ jobs:
 
           Invoke-LazBuild 'ci-artifacts/build-package.log' `
             'LazSerialPort.lpk'
-          Invoke-LazBuild 'ci-artifacts/build-deviceinfo-tests.log' `
-            'tests/deviceinfo/serialdeviceinfotests.lpi'
           Invoke-LazBuild 'ci-artifacts/build-lazserial-tests.log' `
             'tests/lazserialtests.lpi'
           Invoke-LazBuild 'ci-artifacts/build-serial-selector-example.log' `
@@ -341,14 +330,6 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-
-          & .\tests\deviceinfo\.test_build\serialdeviceinfotests.exe `
-            --all --format=xml `
-            --file=ci-artifacts/deviceinfo-results.xml *>&1 |
-            Tee-Object -FilePath ci-artifacts/run-deviceinfo-tests.log
-          if ($LASTEXITCODE -ne 0) {
-            throw "Device-info tests failed: exit code $LASTEXITCODE"
-          }
 
           & .\tests\.test_build\lazserialtests.exe `
             --all --format=xml `
@@ -391,7 +372,6 @@ jobs:
             }
           }
 
-          Test-FpcUnitReport 'ci-artifacts/deviceinfo-results.xml' 'deviceinfo'
           Test-FpcUnitReport 'ci-artifacts/lazserial-results.xml' 'lazserial'
 
       - name: Upload test reports
@@ -410,26 +390,35 @@ jobs:
           name: tlazserial-windows-diagnostics
           path: |
             ci-artifacts/
-            tests/deviceinfo/.test_build/
             tests/.test_build/
           if-no-files-found: warn
           retention-days: 14
 
   macos:
-    name: macOS latest ARM64
-    runs-on: macos-latest
+    name: macOS 15 ARM64 (Xcode 16.4)
+    runs-on: macos-15
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
     timeout-minutes: 60
 
     steps:
       - name: Check out sources
         uses: actions/checkout@v7
 
+      - name: Verify Apple toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -d "$DEVELOPER_DIR"
+          xcodebuild -version
+          test -x "$(xcrun --find ld-classic)"
+
       - name: Cache Lazarus toolchain
         id: toolchain-cache
         uses: actions/cache/restore@v6
         with:
           path: ${{ runner.tool_cache }}/tlazserial/lazarus-4.8-macos-arm64.tar
-          key: tlazserial-macos-latest-arm64-lazarus-4.8-fpc-3.2.4rc1-v2
+          key: tlazserial-macos-15-arm64-xcode-16.4-lazarus-4.8-fpc-3.2.4rc1-v2
 
       - name: Restore cached Lazarus toolchain
         if: steps.toolchain-cache.outputs.cache-hit == 'true'
@@ -546,7 +535,7 @@ jobs:
         uses: actions/cache/save@v6
         with:
           path: ${{ runner.tool_cache }}/tlazserial/lazarus-4.8-macos-arm64.tar
-          key: tlazserial-macos-latest-arm64-lazarus-4.8-fpc-3.2.4rc1-v2
+          key: tlazserial-macos-15-arm64-xcode-16.4-lazarus-4.8-fpc-3.2.4rc1-v2
 
       - name: Build package, tests and examples
         shell: bash
@@ -554,23 +543,22 @@ jobs:
           set -euo pipefail
           mkdir -p ci-artifacts
 
+          # Use the selected Xcode's linker and SDK, overriding FPC config paths.
+          fpc_options="-k-ld_classic -FD$(dirname "$(xcrun --find ld)") -XR$(xcrun --sdk macosx --show-sdk-path)"
+
           lazbuild --lazarusdir="$LAZARUS_DIR" \
-            --build-all --ws=cocoa --opt=-k-ld_classic LazSerialPort.lpk \
+            --build-all --ws=cocoa --opt="$fpc_options" LazSerialPort.lpk \
             2>&1 | tee ci-artifacts/build-package.log
           lazbuild --lazarusdir="$LAZARUS_DIR" --build-all --ws=cocoa \
-            --opt=-k-ld_classic \
-            tests/deviceinfo/serialdeviceinfotests.lpi \
-            2>&1 | tee ci-artifacts/build-deviceinfo-tests.log
-          lazbuild --lazarusdir="$LAZARUS_DIR" --build-all --ws=cocoa \
-            --opt=-k-ld_classic \
+            --opt="$fpc_options" \
             tests/lazserialtests.lpi \
             2>&1 | tee ci-artifacts/build-lazserial-tests.log
           lazbuild --lazarusdir="$LAZARUS_DIR" --build-all --ws=cocoa \
-            --opt=-k-ld_classic \
+            --opt="$fpc_options" \
             examples/serial-selector/serialselectorexample.lpi \
             2>&1 | tee ci-artifacts/build-serial-selector-example.log
           lazbuild --lazarusdir="$LAZARUS_DIR" --build-all --ws=cocoa \
-            --opt=-k-ld_classic \
+            --opt="$fpc_options" \
             examples/serial-gps/serialgpsexample.lpi \
             2>&1 | tee ci-artifacts/build-serial-gps-example.log
 
@@ -579,10 +567,6 @@ jobs:
         run: |
           set -euo pipefail
 
-          tests/deviceinfo/.test_build/serialdeviceinfotests \
-            --all --format=xml \
-            --file=ci-artifacts/deviceinfo-results.xml \
-            2>&1 | tee ci-artifacts/run-deviceinfo-tests.log
           tests/.test_build/lazserialtests \
             --all --format=xml \
             --file=ci-artifacts/lazserial-results.xml \
@@ -616,7 +600,6 @@ jobs:
             test "$failures" -eq 0
           }
 
-          validate_report ci-artifacts/deviceinfo-results.xml deviceinfo
           validate_report ci-artifacts/lazserial-results.xml lazserial
 
       - name: Upload test reports
@@ -635,7 +618,6 @@ jobs:
           name: tlazserial-macos-diagnostics
           path: |
             ci-artifacts/
-            tests/deviceinfo/.test_build/
             tests/.test_build/
           if-no-files-found: warn
           retention-days: 14

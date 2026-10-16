@@ -303,6 +303,9 @@ type
   TBlockSerial = class(TPersistent)
   private
     FLastReadCount: Integer;
+    FPacketReadLimit: Integer;
+    FDiscardLine: Boolean;
+    FDiscardPrefix: AnsiString;
 {$IFDEF MSWINDOWS}
     function TransferBuffer(ARead: Boolean; ABuffer: Pointer;
       ALength: Integer): Integer;
@@ -751,8 +754,10 @@ type
      need hardware handshake!}
     property TestCTS: boolean read FTestCTS write FTestCTS;
 
-    {:Use this property you to limit the maximum size of LineBuffer
-     (as a protection against unlimited memory allocation for LineBuffer).
+    {:Limits LineBuffer, including the terminator. Reads use only the available
+     capacity. An oversized line reports ErrMaxBuffer and is skipped through
+     its terminator, preserving subsequent lines.
+     Data buffered before enabling or reducing the limit is retained.
      Default value is 0 - no limit.}
     property MaxLineLength: Integer read FMaxLineLength Write FMaxLineLength;
 
@@ -1017,6 +1022,8 @@ begin
     Exit;                          {HGJ}
   end;                             {HGJ}
   FBuffer := '';
+  FDiscardLine := False;
+  FDiscardPrefix := '';
   FDevice := comport;
   GetComNr(comport);
 {$IFDEF MSWINDOWS}
@@ -1392,6 +1399,8 @@ var
 
   procedure ReadAvailable;
   begin
+    if (FPacketReadLimit > 0) and (x > FPacketReadLimit) then
+      x := FPacketReadLimit;
     SetLength(Result, x);
     FLastReadCount := 0;
     try
@@ -1415,8 +1424,16 @@ begin
   SetSynaError(sOK);
   if FBuffer <> '' then
   begin
-    Result := FBuffer;
-    FBuffer := '';
+    if FPacketReadLimit > 0 then
+    begin
+      Result := Copy(FBuffer, 1, FPacketReadLimit);
+      Delete(FBuffer, 1, Length(Result));
+    end
+    else
+    begin
+      Result := FBuffer;
+      FBuffer := '';
+    end;
   end
   else
   begin
@@ -1473,6 +1490,8 @@ var
   t: ansistring;
   tl: integer;
   ti: LongWord;
+  SavedLimit, Keep: Integer;
+  Overflow: Boolean;
 begin
   Result := '';
   if PreTestFailing then   {HGJ}
@@ -1485,46 +1504,92 @@ begin
   CorCRLF := FConvertLineEnd and (Terminator = CRLF);
   s := '';
   x := 0;
+  Overflow := False;
   repeat
     ti := GetTick;
     //get rest of FBuffer or incomming new data...
     try
-      s := s + RecvPacket(Timeout);
+      SavedLimit := FPacketReadLimit;
+      try
+        if FMaxLineLength > 0 then
+          FPacketReadLimit := FMaxLineLength - Length(s);
+        s := s + RecvPacket(Timeout);
+      finally
+        FPacketReadLimit := SavedLimit;
+      end;
     except
       FBuffer := s + FBuffer;
       raise;
     end;
     if FLastError <> sOK then
       Break;
-    x := 0;
-    if Length(s) > 0 then
-      if CorCRLF then
-      begin
-        if FLastCR and (s[1] = LF) then
-          Delete(s, 1, 1);
-        if FLastLF and (s[1] = CR) then
-          Delete(s, 1, 1);
-        FLastCR := False;
-        FLastLF := False;
-        t := '';
-        x := PosCRLF(s, t);
-        tl := system.Length(t);
-        if t = CR then
-          FLastCR := True;
-        if t = LF then
-          FLastLF := True;
-      end
-      else
-      begin
-        x := pos(Terminator, s);
-        tl := l;
-      end;
-    if (FMaxLineLength <> 0) and (system.Length(s) > FMaxLineLength) then
+    if FDiscardLine then
     begin
-      SetSynaError(ErrMaxBuffer);
-      Break;
+      s := FDiscardPrefix + s;
+      FDiscardPrefix := '';
     end;
-    if x > 0 then
+    repeat
+      x := 0;
+      if Length(s) > 0 then
+        if CorCRLF then
+        begin
+          if FLastCR and (s[1] = LF) then
+            Delete(s, 1, 1);
+          if FLastLF and (s[1] = CR) then
+            Delete(s, 1, 1);
+          FLastCR := False;
+          FLastLF := False;
+          t := '';
+          x := PosCRLF(s, t);
+          tl := system.Length(t);
+          FLastCR := t = CR;
+          FLastLF := t = LF;
+        end
+        else
+        begin
+          x := pos(Terminator, s);
+          tl := l;
+        end;
+      if x > 0 then
+      begin
+        if not FDiscardLine then
+          Break;
+        Delete(s, 1, x + tl - 1);
+        FDiscardLine := False;
+        x := 0;
+        if Overflow then
+          Break;
+        // The old oversized line ended; inspect its remaining bytes normally.
+        Continue;
+      end;
+      if not FDiscardLine and (FMaxLineLength > 0) and
+        (Length(s) >= FMaxLineLength) then
+      begin
+        FDiscardLine := True;
+        Overflow := True;
+      end;
+      if FDiscardLine then
+      begin
+        // Only a possible terminator prefix is needed between discard reads.
+        Keep := 0;
+        if not CorCRLF then
+        begin
+          Keep := l - 1;
+          if Keep > Length(s) then
+            Keep := Length(s);
+          while (Keep > 0) and
+            (Copy(s, Length(s) - Keep + 1, Keep) <> Copy(Terminator, 1, Keep)) do
+            Dec(Keep);
+        end;
+        FDiscardPrefix := Copy(s, Length(s) - Keep + 1, Keep);
+        s := '';
+      end;
+      Break;
+    until False;
+    if (x > 0) or (Overflow and not FDiscardLine) then
+      Break;
+    // Report a known overflow without waiting for more of the damaged line.
+    if Overflow and (FBuffer = '') and (WaitingData = 0) then
       Break;
     // Zero means non-blocking: drain available packets, including new bytes
     // after an incomplete FBuffer, before reporting a timeout.
@@ -1538,12 +1603,14 @@ begin
       end;
     end;
   until False;
+  if Overflow and ((FLastError = sOK) or (FLastError = ErrTimeout)) then
+    SetSynaError(ErrMaxBuffer);
   if x > 0 then
   begin
     Result := Copy(s, 1, x - 1);
     System.Delete(s, 1, x + tl - 1);
   end;
-  FBuffer := s;
+  FBuffer := s + FBuffer;
   ExceptCheck;
 end;
 
@@ -2168,6 +2235,8 @@ begin
     {$ENDIF}
   {$ENDIF}
   FBuffer := '';
+  FDiscardLine := False;
+  FDiscardPrefix := '';
   ExceptCheck;
 end;
 {$ELSE}
@@ -2180,6 +2249,8 @@ begin
   if not PurgeComm(FHandle, x) then
     SerialCheck(sErr);
   FBuffer := '';
+  FDiscardLine := False;
+  FDiscardPrefix := '';
   ExceptCheck;
 end;
 {$ENDIF}

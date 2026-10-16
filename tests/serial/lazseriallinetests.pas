@@ -62,6 +62,12 @@ type
     procedure MaxLengthAllowsSplitTerminator;
     procedure OversizedUnterminatedLineKeepsBufferBounded;
     procedure DisabledMaxLengthAcceptsLongLines;
+    procedure LimitedReadsLeaveFollowingLinesInDriver;
+    procedure OversizedLineRecoversAtEverySplit;
+    procedure OverlappingTerminatorRecoversWithinLimit;
+    procedure TinyLimitRecoversAfterIncreasingLimit;
+    procedure ConvertedOverflowPreservesFollowingLine;
+    procedure EnablingLimitPreservesAlreadyBufferedLines;
   end;
 
 implementation
@@ -134,7 +140,7 @@ begin
       Serial.QueueIncoming('1234567890');
       AssertEquals('', Serial.RecvString(0));
       AssertTrue('Oversized input may retain only a bounded terminator prefix',
-        Length(Serial.LineBuffer) <= 6);
+        Length(Serial.LineBuffer) <= Serial.MaxLineLength);
     end;
     Serial.QueueIncoming(#13#10 + 'ok' + #13#10);
     AssertEquals('ok', Serial.RecvString(0));
@@ -224,8 +230,8 @@ begin
   Serial := TLineTestSerial.Create;
   try
     Serial.MaxLineLength := 5;
-    Serial.QueueIncoming('12345' + #13#10 + #13#10);
-    AssertEquals('12345', Serial.RecvString(0));
+    Serial.QueueIncoming('123' + #13#10 + #13#10);
+    AssertEquals('123', Serial.RecvString(0));
     AssertEquals(0, Serial.LastError);
     AssertEquals('', Serial.RecvString(0));
     AssertEquals(0, Serial.LastError);
@@ -274,12 +280,12 @@ begin
   Serial := TLineTestSerial.Create;
   try
     Serial.MaxLineLength := 5;
-    Serial.QueueIncoming('12345' + #13);
+    Serial.QueueIncoming('123' + #13);
     AssertEquals('', Serial.RecvString(0));
-    AssertEquals('Terminator bytes do not count as payload',
+    AssertEquals('A split terminator still fits the buffer limit',
       ErrTimeout, Serial.LastError);
     Serial.QueueIncoming(#10);
-    AssertEquals('12345', Serial.RecvString(0));
+    AssertEquals('123', Serial.RecvString(0));
     AssertEquals(0, Serial.LastError);
   finally
     Serial.Free;
@@ -572,6 +578,185 @@ begin
     AssertTrue(Serial.DataAvailable);
     AssertEquals('partial' + #13, Serial.ReadData);
     AssertFalse(Serial.DataAvailable);
+  finally
+    Serial.Free;
+  end;
+end;
+
+type
+  TLimitedReadSerial = class(TLineTestSerial)
+  public
+    LargestRead: Integer;
+    function RecvBuffer(Buffer: Pointer; ALength: Integer): Integer; override;
+  end;
+
+function TLimitedReadSerial.RecvBuffer(Buffer: Pointer; ALength: Integer): Integer;
+begin
+  if ALength > LargestRead then
+    LargestRead := ALength;
+  Result := inherited RecvBuffer(Buffer, ALength);
+end;
+
+procedure TLazSerialLineTests.LimitedReadsLeaveFollowingLinesInDriver;
+var
+  Serial: TLimitedReadSerial;
+begin
+  Serial := TLimitedReadSerial.Create;
+  try
+    Serial.MaxLineLength := 5;
+    Serial.QueueIncoming('abc' + #13#10 + 'def' + #13#10);
+    AssertEquals('abc', Serial.RecvString(0));
+    AssertEquals('Leave bytes beyond the available capacity in the device',
+      5, Serial.WaitingData);
+    AssertTrue(Serial.LargestRead <= Serial.MaxLineLength);
+    AssertEquals('def', Serial.RecvString(0));
+    AssertEquals(0, Serial.WaitingData);
+  finally
+    Serial.Free;
+  end;
+end;
+
+procedure TLazSerialLineTests.OversizedLineRecoversAtEverySplit;
+const
+  Oversized = '1234' + #13#10;
+var
+  Serial: TLimitedReadSerial;
+  RaiseNative: Boolean;
+  Split, ExpectedError: Integer;
+
+  procedure CheckError(const AExpected: Integer);
+  var
+    Raised: Boolean;
+  begin
+    Raised := False;
+    try
+      AssertEquals('', Serial.RecvString(0));
+    except
+      on E: ESynaSerError do
+      begin
+        Raised := True;
+        AssertEquals(AExpected, E.ErrorCode);
+      end;
+    end;
+    AssertEquals(RaiseNative, Raised);
+    AssertEquals(AExpected, Serial.LastError);
+    AssertTrue(Length(Serial.LineBuffer) <= Serial.MaxLineLength);
+    AssertTrue(Serial.LargestRead <= Serial.MaxLineLength);
+  end;
+
+begin
+  for RaiseNative := False to True do
+    for Split := 1 to Length(Oversized) do
+    begin
+      Serial := TLimitedReadSerial.Create;
+      try
+        Serial.MaxLineLength := 5;
+        Serial.RaiseExcept := RaiseNative;
+        Serial.QueueIncoming(Copy(Oversized, 1, Split));
+        if Split < Serial.MaxLineLength then
+          ExpectedError := ErrTimeout
+        else
+          ExpectedError := ErrMaxBuffer;
+        CheckError(ExpectedError);
+        Serial.QueueIncoming(Copy(Oversized, Split + 1, MaxInt) + 'ok' + #13#10);
+        if ExpectedError = ErrTimeout then
+          CheckError(ErrMaxBuffer);
+        AssertEquals('ok', Serial.RecvString(0));
+        AssertEquals(0, Serial.LastError);
+        AssertEquals('', Serial.LineBuffer);
+        AssertEquals(RaiseNative, Serial.RaiseExcept);
+      finally
+        Serial.Free;
+      end;
+    end;
+end;
+
+procedure TLazSerialLineTests.OverlappingTerminatorRecoversWithinLimit;
+var
+  Serial: TLimitedReadSerial;
+begin
+  Serial := TLimitedReadSerial.Create;
+  try
+    Serial.MaxLineLength := 6;
+    Serial.QueueIncoming('zzzabab' + 'OKabab');
+    AssertEquals('', Serial.RecvTerminated(0, 'abab'));
+    AssertEquals(ErrMaxBuffer, Serial.LastError);
+    AssertTrue(Length(Serial.LineBuffer) <= Serial.MaxLineLength);
+    AssertEquals('OK', Serial.RecvTerminated(0, 'abab'));
+    AssertEquals(0, Serial.LastError);
+    AssertTrue(Serial.LargestRead <= Serial.MaxLineLength);
+  finally
+    Serial.Free;
+  end;
+end;
+
+procedure TLazSerialLineTests.TinyLimitRecoversAfterIncreasingLimit;
+var
+  Serial: TLimitedReadSerial;
+begin
+  Serial := TLimitedReadSerial.Create;
+  try
+    Serial.MaxLineLength := 1;
+    Serial.QueueIncoming(#13#10 + 'ok' + #13#10);
+    AssertEquals('', Serial.RecvString(0));
+    AssertEquals(ErrMaxBuffer, Serial.LastError);
+    AssertTrue(Length(Serial.LineBuffer) <= 1);
+    AssertTrue(Serial.LargestRead <= 1);
+    Serial.MaxLineLength := 4;
+    AssertEquals('ok', Serial.RecvString(0));
+    AssertEquals(0, Serial.LastError);
+  finally
+    Serial.Free;
+  end;
+end;
+
+procedure TLazSerialLineTests.ConvertedOverflowPreservesFollowingLine;
+var
+  Serial: TLineTestSerial;
+  RaiseNative: Boolean;
+begin
+  for RaiseNative := False to True do
+  begin
+    Serial := TLineTestSerial.Create;
+    try
+      Serial.ConvertLineEnd := True;
+      Serial.MaxLineLength := 4;
+      Serial.RaiseExcept := RaiseNative;
+      Serial.QueueIncoming('123' + #13#10 + '1234' + #13#10 + 'ok' + #10);
+      AssertEquals('123', Serial.RecvString(0));
+      try
+        AssertEquals('', Serial.RecvString(0));
+        AssertFalse(RaiseNative);
+      except
+        on E: ESynaSerError do
+        begin
+          AssertTrue(RaiseNative);
+          AssertEquals(ErrMaxBuffer, E.ErrorCode);
+        end;
+      end;
+      AssertEquals(ErrMaxBuffer, Serial.LastError);
+      AssertEquals('ok', Serial.RecvString(0));
+      AssertEquals(0, Serial.LastError);
+    finally
+      Serial.Free;
+    end;
+  end;
+end;
+
+procedure TLazSerialLineTests.EnablingLimitPreservesAlreadyBufferedLines;
+var
+  Serial: TLineTestSerial;
+begin
+  Serial := TLineTestSerial.Create;
+  try
+    Serial.QueueIncoming('one' + #13#10 + 'abc' + #13#10 + 'def' + #13#10);
+    AssertEquals('one', Serial.RecvString(0));
+    AssertEquals(0, Serial.WaitingData);
+    Serial.MaxLineLength := 5;
+    AssertEquals('abc', Serial.RecvString(0));
+    AssertEquals('def' + #13#10, Serial.LineBuffer);
+    AssertEquals('def', Serial.RecvString(0));
+    AssertEquals(0, Serial.LastError);
   finally
     Serial.Free;
   end;

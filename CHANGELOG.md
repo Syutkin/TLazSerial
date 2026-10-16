@@ -40,7 +40,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - CRLF reads preserve incomplete lines across timeouts and read exceptions.
   Incomplete buffers do not cause repeated `OnRxData` callbacks or keep
   `DataAvailable` true without new bytes; non-blocking reads also append
-  available bytes when `SynSer.InterPacketTimeout` is false.
+  available bytes when `SynSer.InterPacketTimeout` is false. `MaxLineLength`
+  includes the terminator and bounds new reads; oversized lines are skipped
+  without losing following lines.
 
 ## [0.8.1] - 2026-09-29
 

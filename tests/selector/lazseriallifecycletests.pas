@@ -40,13 +40,24 @@ type
     procedure ReceiveStatusRunsOnMainThread;
     procedure StatusCallbackExceptionDoesNotStopReader;
     procedure PtyTransfersBurstLargePayloadAndReopens;
+    {$IFDEF LINUX}
+    procedure UnsupportedCustomSpeedIsRejectedOnOpen;
+    procedure UnsupportedLiveSpeedPreservesActualSpeed;
+    procedure DisconnectedPtyCloseReleasesHandleWithExceptions;
+    procedure DisconnectedPtyCloseReleasesHandleWithoutExceptions;
+    procedure ReportedZeroSpeedMatchesPtySettings;
+    procedure Reported9600SpeedMatchesPtySettings;
+    procedure Reported38400SpeedMatchesPtySettings;
+    procedure Reported115200SpeedMatchesPtySettings;
+    procedure OutputFlagsDoNotChangeReportedSpeed;
+    {$ENDIF}
   end;
 
 implementation
 
 {$IFDEF UNIX}
 uses
-  BaseUnix, ctypes;
+  BaseUnix, ctypes, Termio, LazSerialTransport;
 
 function OpenPty(AMaster, ASlave: pcint; AName: PChar;
   ATermios, AWindowSize: Pointer): cint; cdecl;
@@ -91,6 +102,212 @@ begin
       Inc(Offset, Written)
     else
       Sleep(1);
+  end;
+end;
+{$ENDIF}
+
+{$IFDEF LINUX}
+type
+  TTermiosProbe = class(TBlockSerial)
+  public
+    function DecodeSpeed(const ASettings: Termios): Integer;
+  end;
+
+function TTermiosProbe.DecodeSpeed(const ASettings: Termios): Integer;
+var
+  State: TDCB;
+begin
+  State := Default(TDCB);
+  TermiosToDcb(ASettings, State);
+  Result := State.BaudRate;
+end;
+
+procedure TLazSerialLifecycleTests.UnsupportedCustomSpeedIsRejectedOnOpen;
+var
+  Master, Slave: cint;
+  Name: array[0..255] of Char;
+  Raised: Boolean;
+  Serial: TLazSerial;
+begin
+  AssertEquals(0, OpenPty(@Master, @Slave, @Name[0], nil, nil));
+  Serial := TLazSerial.Create(nil);
+  try
+    Serial.Device := StrPas(Name);
+    Serial.CustomBaudRate := 250123;
+    Raised := False;
+    try
+      Serial.Open;
+    except
+      on E: ESynaSerError do
+      begin
+        Raised := True;
+        AssertEquals(ErrWrongParameter, E.ErrorCode);
+      end;
+    end;
+    AssertTrue('An unsupported positive speed must not silently apply B0', Raised);
+    AssertFalse(Serial.Active);
+    AssertTrue(Serial.SynSer.Handle = INVALID_HANDLE_VALUE);
+  finally
+    Serial.Free;
+    fpClose(Slave);
+    fpClose(Master);
+  end;
+end;
+
+procedure TLazSerialLifecycleTests.UnsupportedLiveSpeedPreservesActualSpeed;
+var
+  Master, Slave: cint;
+  Name: array[0..255] of Char;
+  BeforeSettings, AfterSettings: Termios;
+  Raised: Boolean;
+  Serial: TLazSerial;
+begin
+  AssertEquals(0, OpenPty(@Master, @Slave, @Name[0], nil, nil));
+  Serial := TLazSerial.Create(nil);
+  try
+    Serial.Device := StrPas(Name);
+    Serial.BaudRate := br115200;
+    Serial.Open;
+    AssertEquals(0, TCGetAttr(Slave, BeforeSettings));
+    Raised := False;
+    try
+      Serial.CustomBaudRate := 250123;
+    except
+      on E: ESynaSerError do
+      begin
+        Raised := True;
+        AssertEquals(ErrWrongParameter, E.ErrorCode);
+      end;
+    end;
+    AssertEquals(0, TCGetAttr(Slave, AfterSettings));
+    AssertTrue('Driver speed must survive rejected reconfiguration',
+      (BeforeSettings.c_cflag and CBAUD) = (AfterSettings.c_cflag and CBAUD));
+    AssertTrue('Unsupported live speed must raise', Raised);
+  finally
+    Serial.Free;
+    fpClose(Slave);
+    fpClose(Master);
+  end;
+end;
+
+procedure CheckDisconnectedPtyClose(const ARaiseNative: Boolean);
+var
+  Master, Slave, SerialHandle: cint;
+  Name: array[0..255] of Char;
+  Serial: TLazSerial;
+  ActualActive, HandleReleased: Boolean;
+  ErrorCode: Integer;
+begin
+  TAssert.AssertEquals(0, OpenPty(@Master, @Slave, @Name[0], nil, nil));
+  Serial := TLazSerial.Create(nil);
+  try
+    Serial.Device := StrPas(Name);
+    Serial.Open;
+    SerialHandle := Serial.SynSer.Handle;
+    Serial.SynSer.RaiseExcept := ARaiseNative;
+    fpClose(Master);
+    Master := -1;
+    ErrorCode := 0;
+    try
+      Serial.Close;
+    except
+      on E: ESynaSerError do
+        ErrorCode := E.ErrorCode;
+    end;
+    ActualActive := Serial.Active;
+    HandleReleased := Serial.SynSer.Handle = INVALID_HANDLE_VALUE;
+    // Let cleanup complete even when the assertions expose the current defect.
+    Serial.SynSer.RaiseExcept := False;
+    TAssert.AssertTrue('Close must release the disconnected descriptor', HandleReleased);
+    TAssert.AssertEquals('OS descriptor must actually be closed',
+      -1, fpFcntl(SerialHandle, F_GETFD));
+    TAssert.AssertEquals(ESysEBADF, fpGetErrno);
+    TAssert.AssertFalse('Close must reset Active even when flush fails', ActualActive);
+    if ARaiseNative then
+      TAssert.AssertEquals('Preserve the first I/O error', ESysEIO, ErrorCode);
+    Serial.Close;
+    TAssert.AssertFalse(Serial.Active);
+  finally
+    Serial.SynSer.RaiseExcept := False;
+    Serial.Free;
+    fpClose(Slave);
+    if Master >= 0 then
+      fpClose(Master);
+  end;
+end;
+
+procedure TLazSerialLifecycleTests.DisconnectedPtyCloseReleasesHandleWithExceptions;
+begin
+  CheckDisconnectedPtyClose(True);
+end;
+
+procedure TLazSerialLifecycleTests.DisconnectedPtyCloseReleasesHandleWithoutExceptions;
+begin
+  CheckDisconnectedPtyClose(False);
+end;
+
+procedure CheckReportedPtySpeed(const ABaudRate: Integer;
+  const ANativeSpeed: Cardinal);
+var
+  Master, Slave: cint;
+  Name: array[0..255] of Char;
+  Settings: Termios;
+  Transport: TLazSynapseSerialTransport;
+begin
+  TAssert.AssertEquals(0, OpenPty(@Master, @Slave, @Name[0], nil, nil));
+  Transport := TLazSynapseSerialTransport.Create;
+  try
+    Transport.Connect(StrPas(Name));
+    Transport.Configure(ABaudRate, 8, 'N', SB1, fcNone);
+    TAssert.AssertEquals(0, TCGetAttr(Slave, Settings));
+    TAssert.AssertEquals('Independent PTY speed', Int64(ANativeSpeed),
+      Int64(Settings.c_cflag and CBAUD));
+    Transport.NativeSerial.GetCommState;
+    TAssert.AssertEquals('Reported speed for ' + IntToStr(ABaudRate),
+      ABaudRate, Transport.NativeSerial.DCB.BaudRate);
+    TAssert.AssertEquals(0, Transport.NativeSerial.LastError);
+  finally
+    Transport.Free;
+    fpClose(Slave);
+    fpClose(Master);
+  end;
+end;
+
+procedure TLazSerialLifecycleTests.ReportedZeroSpeedMatchesPtySettings;
+begin
+  CheckReportedPtySpeed(0, B0);
+end;
+
+procedure TLazSerialLifecycleTests.Reported9600SpeedMatchesPtySettings;
+begin
+  CheckReportedPtySpeed(9600, B9600);
+end;
+
+procedure TLazSerialLifecycleTests.Reported38400SpeedMatchesPtySettings;
+begin
+  CheckReportedPtySpeed(38400, B38400);
+end;
+
+procedure TLazSerialLifecycleTests.Reported115200SpeedMatchesPtySettings;
+begin
+  CheckReportedPtySpeed(115200, B115200);
+end;
+
+procedure TLazSerialLifecycleTests.OutputFlagsDoNotChangeReportedSpeed;
+var
+  Probe: TTermiosProbe;
+  Settings: Termios;
+begin
+  Probe := TTermiosProbe.Create;
+  try
+    Settings := Default(Termios);
+    Settings.c_cflag := B115200 or CS8;
+    Settings.c_oflag := 0;
+    AssertEquals(115200, Probe.DecodeSpeed(Settings));
+    Settings.c_oflag := OPOST or ONLCR;
+    AssertEquals(115200, Probe.DecodeSpeed(Settings));
+  finally
+    Probe.Free;
   end;
 end;
 {$ENDIF}

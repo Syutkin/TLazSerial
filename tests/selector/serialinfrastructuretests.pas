@@ -106,6 +106,7 @@ type
     procedure RefreshCanBeCancelledDuringLoad;
     procedure RefreshDetachCallbacksSuppressesDelivery;
     procedure RefreshCancellationSuppressesQueuedDelivery;
+    procedure RefreshTerminationSuppressesQueuedDelivery;
     procedure RefreshNilCancellationIsIdempotent;
     procedure ChangeSourceStartStopIsIdempotent;
     procedure ChangeSourceRollsBackFailedStart;
@@ -430,6 +431,32 @@ begin
   CancelSerialDeviceRefresh(Refresh);
   CancelSerialDeviceRefresh(Refresh);
   AssertNull(Refresh);
+end;
+
+procedure TSerialInfrastructureTests.RefreshTerminationSuppressesQueuedDelivery;
+var
+  Deadline: QWord;
+  Probe: TRefreshProbe;
+  Refresh: TSerialDeviceRefreshThread;
+begin
+  Probe := TRefreshProbe.Create;
+  Refresh := TSerialDeviceRefreshThread.Create(
+    @Probe.LoadDevices, @Probe.DevicesLoaded, @Probe.Finished);
+  try
+    Refresh.Start;
+    AssertEquals(Ord(wrSignaled), Ord(Probe.LoadCompleted.WaitFor(1000)));
+    Deadline := GetTickCount64 + 1000;
+    while not Refresh.Finished and (GetTickCount64 < Deadline) do
+      Sleep(1);
+    AssertTrue('Worker must exit before delivery is pumped', Refresh.Finished);
+    Refresh.Terminate;
+    CheckSynchronize(0);
+    AssertEquals(0, Probe.DeliveredCount);
+    AssertEquals(0, Probe.FinishedCount);
+  finally
+    CancelSerialDeviceRefresh(Refresh);
+    Probe.Free;
+  end;
 end;
 
 procedure TSerialInfrastructureTests.ChangeSourceStartStopIsIdempotent;

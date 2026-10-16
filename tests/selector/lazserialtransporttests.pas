@@ -124,12 +124,50 @@ type
     procedure WriteDataPropagatesWriteResultsAndErrors;
   end;
 
+  TLazSerialPacketTests = class(TTestCase)
+  private
+    procedure CheckReadResult(const AWaitFirst: Boolean;
+      const AResult, AError: Integer; const AExpected: AnsiString);
+  published
+    procedure FailedImmediateReadReturnsNoBytes;
+    procedure FailedReadAfterWaitingReturnsNoBytes;
+    procedure ZeroReadReturnsNoBytes;
+    procedure PartialReadReturnsOnlyReceivedBytes;
+    procedure ReadDataDoesNotReturnAllocatedGarbage;
+    procedure ReadDataPreservesReadException;
+  end;
+
 implementation
 
 uses
   SysUtils;
 
 type
+  TScriptedReadSerial = class(TBlockSerial)
+  protected
+    function PreTestFailing: Boolean; override;
+  public
+    WaitFirst: Boolean;
+    Ready: Boolean;
+    ReadResult: Integer;
+    ReadError: Integer;
+    procedure GetCommState; override;
+    procedure SetCommState; override;
+    function CanRead(Timeout: Integer): Boolean; override;
+    function WaitingData: Integer; override;
+    function RecvBuffer(Buffer: Pointer; ALength: Integer): Integer; override;
+  end;
+
+  TScriptedReadTransport = class(TLazSynapseSerialTransport)
+  protected
+    function CreateSerial: TBlockSerial; override;
+  public
+    procedure Connect(const ADevice: string); override;
+    procedure Close; override;
+    function IsOpen: Boolean; override;
+    function CanRead(const ATimeout: Integer): Boolean; override;
+  end;
+
   { Keep the production SendString implementation; simulate the buffer write. }
   TScriptedSendTransport = class(TLazSynapseSerialTransport)
   private
@@ -147,6 +185,172 @@ type
     function IsOpen: Boolean; override;
     function SendBuffer(ABuffer: Pointer; ASize: Integer): Integer; override;
   end;
+
+function TScriptedReadSerial.PreTestFailing: Boolean;
+begin
+  Result := False;
+end;
+
+procedure TScriptedReadSerial.GetCommState;
+begin
+  SetSynaError(0);
+end;
+
+procedure TScriptedReadSerial.SetCommState;
+begin
+  SetSynaError(0);
+end;
+
+function TScriptedReadSerial.CanRead(Timeout: Integer): Boolean;
+begin
+  Ready := True;
+  Result := True;
+  SetSynaError(0);
+end;
+
+function TScriptedReadSerial.WaitingData: Integer;
+begin
+  if WaitFirst and not Ready then
+    Result := 0
+  else
+    Result := 4;
+end;
+
+function TScriptedReadSerial.RecvBuffer(Buffer: Pointer;
+  ALength: Integer): Integer;
+const
+  Bytes: AnsiString = 'xy';
+begin
+  if ReadResult > 0 then
+    Move(Bytes[1], Buffer^, ReadResult);
+  RaiseSynaError(ReadError);
+  Result := ReadResult;
+end;
+
+function TScriptedReadTransport.CreateSerial: TBlockSerial;
+begin
+  Result := TScriptedReadSerial.Create;
+end;
+
+procedure TScriptedReadTransport.Connect(const ADevice: string);
+begin
+end;
+
+procedure TScriptedReadTransport.Close;
+begin
+end;
+
+function TScriptedReadTransport.IsOpen: Boolean;
+begin
+  Result := True;
+end;
+
+function TScriptedReadTransport.CanRead(const ATimeout: Integer): Boolean;
+begin
+  if ATimeout > 0 then
+    Sleep(ATimeout);
+  Result := False;
+end;
+
+procedure TLazSerialPacketTests.CheckReadResult(const AWaitFirst: Boolean;
+  const AResult, AError: Integer; const AExpected: AnsiString);
+var
+  Driver: TScriptedReadSerial;
+  Transport: TScriptedReadTransport;
+  Actual: AnsiString;
+begin
+  Transport := TScriptedReadTransport.Create;
+  try
+    Driver := TScriptedReadSerial(Transport.NativeSerial);
+    Driver.WaitFirst := AWaitFirst;
+    Driver.ReadResult := AResult;
+    Driver.ReadError := AError;
+    Actual := Transport.ReadPacket(0);
+    AssertEquals('Result length must equal the number of received bytes',
+      Length(AExpected), Length(Actual));
+    AssertEquals('Only bytes received from the driver may be returned',
+      AExpected, Actual);
+    AssertEquals(AError, Driver.LastError);
+  finally
+    Transport.Free;
+  end;
+end;
+
+procedure TLazSerialPacketTests.FailedImmediateReadReturnsNoBytes;
+begin
+  CheckReadResult(False, -1, 5, '');
+end;
+
+procedure TLazSerialPacketTests.FailedReadAfterWaitingReturnsNoBytes;
+begin
+  CheckReadResult(True, -1, 5, '');
+end;
+
+procedure TLazSerialPacketTests.ZeroReadReturnsNoBytes;
+begin
+  CheckReadResult(False, 0, 0, '');
+  CheckReadResult(True, 0, 0, '');
+end;
+
+procedure TLazSerialPacketTests.PartialReadReturnsOnlyReceivedBytes;
+begin
+  CheckReadResult(False, 2, 0, 'xy');
+  CheckReadResult(True, 2, 0, 'xy');
+end;
+
+procedure TLazSerialPacketTests.ReadDataDoesNotReturnAllocatedGarbage;
+var
+  Actual: AnsiString;
+  Serial: TTestableLazSerial;
+  Transport: TScriptedReadTransport;
+begin
+  Serial := TTestableLazSerial.Create(nil);
+  try
+    Transport := TScriptedReadTransport.Create;
+    Serial.InstallTransport(Transport);
+    Serial.Open;
+    TScriptedReadSerial(Transport.NativeSerial).ReadResult := -1;
+    TScriptedReadSerial(Transport.NativeSerial).ReadError := 5;
+    Actual := Serial.ReadData;
+    AssertEquals('Failed ReadData must not return allocated bytes', 0, Length(Actual));
+    AssertEquals(5, Transport.NativeSerial.LastError);
+  finally
+    Serial.Free;
+  end;
+end;
+
+procedure TLazSerialPacketTests.ReadDataPreservesReadException;
+var
+  Driver: TScriptedReadSerial;
+  Raised: Boolean;
+  Serial: TTestableLazSerial;
+  Transport: TScriptedReadTransport;
+begin
+  Serial := TTestableLazSerial.Create(nil);
+  try
+    Transport := TScriptedReadTransport.Create;
+    Serial.InstallTransport(Transport);
+    Serial.Open;
+    Driver := TScriptedReadSerial(Transport.NativeSerial);
+    Driver.RaiseExcept := True;
+    Driver.ReadResult := -1;
+    Driver.ReadError := 5;
+    Raised := False;
+    try
+      Serial.ReadData;
+    except
+      on E: ESynaSerError do
+      begin
+        Raised := True;
+        AssertEquals(5, E.ErrorCode);
+      end;
+    end;
+    AssertTrue(Raised);
+    AssertTrue(Driver.RaiseExcept);
+  finally
+    Serial.Free;
+  end;
+end;
 
 procedure TScriptedSendTransport.Close;
 begin
@@ -759,6 +963,7 @@ begin
 end;
 
 initialization
+  RegisterTest(TLazSerialPacketTests);
   RegisterTest(TLazSerialTransportTests);
   RegisterTest(TLazSerialSendTests);
 

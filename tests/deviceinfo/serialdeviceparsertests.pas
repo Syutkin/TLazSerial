@@ -29,6 +29,11 @@ type
     procedure ParseMacOSProfilerUsesVendorIdDescriptionFallback;
     procedure ParseMacOSProfilerMatchesNormalizedLocationId;
     procedure ParseMacOSProfilerKeepsUnmatchedDevice;
+    procedure MacExactSerialWinsOverPrefixInEitherOrder;
+    procedure MacPrefixAloneDoesNotIdentifyDifferentDevice;
+    procedure MacDuplicateSerialIsAmbiguous;
+    procedure MacExactSerialWinsOverLocationMatch;
+    procedure MacLocationPrefixDoesNotIdentifyDifferentDevice;
   end;
 
 implementation
@@ -296,6 +301,83 @@ begin
   AssertEquals('', DeviceInfo.VendorId);
   AssertEquals('', DeviceInfo.ProductId);
   AssertEquals('', DeviceInfo.PersistentId);
+end;
+
+procedure TSerialDeviceParserTests.MacExactSerialWinsOverPrefixInEitherOrder;
+const
+  PrefixSection = 'Prefix device:' + LineEnding +
+    '  Serial Number: ABC123' + LineEnding;
+  ExactSection = 'Exact device:' + LineEnding +
+    '  Serial Number: ABC1234' + LineEnding;
+var
+  Device: TSerialDeviceInfo;
+  ReverseOrder: Boolean;
+  Snapshot: string;
+begin
+  for ReverseOrder := False to True do
+  begin
+    if ReverseOrder then
+      Snapshot := ExactSection + PrefixSection
+    else
+      Snapshot := PrefixSection + ExactSection;
+    Device := ParseMacOSSystemProfilerDevice(
+      '/dev/cu.usbserial-ABC1234', Snapshot);
+    AssertEquals('ABC1234', Device.SerialShort);
+    AssertEquals('Exact device', Device.Model);
+    AssertEquals('ABC1234', Device.PersistentId);
+    AssertEquals('/dev/cu.usbserial-ABC1234', Device.Device);
+  end;
+end;
+
+procedure TSerialDeviceParserTests.MacPrefixAloneDoesNotIdentifyDifferentDevice;
+var
+  Device: TSerialDeviceInfo;
+begin
+  Device := ParseMacOSSystemProfilerDevice('/dev/cu.usbserial-ABC1234',
+    'Other device:' + LineEnding + '  Serial Number: ABC123' + LineEnding);
+  AssertEquals('/dev/cu.usbserial-ABC1234', Device.Device);
+  AssertEquals('', Device.SerialShort);
+  AssertEquals('', Device.Model);
+  AssertEquals('', Device.PersistentId);
+end;
+
+procedure TSerialDeviceParserTests.MacDuplicateSerialIsAmbiguous;
+var
+  Device: TSerialDeviceInfo;
+begin
+  Device := ParseMacOSSystemProfilerDevice('/dev/cu.usbserial-ABC1234',
+    'First device:' + LineEnding + '  Serial Number: ABC1234' + LineEnding +
+    'Second device:' + LineEnding + '  Serial Number: ABC1234' + LineEnding);
+  AssertEquals('/dev/cu.usbserial-ABC1234', Device.Device);
+  AssertEquals('', Device.Model);
+  AssertEquals('', Device.SerialShort);
+  AssertEquals('', Device.PersistentId);
+end;
+
+procedure TSerialDeviceParserTests.MacExactSerialWinsOverLocationMatch;
+var
+  Device: TSerialDeviceInfo;
+begin
+  Device := ParseMacOSSystemProfilerDevice('/dev/cu.usbmodem-00200000',
+    'Location match:' + LineEnding +
+    '  Location ID: 0x00200000 / 3' + LineEnding +
+    'Serial match:' + LineEnding +
+    '  Serial Number: 00200000' + LineEnding);
+  AssertEquals('Serial match', Device.Model);
+  AssertEquals('00200000', Device.SerialShort);
+  AssertEquals('00200000', Device.PersistentId);
+end;
+
+procedure TSerialDeviceParserTests.MacLocationPrefixDoesNotIdentifyDifferentDevice;
+var
+  Device: TSerialDeviceInfo;
+begin
+  Device := ParseMacOSSystemProfilerDevice('/dev/cu.usbmodem-00200000',
+    'Other location:' + LineEnding +
+    '  Location ID: 0x0020 / 3' + LineEnding);
+  AssertEquals('/dev/cu.usbmodem-00200000', Device.Device);
+  AssertEquals('', Device.Model);
+  AssertEquals('', Device.PersistentId);
 end;
 
 initialization

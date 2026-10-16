@@ -5,11 +5,13 @@ unit LazSerialConfigurationTests;
 interface
 
 uses
-  Classes, SysUtils, FpcUnit, TestRegistry, LazSerial, LazSerialCommon,
+  Classes, SysUtils, SyncObjs, TypInfo, FpcUnit, TestRegistry, LazSerial, LazSerialCommon,
   LazSerialTransport, LazSynaSer, LazSerialTransportTests;
 
 type
   TLazSerialConfigurationTests = class(TTestCase)
+  private
+    procedure CheckRejectedProperty(const AName: string; const AValue: Int64);
   published
     procedure SuccessfulConfigurationPreservesExceptionPreference;
     procedure ApplyFailureRaisesWithNativeExceptionsDisabled;
@@ -17,6 +19,15 @@ type
     procedure ReadStateFailureDoesNotApplyConfiguration;
     procedure OpenFailureClosesPortAndCanRetry;
     procedure LiveParameterFailuresAreReported;
+    procedure ReaderCannotEraseConfigurationError;
+    procedure FailedBaudRateKeepsPreviousValue;
+    procedure FailedCustomBaudRateKeepsPreviousValue;
+    procedure FailedDataBitsKeepsPreviousValue;
+    procedure FailedParityKeepsPreviousValue;
+    procedure FailedStopBitsKeepsPreviousValue;
+    procedure FailedFlowControlKeepsPreviousValue;
+    procedure FailedCustomBaudRateCanRetrySameValue;
+    procedure FailedFlowControlCanRetrySameValue;
   end;
 
 implementation
@@ -29,6 +40,8 @@ type
     ApplyError: Integer;
     ReadCount: Integer;
     ApplyCount: Integer;
+    ReadGate: TEvent;
+    ReadDone: TEvent;
     procedure GetCommState; override;
     procedure SetCommState; override;
   end;
@@ -57,6 +70,13 @@ procedure TConfigurationTestSerial.SetCommState;
 begin
   Inc(ApplyCount);
   RaiseSynaError(ApplyError);
+  if (ApplyError <> 0) and (ReadGate <> nil) then
+  begin
+    ReadGate.SetEvent;
+    // A synchronized transport may block the reader until Config returns.
+    // The bounded wait lets that implementation complete without deadlocking.
+    ReadDone.WaitFor(200);
+  end;
 end;
 
 function TConfigurationTestTransport.CreateSerial: TBlockSerial;
@@ -90,6 +110,15 @@ end;
 function TConfigurationTestTransport.CanRead(
   const ATimeout: Integer): Boolean;
 begin
+  if TestSerial.ReadGate <> nil then
+  begin
+    if TestSerial.ReadGate.WaitFor(ATimeout) = wrSignaled then
+    begin
+      NativeSerial.SetSynaError(0);
+      TestSerial.ReadDone.SetEvent;
+    end;
+    Exit(False);
+  end;
   if ATimeout > 0 then
     Sleep(ATimeout);
   Result := False;
@@ -278,6 +307,164 @@ begin
     finally
       Serial.Free;
     end;
+  end;
+end;
+
+procedure TLazSerialConfigurationTests.ReaderCannotEraseConfigurationError;
+var
+  Gate, Done: TEvent;
+  Raised: Boolean;
+  Serial: TTestableLazSerial;
+  Transport: TConfigurationTestTransport;
+begin
+  Gate := TEvent.Create(nil, False, False, '');
+  Done := TEvent.Create(nil, False, False, '');
+  Serial := TTestableLazSerial.Create(nil);
+  try
+    Transport := TConfigurationTestTransport.Create;
+    Transport.TestSerial.ReadGate := Gate;
+    Transport.TestSerial.ReadDone := Done;
+    Serial.InstallTransport(Transport);
+    Serial.Open;
+    Transport.TestSerial.ApplyError := ErrWrongParameter;
+    Raised := False;
+    try
+      Serial.BaudRate := br_57600;
+    except
+      on E: ESynaSerError do
+      begin
+        Raised := True;
+        AssertEquals(ErrWrongParameter, E.ErrorCode);
+      end;
+    end;
+    AssertTrue('Internal reader must not turn a rejected configuration into success',
+      Raised);
+  finally
+    Serial.Free;
+    Done.Free;
+    Gate.Free;
+  end;
+end;
+
+procedure TLazSerialConfigurationTests.CheckRejectedProperty(
+  const AName: string; const AValue: Int64);
+var
+  OldValue: Int64;
+  Raised: Boolean;
+  Serial: TTestableLazSerial;
+  Transport: TConfigurationTestTransport;
+begin
+  Serial := TTestableLazSerial.Create(nil);
+  try
+    Transport := TConfigurationTestTransport.Create;
+    Serial.InstallTransport(Transport);
+    Serial.Open;
+    OldValue := GetOrdProp(Serial, AName);
+    Transport.TestSerial.ApplyError := ErrWrongParameter;
+    Raised := False;
+    try
+      SetOrdProp(Serial, AName, AValue);
+    except
+      on E: ESynaSerError do
+      begin
+        Raised := True;
+        AssertEquals(ErrWrongParameter, E.ErrorCode);
+      end;
+    end;
+    AssertTrue('Driver must reject ' + AName, Raised);
+    AssertEquals('Rejected setting must preserve ' + AName,
+      OldValue, GetOrdProp(Serial, AName));
+    Transport.TestSerial.ApplyError := 0;
+    SetOrdProp(Serial, AName, AValue);
+    AssertEquals(AValue, GetOrdProp(Serial, AName));
+  finally
+    Serial.Free;
+  end;
+end;
+
+procedure TLazSerialConfigurationTests.FailedBaudRateKeepsPreviousValue;
+begin
+  CheckRejectedProperty('BaudRate', Ord(br_57600));
+end;
+
+procedure TLazSerialConfigurationTests.FailedCustomBaudRateKeepsPreviousValue;
+begin
+  CheckRejectedProperty('CustomBaudRate', 57600);
+end;
+
+procedure TLazSerialConfigurationTests.FailedDataBitsKeepsPreviousValue;
+begin
+  CheckRejectedProperty('DataBits', Ord(db7bits));
+end;
+
+procedure TLazSerialConfigurationTests.FailedParityKeepsPreviousValue;
+begin
+  CheckRejectedProperty('Parity', Ord(pEven));
+end;
+
+procedure TLazSerialConfigurationTests.FailedStopBitsKeepsPreviousValue;
+begin
+  CheckRejectedProperty('StopBits', Ord(sbTwo));
+end;
+
+procedure TLazSerialConfigurationTests.FailedFlowControlKeepsPreviousValue;
+begin
+  CheckRejectedProperty('FlowControl', Ord(fcRTS_CTS));
+end;
+
+procedure TLazSerialConfigurationTests.FailedCustomBaudRateCanRetrySameValue;
+var
+  Count: Integer;
+  Serial: TTestableLazSerial;
+  Transport: TFakeSerialTransport;
+begin
+  Serial := TTestableLazSerial.Create(nil);
+  try
+    Transport := TFakeSerialTransport.Create;
+    Serial.InstallTransport(Transport);
+    Serial.Open;
+    Transport.FailConfigure := True;
+    try
+      Serial.CustomBaudRate := 57600;
+      Fail('Expected configuration failure');
+    except
+      on E: EInvalidOperation do ;
+    end;
+    Count := Transport.ConfigCount;
+    Transport.FailConfigure := False;
+    Serial.CustomBaudRate := 57600;
+    AssertEquals('Retry must reach the driver', Count + 1, Transport.ConfigCount);
+    AssertEquals(57600, Transport.LastConfig.BaudRate);
+  finally
+    Serial.Free;
+  end;
+end;
+
+procedure TLazSerialConfigurationTests.FailedFlowControlCanRetrySameValue;
+var
+  Count: Integer;
+  Serial: TTestableLazSerial;
+  Transport: TFakeSerialTransport;
+begin
+  Serial := TTestableLazSerial.Create(nil);
+  try
+    Transport := TFakeSerialTransport.Create;
+    Serial.InstallTransport(Transport);
+    Serial.Open;
+    Transport.FailConfigure := True;
+    try
+      Serial.FlowControl := fcRTS_CTS;
+      Fail('Expected configuration failure');
+    except
+      on E: EInvalidOperation do ;
+    end;
+    Count := Transport.ConfigCount;
+    Transport.FailConfigure := False;
+    Serial.FlowControl := fcRTS_CTS;
+    AssertEquals('Retry must reach the driver', Count + 1, Transport.ConfigCount);
+    AssertEquals(Ord(fcRTS_CTS), Ord(Transport.LastConfig.FlowControl));
+  finally
+    Serial.Free;
   end;
 end;
 

@@ -88,9 +88,89 @@ type
     procedure BackgroundRefreshFailurePreservesKnownAndCustomSelection;
     procedure SuccessfulEmptyBackgroundRefreshClearsKnownSelection;
     procedure RepeatedBackgroundRefreshDoesNotOverlapOrReenter;
+    procedure DestroyFromBackgroundApplyPreservesHeap;
+    procedure DestroyOwnerFromBackgroundApplyPreservesHeap;
   end;
 
+procedure RunSelectorLifetimeHelper(const AFreeOwner: Boolean);
+
 implementation
+
+uses
+  SerialCommandRunner;
+
+type
+  TDestroyingSerialSelector = class(TBackgroundTestSerialSelector)
+  protected
+    procedure ApplyDevices(const ADevices: TSerialDeviceInfoArray); override;
+  public
+    FreeOwner: Boolean;
+    Applied: PBoolean;
+  end;
+
+procedure TDestroyingSerialSelector.ApplyDevices(
+  const ADevices: TSerialDeviceInfoArray);
+begin
+  Applied^ := True;
+  if FreeOwner then
+    Owner.Free
+  else
+    Free;
+end;
+
+procedure RunSelectorLifetimeHelper(const AFreeOwner: Boolean);
+var
+  Owner: TComponent;
+  Selector: TDestroyingSerialSelector;
+  Applied: Boolean;
+  Deadline: QWord;
+begin
+  Owner := TComponent.Create(nil);
+  Applied := False;
+  try
+    Selector := TDestroyingSerialSelector.Create(Owner);
+    Selector.FreeOwner := AFreeOwner;
+    Selector.Applied := @Applied;
+    Selector.Refresh;
+    Deadline := GetTickCount64 + 1000;
+    while not Selector.RefreshFinished and (GetTickCount64 < Deadline) do
+      Sleep(1);
+    if not Selector.RefreshFinished then
+      raise Exception.Create('Selector refresh did not finish');
+    CheckSynchronize(0);
+    if not Applied then
+      raise Exception.Create('Selector callback did not execute');
+    if AFreeOwner then
+      Owner := nil;
+    WriteLn('selector lifetime helper completed');
+  finally
+    Owner.Free;
+  end;
+end;
+
+procedure CheckSelectorLifetime(const AMode: string);
+var
+  Output: string;
+  Success: Boolean;
+begin
+  Success := RunSerialCommand(ExpandFileName(ParamStr(0)),
+    ['--selector-lifetime-helper', AMode], 5000, Output);
+  TAssert.AssertTrue('Selector lifetime helper failed: ' + Output, Success);
+  TAssert.AssertTrue('Selector callback must execute: ' + Output,
+    Pos('selector lifetime helper completed', Output) > 0);
+  TAssert.AssertEquals('HeapTrc detected use after free: ' + Output, 0,
+    Pos('marked memory', LowerCase(Output)));
+end;
+
+procedure TSerialSelectorComponentTests.DestroyFromBackgroundApplyPreservesHeap;
+begin
+  CheckSelectorLifetime('self');
+end;
+
+procedure TSerialSelectorComponentTests.DestroyOwnerFromBackgroundApplyPreservesHeap;
+begin
+  CheckSelectorLifetime('owner');
+end;
 
 procedure TBackgroundTestSerialSelector.ApplyDevices(
   const ADevices: TSerialDeviceInfoArray

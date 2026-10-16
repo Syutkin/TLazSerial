@@ -113,6 +113,7 @@ type
     function CreateDevice(const ADevice: string): TSerialDeviceInfo;
     procedure DeviceConnected(Sender: TObject);
     procedure DeviceDisconnected(Sender: TObject);
+    procedure CheckLifetimeInChild(const AMode: string);
   protected
     procedure SetUp; override;
     procedure TearDown; override;
@@ -134,9 +135,239 @@ type
     procedure StopCancelsSignalsAndScheduledRefresh;
     procedure DestroyStopsSourceAndCancelsScheduledRefresh;
     procedure DestroyCancelsHungSystemCommand;
+    procedure FailedRefreshPreservesLastSnapshot;
+    procedure FailedFirstRefreshDoesNotEstablishEmptyBaseline;
+    procedure SuccessfulEmptyRefreshReportsRemoval;
+    procedure DestroyFromConnectedEventPreservesHeap;
+    procedure DestroyFromDisconnectedEventPreservesHeap;
+    procedure DestroyDuringReplacementStopsFurtherEvents;
+    procedure DestroyOwnerFromEventPreservesHeap;
   end;
 
+procedure RunWatcherLifetimeHelper(const AMode: string);
+
 implementation
+
+type
+  TFailingRefreshWatcher = class(TTestSerialWatcher)
+  protected
+    function LoadDevices: TSerialDeviceInfoArray; override;
+  public
+    FailLoad: Boolean;
+    LoadStarted: TEvent;
+    Worker: TThread;
+    constructor Create(AOwner: TComponent); override;
+    destructor Destroy; override;
+    procedure RefreshAndWait;
+  end;
+
+  TWatcherLifetimeProbe = class
+  public
+    Watcher: TFailingRefreshWatcher;
+    Owner: TComponent;
+    CallbackCount: Integer;
+    FreeOwner: Boolean;
+    procedure DestroyFromEvent(Sender: TObject);
+  end;
+
+constructor TFailingRefreshWatcher.Create(AOwner: TComponent);
+begin
+  inherited Create(AOwner);
+  LoadStarted := TEvent.Create(nil, True, False, '');
+  SetInfrastructure(TSerialManualChangeSource.Create,
+    TFakeSerialRefreshScheduler.Create, True);
+end;
+
+destructor TFailingRefreshWatcher.Destroy;
+begin
+  // Stop/join the worker before releasing events used by the loader.
+  StopWatching;
+  LoadStarted.Free;
+  inherited Destroy;
+end;
+
+function TFailingRefreshWatcher.LoadDevices: TSerialDeviceInfoArray;
+begin
+  Worker := TThread.CurrentThread;
+  LoadStarted.SetEvent;
+  if FailLoad then
+    raise EInvalidOperation.Create('Simulated device enumeration failure');
+  Result := inherited LoadDevices;
+end;
+
+procedure TFailingRefreshWatcher.RefreshAndWait;
+var
+  Deadline: QWord;
+begin
+  LoadStarted.ResetEvent;
+  Refresh;
+  if LoadStarted.WaitFor(1000) <> wrSignaled then
+    raise Exception.Create('Device refresh did not start');
+  Deadline := GetTickCount64 + 1000;
+  // Do not pump callbacks until Queue has completed and the worker has exited.
+  while not Worker.Finished and (GetTickCount64 < Deadline) do
+    Sleep(1);
+  if not Worker.Finished then
+    raise Exception.Create('Device refresh did not finish');
+  CheckSynchronize(0);
+end;
+
+procedure TWatcherLifetimeProbe.DestroyFromEvent(Sender: TObject);
+var
+  ToFree: TFailingRefreshWatcher;
+begin
+  Inc(CallbackCount);
+  if CallbackCount > 1 then
+    raise Exception.Create('Callback after watcher destruction');
+  ToFree := Watcher;
+  Watcher := nil;
+  if FreeOwner then
+    FreeAndNil(Owner)
+  else
+    ToFree.Free;
+end;
+
+procedure RunWatcherLifetimeHelper(const AMode: string);
+var
+  DeviceA, DeviceB: TSerialDeviceInfo;
+  Probe: TWatcherLifetimeProbe;
+begin
+  Probe := TWatcherLifetimeProbe.Create;
+  try
+    Probe.Owner := TComponent.Create(nil);
+    Probe.Watcher := TFailingRefreshWatcher.Create(Probe.Owner);
+    DeviceA := Default(TSerialDeviceInfo);
+    DeviceA.Device := '/dev/audit-a';
+    DeviceB := Default(TSerialDeviceInfo);
+    DeviceB.Device := '/dev/audit-b';
+    Probe.Watcher.OnComConnected := @Probe.DestroyFromEvent;
+    Probe.Watcher.OnComDisconnected := @Probe.DestroyFromEvent;
+    Probe.FreeOwner := AMode = 'owner';
+    if AMode = 'connect' then
+    begin
+      Probe.Watcher.AdoptSnapshot(nil);
+      Probe.Watcher.SetSnapshot([DeviceA]);
+    end
+    else
+    begin
+      Probe.Watcher.AdoptSnapshot([DeviceA]);
+      if AMode = 'replace' then
+        Probe.Watcher.SetSnapshot([DeviceB])
+      else
+        Probe.Watcher.SetSnapshot([]);
+    end;
+    Probe.Watcher.RefreshAndWait;
+    CheckSynchronize(0);
+    if (Probe.Watcher <> nil) or (Probe.CallbackCount <> 1) then
+      raise Exception.Create('Lifetime callback was not exercised');
+    WriteLn('watcher lifetime helper completed');
+  finally
+    Probe.Watcher.Free;
+    Probe.Owner.Free;
+    Probe.Free;
+  end;
+end;
+
+procedure TSerialWatcherComponentTests.CheckLifetimeInChild(const AMode: string);
+var
+  Output: string;
+  Success: Boolean;
+begin
+  Success := RunSerialCommand(ExpandFileName(ParamStr(0)),
+    ['--watcher-lifetime-helper', AMode], 5000, Output);
+  AssertTrue('Watcher lifetime helper failed: ' + Output, Success);
+  AssertTrue('Lifetime callback must execute: ' + Output,
+    Pos('watcher lifetime helper completed', Output) > 0);
+  AssertEquals('HeapTrc detected use after free: ' + Output, 0,
+    Pos('marked memory', LowerCase(Output)));
+end;
+
+procedure TSerialWatcherComponentTests.DestroyFromConnectedEventPreservesHeap;
+begin
+  CheckLifetimeInChild('connect');
+end;
+
+procedure TSerialWatcherComponentTests.DestroyFromDisconnectedEventPreservesHeap;
+begin
+  CheckLifetimeInChild('disconnect');
+end;
+
+procedure TSerialWatcherComponentTests.DestroyDuringReplacementStopsFurtherEvents;
+begin
+  CheckLifetimeInChild('replace');
+end;
+
+procedure TSerialWatcherComponentTests.DestroyOwnerFromEventPreservesHeap;
+begin
+  CheckLifetimeInChild('owner');
+end;
+
+procedure TSerialWatcherComponentTests.FailedRefreshPreservesLastSnapshot;
+var
+  DeviceA: TSerialDeviceInfo;
+  Watcher: TFailingRefreshWatcher;
+begin
+  Watcher := TFailingRefreshWatcher.Create(nil);
+  try
+    DeviceA := CreateDevice('/dev/audit-a');
+    Watcher.AdoptSnapshot([DeviceA]);
+    Watcher.OnComDisconnected := @DeviceDisconnected;
+    Watcher.OnComConnected := @DeviceConnected;
+    Watcher.FailLoad := True;
+    Watcher.RefreshAndWait;
+    AssertEquals('Enumeration failure must not report device removal',
+      0, FDisconnectedCount);
+    AssertEquals(0, FConnectedCount);
+    AssertTrue(Watcher.ContainsDevice(DeviceA.Device));
+    Watcher.FailLoad := False;
+    Watcher.SetSnapshot([DeviceA]);
+    Watcher.RefreshAndWait;
+    AssertEquals('Recovery must not synthesize reconnection', 0, FConnectedCount);
+  finally
+    Watcher.Free;
+  end;
+end;
+
+procedure TSerialWatcherComponentTests.FailedFirstRefreshDoesNotEstablishEmptyBaseline;
+var
+  DeviceA: TSerialDeviceInfo;
+  Watcher: TFailingRefreshWatcher;
+begin
+  Watcher := TFailingRefreshWatcher.Create(nil);
+  try
+    Watcher.OnComConnected := @DeviceConnected;
+    Watcher.FailLoad := True;
+    Watcher.RefreshAndWait;
+    Watcher.FailLoad := False;
+    DeviceA := CreateDevice('/dev/audit-a');
+    Watcher.SetSnapshot([DeviceA]);
+    Watcher.RefreshAndWait;
+    AssertTrue(Watcher.ContainsDevice(DeviceA.Device));
+    AssertEquals('First successful snapshot establishes the baseline',
+      0, FConnectedCount);
+  finally
+    Watcher.Free;
+  end;
+end;
+
+procedure TSerialWatcherComponentTests.SuccessfulEmptyRefreshReportsRemoval;
+var
+  DeviceA: TSerialDeviceInfo;
+  Watcher: TFailingRefreshWatcher;
+begin
+  Watcher := TFailingRefreshWatcher.Create(nil);
+  try
+    DeviceA := CreateDevice('/dev/audit-a');
+    Watcher.AdoptSnapshot([DeviceA]);
+    Watcher.OnComDisconnected := @DeviceDisconnected;
+    Watcher.SetSnapshot([]);
+    Watcher.RefreshAndWait;
+    AssertEquals(1, FDisconnectedCount);
+    AssertFalse(Watcher.ContainsDevice(DeviceA.Device));
+  finally
+    Watcher.Free;
+  end;
+end;
 
 procedure TFakeSerialChangeSource.DoStart;
 begin

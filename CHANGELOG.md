@@ -12,6 +12,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Serial configuration failures now raise an error even when
+  `SynSer.RaiseExcept` is false, allowing failed opens to close the port and
+  leave `Active` false. Errors while reading the current port settings are
+  preserved instead of being masked by an attempt to apply new settings.
 - `WriteData` now returns the actual buffer-write result instead of the
   requested string length, preserving short writes and failures.
 - In CRLF mode, incomplete buffered lines no longer cause repeated `OnRxData`

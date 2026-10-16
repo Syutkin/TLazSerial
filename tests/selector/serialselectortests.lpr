@@ -20,6 +20,7 @@ uses
   LazSerialSetupTests,
   SerialInfrastructureTests,
   LazSerialTransportTests,
+  LazSerialConfigurationTests,
   LazSerialIoLifecycleTests,
   LazSerialLineTests,
   SerialPlatformChangeSourceSmokeTests;

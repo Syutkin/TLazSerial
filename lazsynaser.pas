@@ -913,6 +913,8 @@ procedure TBlockSerial.Config(baud, bits: integer; parity: char; stop: integer; 
 begin
   FillChar(dcb, SizeOf(dcb), 0);
   GetCommState;
+  if FLastError <> sOK then
+    Exit;
   dcb.DCBlength := SizeOf(dcb);
   dcb.BaudRate := baud;
   dcb.ByteSize := bits;

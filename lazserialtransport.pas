@@ -40,6 +40,8 @@ type
   TLazSynapseSerialTransport = class(TLazSerialTransport)
   private
     FSerial: TBlockSerial;
+  protected
+    function CreateSerial: TBlockSerial; virtual;
   public
     constructor Create;
     destructor Destroy; override;
@@ -75,8 +77,13 @@ end;
 constructor TLazSynapseSerialTransport.Create;
 begin
   inherited Create;
-  FSerial := TBlockSerial.Create;
+  FSerial := CreateSerial;
   FSerial.LinuxLock := False;
+end;
+
+function TLazSynapseSerialTransport.CreateSerial: TBlockSerial;
+begin
+  Result := TBlockSerial.Create;
 end;
 
 destructor TLazSynapseSerialTransport.Destroy;
@@ -98,8 +105,22 @@ end;
 procedure TLazSynapseSerialTransport.Configure(ABaudRate,
   ADataBits: Integer; AParity: Char; AStopBits: Integer;
   AFlowControl: TFlowControl);
+var
+  ErrorCode: Integer;
+  ErrorMessage: string;
+  Error: ESynaSerError;
 begin
   FSerial.Config(ABaudRate, ADataBits, AParity, AStopBits, AFlowControl);
+  ErrorCode := FSerial.LastError;
+  if ErrorCode <> 0 then
+  begin
+    ErrorMessage := TBlockSerial.GetErrorDesc(ErrorCode);
+    Error := ESynaSerError.CreateFmt('Could not configure device %s: %s',
+      [FSerial.Device, ErrorMessage]);
+    Error.ErrorCode := ErrorCode;
+    Error.ErrorMessage := ErrorMessage;
+    raise Error;
+  end;
 end;
 
 procedure TLazSynapseSerialTransport.Connect(const ADevice: string);

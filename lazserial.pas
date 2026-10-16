@@ -594,12 +594,18 @@ begin
         FReaderSession.Cancel;
       while not ReadThread.Finished do
         Sleep(1);
-      ReadThread.WaitFor;
       FailureDelivery := ReadThread.FFailureDelivery;
+      ReadThread.FFailureDelivery := nil;
+      if FailureDelivery <> nil then
+      begin
+        // Windows WaitFor can dispatch queued calls before the OS thread exits.
+        TThread.RemoveQueuedEvents(nil,
+          @TSerialReaderEventDelivery(FailureDelivery).Deliver);
+        FailureDelivery.Free;
+      end;
+      ReadThread.WaitFor;
       ReadThread.Free;
       ReadThread := nil;
-      // TThread.Destroy removes queued methods without freeing their targets.
-      FailureDelivery.Free;
     end;
     FReaderSession := nil;
   except

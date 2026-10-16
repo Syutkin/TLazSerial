@@ -29,6 +29,10 @@ type
     procedure ReadWaitsForIncompleteResult;
     procedure WriteWaitsForIncompleteResult;
     procedure ReadErrorPreservesPartialLine;
+    procedure OperationsKeepDedicatedEventUntilCompletion;
+    procedure FailedCancellationStillDrainsOperation;
+    procedure ExceptionsPreserveFirstErrorAfterCompletion;
+    procedure ImmediateFailureReturnsNoTransferredBytes;
   end;
 {$ENDIF}
 
@@ -286,6 +290,208 @@ procedure TLazSerialWindowsIoTests.ReadWaitsForIncompleteResult;
 begin CheckIO(True, ioIncomplete); end;
 procedure TLazSerialWindowsIoTests.WriteWaitsForIncompleteResult;
 begin CheckIO(False, ioIncomplete); end;
+
+type
+  TCheckedWindowsSerial = class(TScriptedWindowsSerial)
+  protected
+    function StartOverlappedIO(ARead: Boolean; ABuffer: Pointer;
+      ALength: DWord; var ATransferred: DWord;
+      AOverlapped: POverlapped): Boolean; override;
+    function WaitOverlappedIO(AHandle: THandle; ATimeout: DWord): DWord; override;
+    function FinishOverlappedIO(var AOverlapped: TOverlapped;
+      var ATransferred: DWord; AWait: Boolean): Boolean; override;
+    function AbortOverlappedIO(AFlags: DWord): Boolean; override;
+    function ClearOverlappedIOError(var AError: DWord): Boolean; override;
+  public
+    OperationEvent: THandle;
+    FailCancel, FailStart, ReportFrameError: Boolean;
+  end;
+
+function TCheckedWindowsSerial.StartOverlappedIO(ARead: Boolean;
+  ABuffer: Pointer; ALength: DWord; var ATransferred: DWord;
+  AOverlapped: POverlapped): Boolean;
+var
+  Flags: DWord;
+begin
+  OperationEvent := AOverlapped^.hEvent;
+  TAssert.AssertTrue('Every transfer needs its own valid event',
+    (OperationEvent <> 0) and GetHandleInformation(OperationEvent, Flags));
+  TAssert.AssertTrue('The operation event must differ from the port handle',
+    OperationEvent <> Handle);
+  if FailStart then
+  begin
+    // A failed ReadFile/WriteFile need not initialize the byte count.
+    ATransferred := High(DWord);
+    Windows.SetLastError(ERROR_ACCESS_DENIED);
+    Exit(False);
+  end;
+  Result := inherited StartOverlappedIO(ARead, ABuffer, ALength,
+    ATransferred, AOverlapped);
+end;
+
+function TCheckedWindowsSerial.WaitOverlappedIO(AHandle: THandle;
+  ATimeout: DWord): DWord;
+begin
+  TAssert.AssertTrue('Wait for this operation, not unrelated port readiness',
+    AHandle = OperationEvent);
+  Result := inherited WaitOverlappedIO(AHandle, ATimeout);
+end;
+
+function TCheckedWindowsSerial.FinishOverlappedIO(var AOverlapped: TOverlapped;
+  var ATransferred: DWord; AWait: Boolean): Boolean;
+var
+  Flags: DWord;
+begin
+  TAssert.AssertTrue('Keep the event alive while completion/cancellation is pending',
+    GetHandleInformation(AOverlapped.hEvent, Flags));
+  Result := inherited FinishOverlappedIO(AOverlapped, ATransferred, AWait);
+end;
+
+function TCheckedWindowsSerial.AbortOverlappedIO(AFlags: DWord): Boolean;
+begin
+  Result := inherited AbortOverlappedIO(AFlags);
+  if FailCancel then
+  begin
+    Windows.SetLastError(ERROR_ACCESS_DENIED);
+    Result := False;
+  end;
+end;
+
+function TCheckedWindowsSerial.ClearOverlappedIOError(var AError: DWord): Boolean;
+begin
+  Result := inherited ClearOverlappedIOError(AError);
+  if ReportFrameError then
+    AError := CE_FRAME;
+end;
+
+procedure TLazSerialWindowsIoTests.OperationsKeepDedicatedEventUntilCompletion;
+var
+  Serial: TCheckedWindowsSerial;
+  Scenario: TIoScenario;
+  ReadOperation: Boolean;
+  Buffer: array[0..3] of Byte;
+  Flags: DWord;
+begin
+  for ReadOperation := False to True do
+    for Scenario := Low(TIoScenario) to High(TIoScenario) do
+    begin
+      Serial := TCheckedWindowsSerial.Create;
+      try
+        Serial.Scenario := Scenario;
+        if ReadOperation then
+          Serial.RecvBuffer(@Buffer[0], SizeOf(Buffer))
+        else
+          Serial.SendBuffer(@Buffer[0], SizeOf(Buffer));
+        AssertFalse('The transfer must reach a terminal state', Serial.Pending);
+        AssertFalse('Release the event after the transfer has finished',
+          GetHandleInformation(Serial.OperationEvent, Flags));
+        AssertEquals(ERROR_INVALID_HANDLE, Windows.GetLastError);
+      finally
+        Serial.Free;
+      end;
+    end;
+end;
+
+procedure TLazSerialWindowsIoTests.FailedCancellationStillDrainsOperation;
+var
+  Serial: TCheckedWindowsSerial;
+  ReadOperation: Boolean;
+  Buffer: array[0..3] of Byte;
+begin
+  for ReadOperation := False to True do
+  begin
+    Serial := TCheckedWindowsSerial.Create;
+    try
+      Serial.Scenario := ioTimeout;
+      Serial.FailCancel := True;
+      if ReadOperation then
+        Serial.RecvBuffer(@Buffer[0], SizeOf(Buffer))
+      else
+        Serial.SendBuffer(@Buffer[0], SizeOf(Buffer));
+      AssertTrue(Serial.Cancelled);
+      AssertFalse('Even failed cancellation must not abandon live buffers',
+        Serial.Pending);
+      AssertEquals('Preserve the timeout rather than the cancellation error',
+        ErrTimeout, Serial.LastError);
+    finally
+      Serial.Free;
+    end;
+  end;
+end;
+
+procedure TLazSerialWindowsIoTests.ExceptionsPreserveFirstErrorAfterCompletion;
+var
+  Serial: TCheckedWindowsSerial;
+  Scenario: TIoScenario;
+  ReadOperation, Raised: Boolean;
+  Buffer: array[0..3] of Byte;
+  ExpectedError: Integer;
+  Flags: DWord;
+begin
+  for ReadOperation := False to True do
+    for Scenario := ioCompletionError to ioWaitFailed do
+    begin
+      Serial := TCheckedWindowsSerial.Create;
+      try
+        Serial.Scenario := Scenario;
+        Serial.RaiseExcept := True;
+        Serial.ReportFrameError := True;
+        case Scenario of
+          ioCompletionError: ExpectedError := ERROR_ACCESS_DENIED;
+          ioTimeout: ExpectedError := ErrTimeout;
+          ioWaitFailed: ExpectedError := ERROR_INVALID_HANDLE;
+        else
+          Fail('Unexpected test scenario');
+        end;
+        Raised := False;
+        try
+          if ReadOperation then
+            Serial.RecvBuffer(@Buffer[0], SizeOf(Buffer))
+          else
+            Serial.SendBuffer(@Buffer[0], SizeOf(Buffer));
+        except
+          on E: ESynaSerError do
+          begin
+            Raised := True;
+            AssertEquals(ExpectedError, E.ErrorCode);
+          end;
+        end;
+        AssertTrue('RaiseExcept must report the first transfer error', Raised);
+        AssertFalse('Complete cancellation before raising', Serial.Pending);
+        AssertEquals(ExpectedError, Serial.LastError);
+        AssertFalse('Release the event before raising',
+          GetHandleInformation(Serial.OperationEvent, Flags));
+      finally
+        Serial.Free;
+      end;
+    end;
+end;
+
+procedure TLazSerialWindowsIoTests.ImmediateFailureReturnsNoTransferredBytes;
+var
+  Serial: TCheckedWindowsSerial;
+  ReadOperation: Boolean;
+  Buffer: array[0..3] of Byte;
+  Count: Integer;
+begin
+  for ReadOperation := False to True do
+  begin
+    Serial := TCheckedWindowsSerial.Create;
+    try
+      Serial.FailStart := True;
+      if ReadOperation then
+        Count := Serial.RecvBuffer(@Buffer[0], SizeOf(Buffer))
+      else
+        Count := Serial.SendBuffer(@Buffer[0], SizeOf(Buffer));
+      AssertEquals(0, Count);
+      AssertEquals(ERROR_ACCESS_DENIED, Serial.LastError);
+      AssertEquals(0, Serial.FinishCount);
+      AssertFalse(Serial.Cancelled);
+    finally
+      Serial.Free;
+    end;
+  end;
+end;
 
 initialization
   RegisterTest(TLazSerialWindowsIoTests);

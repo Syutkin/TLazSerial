@@ -303,6 +303,10 @@ type
   TBlockSerial = class(TPersistent)
   private
     FLastReadCount: Integer;
+{$IFDEF MSWINDOWS}
+    function TransferBuffer(ARead: Boolean; ABuffer: Pointer;
+      ALength: Integer): Integer;
+{$ENDIF}
   protected
     FOnStatus: THookSerialStatus;
     Fhandle: THandle;
@@ -755,7 +759,9 @@ type
     {:This timeout value is used as deadlock protection when trying to send data
      to (or receive data from) a device that stopped communicating during data
      transmission (e.g. by physically disconnecting the device).
-     The timeout value is in milliseconds. The default value is 30,000 (30 seconds).}
+     The timeout value is in milliseconds. The default value is 30,000 (30 seconds).
+     On Windows, cancellation after this timeout must complete before returning;
+     a driver can therefore extend the total duration beyond this timeout.}
     property DeadlockTimeout: Integer read FDeadlockTimeout Write FDeadlockTimeout;
 
     {:If set to @true (default value), port locking is enabled (under Linux only).
@@ -1130,14 +1136,83 @@ function TBlockSerial.ClearOverlappedIOError(var AError: DWord): Boolean;
 begin
   Result := Windows.ClearCommError(FHandle, AError, nil);
 end;
+
+function TBlockSerial.TransferBuffer(ARead: Boolean; ABuffer: Pointer;
+  ALength: Integer): Integer;
+var
+  Overlapped: TOverlapped;
+  Transferred, ErrorCode, CompletionError, WaitResult, AbortFlags, Err: DWord;
+  WaitCompletion: Boolean;
+begin
+  Result := 0;
+  FillChar(Overlapped, SizeOf(Overlapped), 0);
+  Overlapped.hEvent := Windows.CreateEvent(nil, True, False, nil);
+  if Overlapped.hEvent = 0 then
+  begin
+    SetSynaError(Windows.GetLastError);
+    Exit;
+  end;
+  try
+    Transferred := 0;
+    ErrorCode := sOK;
+    if not StartOverlappedIO(ARead, ABuffer, ALength, Transferred,
+      @Overlapped) then
+    begin
+      ErrorCode := Windows.GetLastError;
+      Transferred := 0;
+      if ErrorCode = ERROR_IO_PENDING then
+      begin
+        WaitResult := WaitOverlappedIO(Overlapped.hEvent, FDeadlockTimeout);
+        case WaitResult of
+          WAIT_OBJECT_0: ErrorCode := sOK;
+          WAIT_TIMEOUT: ErrorCode := ErrTimeout;
+          WAIT_FAILED: ErrorCode := Windows.GetLastError;
+        else
+          ErrorCode := ERROR_GEN_FAILURE;
+        end;
+        WaitCompletion := ErrorCode <> sOK;
+        if WaitCompletion then
+        begin
+          if ARead then
+            AbortFlags := PURGE_RXABORT
+          else
+            AbortFlags := PURGE_TXABORT;
+          AbortOverlappedIO(AbortFlags);
+        end;
+        // Cancellation can finish later or fail. Keep all storage alive until
+        // GetOverlappedResult reports a terminal result in either case.
+        repeat
+          Transferred := 0;
+          if FinishOverlappedIO(Overlapped, Transferred, WaitCompletion) then
+            Break;
+          CompletionError := Windows.GetLastError;
+          if CompletionError <> ERROR_IO_INCOMPLETE then
+          begin
+            if ErrorCode = sOK then
+              ErrorCode := CompletionError;
+            Break;
+          end;
+          WaitCompletion := True;
+        until False;
+      end;
+    end;
+    Result := Transferred;
+    SetSynaError(ErrorCode);
+    Err := 0;
+    if not ClearOverlappedIOError(Err) then
+    begin
+      if FLastError = sOK then
+        SetSynaError(Windows.GetLastError);
+    end
+    else if (FLastError = sOK) and (Err <> 0) then
+      DecodeCommError(Err);
+  finally
+    Windows.CloseHandle(Overlapped.hEvent);
+  end;
+end;
 {$ENDIF}
 
 function TBlockSerial.SendBuffer(buffer: pointer; length: integer): integer;
-{$IFDEF MSWINDOWS}
-var
-  Overlapped: TOverlapped;
-  x, y, Err: DWord;
-{$ENDIF}
 begin
   Result := 0;
   if PreTestFailing then   {HGJ}
@@ -1152,26 +1227,7 @@ begin
   result := FileWrite(Fhandle, Buffer^, Length);
   serialcheck(result);
 {$ELSE}
-  FillChar(Overlapped, Sizeof(Overlapped), 0);
-  SetSynaError(sOK);
-  y := 0;
-  if not StartOverlappedIO(False, Buffer, Length, DWord(Result), @Overlapped) then
-    y := GetLastError;
-  if y = ERROR_IO_PENDING then
-  begin
-    x := WaitOverlappedIO(FHandle, FDeadlockTimeout);
-    if x = WAIT_TIMEOUT then
-    begin
-      AbortOverlappedIO(PURGE_TXABORT);
-      SetSynaError(ErrTimeout);
-    end;
-    FinishOverlappedIO(Overlapped, Dword(Result), False);
-  end
-  else
-    SetSynaError(y);
-  ClearOverlappedIOError(err);
-  if err <> 0 then
-    DecodeCommError(err);
+  Result := TransferBuffer(False, Buffer, Length);
 {$ENDIF}
   if FRTSToggle then
   begin
@@ -1259,34 +1315,12 @@ begin
   result := FileRead(FHandle, Buffer^, length);
   serialcheck(result);
 {$ELSE}
-var
-  Overlapped: TOverlapped;
-  x, y, Err: DWord;
 begin
   Result := 0;
   if PreTestFailing then   {HGJ}
     Exit;                  {HGJ}
   LimitBandwidth(Length, FMaxRecvBandwidth, FNextRecv);
-  FillChar(Overlapped, Sizeof(Overlapped), 0);
-  SetSynaError(sOK);
-  y := 0;
-  if not StartOverlappedIO(True, Buffer, length, Dword(Result), @Overlapped) then
-    y := GetLastError;
-  if y = ERROR_IO_PENDING then
-  begin
-    x := WaitOverlappedIO(FHandle, FDeadlockTimeout);
-    if x = WAIT_TIMEOUT then
-    begin
-      AbortOverlappedIO(PURGE_RXABORT);
-      SetSynaError(ErrTimeout);
-    end;
-    FinishOverlappedIO(Overlapped, Dword(Result), False);
-  end
-  else
-    SetSynaError(y);
-  ClearOverlappedIOError(err);
-  if err <> 0 then
-    DecodeCommError(err);
+  Result := TransferBuffer(True, Buffer, Length);
 {$ENDIF}
   FLastReadCount := Result;
   if FLastReadCount < 0 then

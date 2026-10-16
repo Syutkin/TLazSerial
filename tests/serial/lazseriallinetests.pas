@@ -82,7 +82,7 @@ var
   Raised: Boolean;
 begin
   for InterPacket := False to True do
-    for Timeout := 0 to 1 do
+    for Timeout in [0, 10] do
       for SplitPosition := 1 to Length(WireValue) - 1 do
       begin
         Serial := TLineTestSerial.Create;

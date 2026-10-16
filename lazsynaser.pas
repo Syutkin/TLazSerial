@@ -1849,8 +1849,11 @@ begin
   //set baudrate;
   dcb.baudrate := 0;
  {$IFDEF FPC}
-  //why FPC not have cfgetospeed???
-  x := term.c_oflag and $0F;
+  {$IFDEF LINUX}
+  x := term.c_cflag and CBAUD;
+  {$ELSE}
+  x := term.c_ospeed;
+  {$ENDIF}
  {$ELSE}
   x := cfgetospeed(term);
  {$ENDIF}
@@ -1923,6 +1926,8 @@ procedure TBlockSerial.GetCommState;
 begin
   SerialCheck(tcgetattr(FHandle, termiosstruc));
   ExceptCheck;
+  if FLastError <> sOK then
+    Exit;
   TermiostoDCB(termiosstruc, dcb);
 end;
 {$ELSE}

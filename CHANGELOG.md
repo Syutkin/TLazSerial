@@ -24,7 +24,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   open cleanup cannot mask these errors, and status callbacks can safely read
   data or close the port. Failed live updates preserve property values and
   restore driver settings, closing the port if recovery fails and allowing
-  the same setting to be retried.
+  the same setting to be retried. Unix port-state reads report the actual
+  configured baud rate and preserve the previous DCB if reading settings fails.
 - Closing a port bounds output draining by `SynSer.DeadlockTimeout`, releases
   its handle and resets `Active` even after I/O errors, preserving the first
   error. Destruction completes cleanup without propagating serial-close errors.

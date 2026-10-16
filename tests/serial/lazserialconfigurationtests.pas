@@ -6,6 +6,7 @@ interface
 
 uses
   {$IFDEF MSWINDOWS}Windows,{$ENDIF}
+  {$IFDEF UNIX}Termio,{$ENDIF}
   Classes, SysUtils, SyncObjs, TypInfo, FpcUnit, TestRegistry, LazSerial, LazSerialCommon,
   LazSerialTransport, LazSynaSer, LazSerialTransportTests;
 
@@ -14,6 +15,9 @@ type
   private
     procedure CheckRejectedProperty(const AName: string; const AValue: Int64);
   published
+    {$IFDEF UNIX}
+    procedure FailedNativeStateReadPreservesDcb;
+    {$ENDIF}
     procedure SuccessfulConfigurationPreservesExceptionPreference;
     procedure ApplyFailureRaisesWithNativeExceptionsDisabled;
     procedure ApplyFailurePreservesNativeExceptions;
@@ -39,6 +43,47 @@ type
   end;
 
 implementation
+
+{$IFDEF UNIX}
+procedure TLazSerialConfigurationTests.FailedNativeStateReadPreservesDcb;
+var
+  Serial: TBlockSerial;
+  Previous: TDCB;
+  RaiseNative, Raised: Boolean;
+begin
+  Serial := TBlockSerial.Create;
+  try
+    Previous := Default(TDCB);
+    Previous.BaudRate := 115200;
+    Previous.ByteSize := 8;
+    Previous.Flags := dcb_RtsControlHandshake;
+    for RaiseNative := False to True do
+    begin
+      Serial.DCB := Previous;
+      Serial.TermiosStruc := Default(Termios);
+      Serial.RaiseExcept := RaiseNative;
+      Raised := False;
+      try
+        // An unopened descriptor exercises the real tcgetattr failure path.
+        Serial.GetCommState;
+      except
+        on E: ESynaSerError do
+        begin
+          Raised := True;
+          AssertEquals(Serial.LastError, E.ErrorCode);
+        end;
+      end;
+      AssertTrue('A failed native read must retain its error', Serial.LastError <> 0);
+      AssertEquals('RaiseExcept preference must be respected', RaiseNative, Raised);
+      AssertEquals(RaiseNative, Serial.RaiseExcept);
+      AssertTrue('A failed native read must not decode stale termios data',
+        CompareMem(@Previous, @Serial.DCB, SizeOf(Previous)));
+    end;
+  finally
+    Serial.Free;
+  end;
+end;
+{$ENDIF}
 
 type
   { Config itself is real; only the driver operations are simulated. }

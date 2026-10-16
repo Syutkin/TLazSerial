@@ -54,6 +54,11 @@ type
     procedure Reported38400SpeedMatchesPtySettings;
     procedure Reported115200SpeedMatchesPtySettings;
     procedure OutputFlagsDoNotChangeReportedSpeed;
+    procedure ReportedExtendedSpeedsMatchPtySettings;
+    {$ENDIF}
+    {$IFDEF DARWIN}
+    procedure MacReportedSpeedsMatchPtySettings;
+    procedure MacOutputSpeedIsIndependentOfOtherFields;
     {$ENDIF}
   end;
 
@@ -550,6 +555,18 @@ begin
   CheckReportedPtySpeed(115200, B115200);
 end;
 
+procedure TLazSerialLifecycleTests.ReportedExtendedSpeedsMatchPtySettings;
+begin
+  CheckReportedPtySpeed(57600, B57600);
+  CheckReportedPtySpeed(230400, B230400);
+  CheckReportedPtySpeed(460800, B460800);
+  {$IFNDEF CPUARM}
+  CheckReportedPtySpeed(500000, B500000);
+  CheckReportedPtySpeed(1000000, B1000000);
+  CheckReportedPtySpeed(4000000, B4000000);
+  {$ENDIF}
+end;
+
 procedure TLazSerialLifecycleTests.OutputFlagsDoNotChangeReportedSpeed;
 var
   Probe: TTermiosProbe;
@@ -562,6 +579,76 @@ begin
     Settings.c_oflag := 0;
     AssertEquals(115200, Probe.DecodeSpeed(Settings));
     Settings.c_oflag := OPOST or ONLCR;
+    AssertEquals(115200, Probe.DecodeSpeed(Settings));
+  finally
+    Probe.Free;
+  end;
+end;
+{$ENDIF}
+
+{$IFDEF DARWIN}
+type
+  TMacTermiosProbe = class(TBlockSerial)
+  public
+    function DecodeSpeed(const ASettings: Termios): Integer;
+  end;
+
+function TMacTermiosProbe.DecodeSpeed(const ASettings: Termios): Integer;
+var
+  State: TDCB;
+begin
+  State := Default(TDCB);
+  TermiosToDcb(ASettings, State);
+  Result := State.BaudRate;
+end;
+
+procedure TLazSerialLifecycleTests.MacReportedSpeedsMatchPtySettings;
+const
+  Speeds: array[0..4] of Integer = (0, 9600, 38400, 115200, 230400);
+var
+  Master, Slave: cint;
+  Name: array[0..255] of Char;
+  Settings: Termios;
+  Transport: TLazSynapseSerialTransport;
+  Speed: Integer;
+begin
+  AssertEquals(0, OpenPty(@Master, @Slave, @Name[0], nil, nil));
+  Transport := TLazSynapseSerialTransport.Create;
+  try
+    Transport.Connect(StrPas(Name));
+    for Speed in Speeds do
+    begin
+      Transport.Configure(Speed, 8, 'N', SB1, fcNone);
+      AssertEquals(0, TCGetAttr(Slave, Settings));
+      AssertEquals('Independent macOS PTY output speed', Int64(Speed),
+        Int64(Settings.c_ospeed));
+      Transport.NativeSerial.GetCommState;
+      AssertEquals('Reported macOS speed', Speed,
+        Transport.NativeSerial.DCB.BaudRate);
+      AssertEquals(0, Transport.NativeSerial.LastError);
+    end;
+  finally
+    Transport.Free;
+    fpClose(Slave);
+    fpClose(Master);
+  end;
+end;
+
+procedure TLazSerialLifecycleTests.MacOutputSpeedIsIndependentOfOtherFields;
+var
+  Probe: TMacTermiosProbe;
+  Settings: Termios;
+begin
+  Probe := TMacTermiosProbe.Create;
+  try
+    Settings := Default(Termios);
+    Settings.c_ospeed := B115200;
+    Settings.c_ispeed := B9600;
+    Settings.c_cflag := CS8;
+    Settings.c_oflag := OPOST or ONLCR;
+    AssertEquals(115200, Probe.DecodeSpeed(Settings));
+    Settings.c_oflag := 0;
+    Settings.c_ispeed := B38400;
     AssertEquals(115200, Probe.DecodeSpeed(Settings));
   finally
     Probe.Free;

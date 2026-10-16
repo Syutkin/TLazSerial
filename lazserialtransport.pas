@@ -16,6 +16,7 @@ type
       AStopBits: Integer; AFlowControl: TFlowControl); virtual; abstract;
     procedure Connect(const ADevice: string); virtual; abstract;
     function CanRead(const ATimeout: Integer): Boolean; virtual; abstract;
+    function CanReadLine(const ATimeout: Integer): Boolean; virtual;
     function DeviceName: string; virtual; abstract;
     function IsOpen: Boolean; virtual; abstract;
     function NativeSerial: TBlockSerial; virtual; abstract;
@@ -47,6 +48,7 @@ type
       AStopBits: Integer; AFlowControl: TFlowControl); override;
     procedure Connect(const ADevice: string); override;
     function CanRead(const ATimeout: Integer): Boolean; override;
+    function CanReadLine(const ATimeout: Integer): Boolean; override;
     function DeviceName: string; override;
     function IsOpen: Boolean; override;
     function NativeSerial: TBlockSerial; override;
@@ -64,6 +66,11 @@ type
   end;
 
 implementation
+
+function TLazSerialTransport.CanReadLine(const ATimeout: Integer): Boolean;
+begin
+  Result := CanRead(ATimeout);
+end;
 
 constructor TLazSynapseSerialTransport.Create;
 begin
@@ -104,6 +111,12 @@ function TLazSynapseSerialTransport.CanRead(
   const ATimeout: Integer): Boolean;
 begin
   Result := FSerial.CanReadEx(ATimeout);
+end;
+
+function TLazSynapseSerialTransport.CanReadLine(
+  const ATimeout: Integer): Boolean;
+begin
+  Result := FSerial.CanReadLine(ATimeout);
 end;
 
 function TLazSynapseSerialTransport.DeviceName: string;

@@ -21,6 +21,7 @@ uses
   SerialInfrastructureTests,
   LazSerialTransportTests,
   LazSerialIoLifecycleTests,
+  LazSerialLineTests,
   SerialPlatformChangeSourceSmokeTests;
 
 var

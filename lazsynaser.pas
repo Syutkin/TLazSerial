@@ -585,6 +585,10 @@ type
     @link(LineBuffer) too.}
     function CanReadEx(Timeout: integer): boolean; virtual;
 
+    {:Like CanReadEx, but an incomplete buffered line alone is not readable.
+     New bytes in the port are readable even before a line is complete.}
+    function CanReadLine(Timeout: integer): boolean; virtual;
+
     {:Returns the status word of the modem. Decoding the status word could yield
      the status of carrier detect signaland other signals. This method is used
      internally by the modem status reading properties. You usually do not need
@@ -1385,7 +1389,9 @@ begin
     end;
     if x > 0 then
       Break;
-    if not FInterPacketTimeout then
+    // Zero means non-blocking: drain available packets, including new bytes
+    // after an incomplete FBuffer, before reporting a timeout.
+    if not FInterPacketTimeout and (Timeout <> 0) then
     begin
       Timeout := Timeout - integer(TickDelta(ti, GetTick));
       if Timeout <= 0 then
@@ -1934,6 +1940,28 @@ begin
   	Result := True
   else
   	Result := CanRead(Timeout);
+end;
+
+function TBlockSerial.CanReadLine(Timeout: integer): boolean;
+var
+  Start, I: Integer;
+begin
+  if FConvertLineEnd then
+  begin
+    Start := 1;
+    // A complementary byte after a converted single CR/LF belongs to the
+    // previous line, not to a new empty line.
+    if FBuffer <> '' then
+      if (FLastCR and (FBuffer[1] = LF)) or
+        (FLastLF and (FBuffer[1] = CR)) then
+        Inc(Start);
+    for I := Start to Length(FBuffer) do
+      if FBuffer[I] in [CR, LF] then
+        Exit(True);
+  end
+  else if Pos(CRLF, FBuffer) > 0 then
+    Exit(True);
+  Result := CanRead(Timeout);
 end;
 
 procedure TBlockSerial.EnableRTSToggle(Value: boolean);

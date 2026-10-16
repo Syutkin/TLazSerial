@@ -187,6 +187,7 @@ type
     procedure SynSerStatus(Sender: TObject; Reason: THookSerialReason;
       const Value: string);
     function AppliedBaudrate: integer;
+    function CanReadData(const ATimeout: Integer): Boolean;
     function GetSynSer: TBlockSerial;
 
   protected
@@ -470,7 +471,15 @@ begin
     result:=false;
     exit;
   end;
-  result:=FTransport.CanRead(0);
+  result:=CanReadData(0);
+end;
+
+function TLazSerial.CanReadData(const ATimeout: Integer): Boolean;
+begin
+  if FRcvLineCRLF then
+    Result := FTransport.CanReadLine(ATimeout)
+  else
+    Result := FTransport.CanRead(ATimeout);
 end;
 
 destructor TLazSerial.Destroy;
@@ -862,7 +871,7 @@ procedure TComPortReadThread.Execute;
 begin
   try
     while not Terminated do begin
-      if Owner.FTransport.CanRead(100) then
+      if Owner.CanReadData(100) then
         QueueReceive;
     end;
   finally

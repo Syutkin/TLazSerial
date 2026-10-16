@@ -42,6 +42,13 @@ Serial.Open;
 Use `OnRxData` with `ReadData` for incoming data and `WriteData` for outgoing
 data. `ShowSetupDialog` opens the bundled port-settings dialog.
 
+With `RcvLineCRLF = True`, `ReadData` returns one line without its CRLF.
+An incomplete line stays buffered and `ReadData` returns an empty string with
+`SynSer.LastError = ErrTimeout`. `DataAvailable` and the reader wait for new
+bytes or a complete buffered line, so an incomplete line alone does not cause
+repeated `OnRxData` callbacks. A complete empty line also returns an empty
+string, with `SynSer.LastError = 0`.
+
 Reader-originated `OnRxData` and `OnStatus` callbacks are delivered on the LCL
 main thread. A handler may close or destroy its `TLazSerial` component; an
 exception raised by a handler remains a main-thread exception and does not stop

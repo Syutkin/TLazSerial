@@ -10,6 +10,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - Expose the TLazSerial package version through `LazSerialGetVersion`.
 
+### Fixed
+
+- In CRLF mode, incomplete buffered lines no longer cause repeated `OnRxData`
+  callbacks or keep `DataAvailable` true without new bytes.
+- Non-blocking line reads now append available bytes to an incomplete line
+  when `SynSer.InterPacketTimeout` is false.
+
 ## [0.8.1] - 2026-09-29
 
 ### Fixed

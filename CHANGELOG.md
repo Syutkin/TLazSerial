@@ -12,8 +12,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
-- Device-refresh callbacks can safely destroy their watcher, selector or owner
-  without accessing freed memory or delivering further events.
+- Watchers retain the last snapshot and retry failed enumeration up to three
+  times without false disconnections. Device-refresh callbacks can safely
+  destroy their watcher, selector or owner without accessing freed memory
+  or delivering further events.
 - Serial configuration errors, including failed reads of port settings and
   unsupported Unix baud rates, are preserved and reported even with
   `SynSer.RaiseExcept` disabled. Failed opens leave the port closed and `Active`

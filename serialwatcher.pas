@@ -31,6 +31,7 @@ type
     FLastRefreshChanged: Boolean;
     FOwnInfrastructure: Boolean;
     FRefreshDirty: Boolean;
+    FFailureRetryCount: Cardinal;
     FRefreshOnLoaded: Boolean;
     FRefreshPending: Boolean;
     FRefreshScheduler: TSerialRefreshScheduler;
@@ -114,6 +115,8 @@ end;
 
 const
   SerialRefreshSettleRetryMs = 1;
+  SerialRefreshFailureRetryCount = 3;
+  SerialRefreshFailureRetryDelayMs = 250;
   {$IFDEF Windows}
   WindowsChangeDebounceMs = 150;
   WindowsSettleRetryDelayMs = 250;
@@ -168,6 +171,7 @@ begin
     Exit;
   FRefreshScheduler.Cancel;
   FRefreshDirty := False;
+  FFailureRetryCount := 0;
   FSettleRetriesRemaining := 0;
   FSettlingActive := False;
   StartBackgroundRefresh;
@@ -181,6 +185,10 @@ var
   RemovedDevices: Boolean;
   Guard: TSerialWatcherEventGuard;
 begin
+  if (FDeviceRefreshThread <> nil) and
+    FDeviceRefreshThread.Delivering and
+    not FDeviceRefreshThread.LoadSucceeded then
+    Exit;
   if not FInitialized then
   begin
     FDevices := CopyDevices(ADevices);
@@ -271,7 +279,20 @@ begin
     FRefreshScheduler.Schedule(FChangeDelayMs, @ScheduledRefresh);
     Exit;
   end;
-  if not FWatching or not FSettlingActive then
+  if not FWatching then
+    Exit;
+  if not FDeviceRefreshThread.LoadSucceeded then
+  begin
+    if FFailureRetryCount < SerialRefreshFailureRetryCount then
+    begin
+      Inc(FFailureRetryCount);
+      FRefreshScheduler.Schedule(SerialRefreshFailureRetryDelayMs,
+        @ScheduledRefresh);
+    end;
+    Exit;
+  end;
+  FFailureRetryCount := 0;
+  if not FSettlingActive then
     Exit;
   if FLastRefreshChanged or (FSettleRetriesRemaining = 0) then
   begin
@@ -289,6 +310,7 @@ procedure TSerialWatcher.ChangeDetected(Sender: TObject);
 begin
   if not FWatching then
     Exit;
+  FFailureRetryCount := 0;
   FSettlingActive := FChangeSource.RequiresSettling and
     (FSettleRetryCount > 0);
   if FSettlingActive then
@@ -343,6 +365,7 @@ begin
   FInitialized := False;
   FLastRefreshChanged := False;
   FRefreshDirty := False;
+  FFailureRetryCount := 0;
   FRefreshOnLoaded := True;
   FRefreshPending := False;
   FSettleRetriesRemaining := 0;
@@ -443,6 +466,7 @@ procedure TSerialWatcher.StopWatching;
 begin
   FWatching := False;
   FRefreshDirty := False;
+  FFailureRetryCount := 0;
   FSettleRetriesRemaining := 0;
   FSettlingActive := False;
   if FRefreshScheduler <> nil then

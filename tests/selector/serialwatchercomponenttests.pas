@@ -138,6 +138,9 @@ type
     procedure FailedRefreshPreservesLastSnapshot;
     procedure FailedFirstRefreshDoesNotEstablishEmptyBaseline;
     procedure SuccessfulEmptyRefreshReportsRemoval;
+    procedure FailedRefreshRetriesWithoutNewSignalAndRecovers;
+    procedure PermanentRefreshFailureHasBoundedRetries;
+    procedure StopAndDestroyCancelFailedRefreshRetries;
     procedure DestroyFromConnectedEventPreservesHeap;
     procedure DestroyFromDisconnectedEventPreservesHeap;
     procedure DestroyDuringReplacementStopsFurtherEvents;
@@ -169,6 +172,166 @@ type
     FreeOwner: Boolean;
     procedure DestroyFromEvent(Sender: TObject);
   end;
+
+  TFailureRetryWatcher = class(TFailingRefreshWatcher)
+  protected
+    function LoadDevices: TSerialDeviceInfoArray; override;
+  public
+    Attempts: Integer;
+    constructor CreateWithInfrastructure(ASource: TFakeSerialChangeSource;
+      AScheduler: TFakeSerialRefreshScheduler);
+    procedure RetryAndWait(AScheduler: TFakeSerialRefreshScheduler);
+    procedure StopNow;
+  end;
+
+constructor TFailureRetryWatcher.CreateWithInfrastructure(
+  ASource: TFakeSerialChangeSource; AScheduler: TFakeSerialRefreshScheduler);
+begin
+  inherited Create(nil);
+  SetInfrastructure(ASource, AScheduler, False);
+end;
+
+function TFailureRetryWatcher.LoadDevices: TSerialDeviceInfoArray;
+begin
+  Inc(Attempts);
+  Result := inherited LoadDevices;
+end;
+
+procedure TFailureRetryWatcher.RetryAndWait(
+  AScheduler: TFakeSerialRefreshScheduler);
+var
+  Deadline: QWord;
+begin
+  LoadStarted.ResetEvent;
+  AScheduler.Fire;
+  TAssert.AssertEquals(Ord(wrSignaled), Ord(LoadStarted.WaitFor(1000)));
+  Deadline := GetTickCount64 + 1000;
+  while not Worker.Finished and (GetTickCount64 < Deadline) do
+    Sleep(1);
+  TAssert.AssertTrue('Retry worker must finish', Worker.Finished);
+  CheckSynchronize(0);
+end;
+
+procedure TFailureRetryWatcher.StopNow;
+begin
+  StopWatching;
+end;
+
+procedure TSerialWatcherComponentTests.FailedRefreshRetriesWithoutNewSignalAndRecovers;
+var
+  Source: TFakeSerialChangeSource;
+  Scheduler: TFakeSerialRefreshScheduler;
+  Watcher: TFailureRetryWatcher;
+  DeviceA, DeviceB: TSerialDeviceInfo;
+begin
+  Source := TFakeSerialChangeSource.Create;
+  Scheduler := TFakeSerialRefreshScheduler.Create;
+  Watcher := TFailureRetryWatcher.CreateWithInfrastructure(Source, Scheduler);
+  try
+    DeviceA := CreateDevice('/dev/retry-a');
+    DeviceB := CreateDevice('/dev/retry-b');
+    Watcher.AdoptSnapshot([DeviceA]);
+    Watcher.OnComConnected := @DeviceConnected;
+    Watcher.OnComDisconnected := @DeviceDisconnected;
+    Watcher.FailLoad := True;
+    Watcher.RefreshAndWait;
+    AssertTrue('Failure must schedule a retry without another device event',
+      Scheduler.Scheduled);
+    AssertTrue('Retries must have a delay', Scheduler.LastDelayMs > 0);
+    AssertTrue(Watcher.ContainsDevice(DeviceA.Device));
+    AssertEquals(0, FDisconnectedCount);
+    Watcher.FailLoad := False;
+    Watcher.SetSnapshot([DeviceA, DeviceB]);
+    Watcher.RetryAndWait(Scheduler);
+    AssertEquals(2, Watcher.Attempts);
+    AssertTrue(Watcher.ContainsDevice(DeviceB.Device));
+    AssertEquals(1, FConnectedCount);
+    AssertEquals(0, FDisconnectedCount);
+    AssertFalse('A successful retry must stop failure retries', Scheduler.Scheduled);
+  finally
+    Watcher.Free;
+    Scheduler.Free;
+    Source.Free;
+  end;
+end;
+
+procedure TSerialWatcherComponentTests.PermanentRefreshFailureHasBoundedRetries;
+var
+  Source: TFakeSerialChangeSource;
+  Scheduler: TFakeSerialRefreshScheduler;
+  Watcher: TFailureRetryWatcher;
+  DeviceA: TSerialDeviceInfo;
+  Attempt: Integer;
+begin
+  Source := TFakeSerialChangeSource.Create;
+  Scheduler := TFakeSerialRefreshScheduler.Create;
+  Watcher := TFailureRetryWatcher.CreateWithInfrastructure(Source, Scheduler);
+  try
+    DeviceA := CreateDevice('/dev/retry-a');
+    Watcher.AdoptSnapshot([DeviceA]);
+    Watcher.FailLoad := True;
+    Watcher.RefreshAndWait;
+    for Attempt := 1 to 3 do
+    begin
+      AssertTrue('Each failed attempt within the limit must schedule a retry',
+        Scheduler.Scheduled);
+      AssertTrue(Scheduler.LastDelayMs > 0);
+      Watcher.RetryAndWait(Scheduler);
+    end;
+    AssertEquals(4, Watcher.Attempts);
+    AssertFalse('A permanent failure must not retry indefinitely', Scheduler.Scheduled);
+    AssertTrue(Watcher.ContainsDevice(DeviceA.Device));
+    Watcher.RefreshAndWait;
+    AssertTrue('Manual refresh must reset the retry limit', Scheduler.Scheduled);
+    for Attempt := 1 to 3 do
+      Watcher.RetryAndWait(Scheduler);
+    AssertFalse(Scheduler.Scheduled);
+    Source.Signal;
+    AssertTrue(Scheduler.Scheduled);
+    Watcher.RetryAndWait(Scheduler);
+    AssertTrue('A new device event must reset the retry limit', Scheduler.Scheduled);
+  finally
+    Watcher.Free;
+    Scheduler.Free;
+    Source.Free;
+  end;
+end;
+
+procedure TSerialWatcherComponentTests.StopAndDestroyCancelFailedRefreshRetries;
+var
+  Source: TFakeSerialChangeSource;
+  Scheduler: TFakeSerialRefreshScheduler;
+  Watcher: TFailureRetryWatcher;
+  StopFirst: Boolean;
+begin
+  for StopFirst := False to True do
+  begin
+    Source := TFakeSerialChangeSource.Create;
+    Scheduler := TFakeSerialRefreshScheduler.Create;
+    Watcher := TFailureRetryWatcher.CreateWithInfrastructure(Source, Scheduler);
+    try
+      Watcher.FailLoad := True;
+      Watcher.RefreshAndWait;
+      AssertTrue(Scheduler.Scheduled);
+      if StopFirst then
+        Watcher.StopNow
+      else
+        FreeAndNil(Watcher);
+      AssertFalse(Scheduler.Scheduled);
+      Source.Signal;
+      Scheduler.Fire;
+      AssertFalse(Scheduler.Scheduled);
+      if Watcher <> nil then
+        AssertEquals('Stopping must cancel the pending retry', 1, Watcher.Attempts);
+      AssertEquals(0, FConnectedCount);
+      AssertEquals(0, FDisconnectedCount);
+    finally
+      Watcher.Free;
+      Scheduler.Free;
+      Source.Free;
+    end;
+  end;
+end;
 
 constructor TFailingRefreshWatcher.Create(AOwner: TComponent);
 begin

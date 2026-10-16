@@ -153,6 +153,10 @@ type
   private
     FActive: boolean;
     FTransport: TLazSerialTransport;
+    FTransportLock: TCriticalSection;
+    FTransportDepth: Integer;
+    FPendingStatuses: TList;
+    FStatusSession: ISerialReaderSession;
     FDevice: string;
 
     FSerialWatcher : TSerialWatcher;
@@ -175,6 +179,10 @@ type
     FReaderSession: ISerialReaderSession;
     ReadThread: TComPortReadThread;
 
+    procedure BeginTransport;
+    procedure EndTransport;
+    procedure ConfigurePort;
+    function ReadModemSignal(ASignal: TModemSignal): Boolean;
     procedure DeviceOpen;
     procedure DeviceClose;
 
@@ -409,6 +417,87 @@ end;
 
 { TLazSerial }
 
+procedure TLazSerial.BeginTransport;
+begin
+  FTransportLock.Acquire;
+  Inc(FTransportDepth);
+end;
+
+procedure TLazSerial.EndTransport;
+var
+  Statuses: TList;
+  Delivery: TSerialReaderEventDelivery;
+  Reader: TComPortReadThread;
+  I: Integer;
+begin
+  Dec(FTransportDepth);
+  Statuses := nil;
+  Reader := nil;
+  if FTransportDepth = 0 then
+  begin
+    Statuses := FPendingStatuses;
+    FPendingStatuses := nil;
+    if GetCurrentThreadID <> MainThreadID then
+      Reader := ReadThread;
+  end;
+  FTransportLock.Release;
+  if Statuses = nil then
+    Exit;
+  // Everything below uses local state: a callback can destroy this component.
+  try
+    for I := 0 to Statuses.Count - 1 do
+    begin
+      if (Reader <> nil) and Reader.Terminated then
+        Break;
+      Delivery := TSerialReaderEventDelivery(Statuses[I]);
+      Statuses[I] := nil;
+      if Reader = nil then
+        Delivery.Deliver
+      else
+      begin
+        try
+          TThread.Queue(nil, @Delivery.Deliver);
+        except
+          Delivery.Free;
+          raise;
+        end;
+        Reader.WaitForDelivery;
+      end;
+    end;
+  finally
+    for I := 0 to Statuses.Count - 1 do
+      TObject(Statuses[I]).Free;
+    Statuses.Free;
+  end;
+end;
+
+procedure TLazSerial.ConfigurePort;
+begin
+  BeginTransport;
+  try
+    if FTransport.IsOpen then
+      FTransport.Configure(AppliedBaudrate, ConstsBits[FDataBits],
+        ConstsParity[FParity], ConstsStopBits[FStopBits], FFlowControl);
+  finally
+    EndTransport;
+  end;
+end;
+
+function TLazSerial.ReadModemSignal(ASignal: TModemSignal): Boolean;
+begin
+  BeginTransport;
+  try
+    case ASignal of
+      msCTS: Result := FTransport.GetCTS;
+      msCD: Result := FTransport.GetCarrier;
+      msRI: Result := FTransport.GetRing;
+      msDSR: Result := FTransport.GetDSR;
+    end;
+  finally
+    EndTransport;
+  end;
+end;
+
 procedure TLazSerial.Close;
 begin
   CheckMainThread('TLazSerial.Close');
@@ -419,7 +508,7 @@ procedure TLazSerial.DeviceClose;
 begin
   FClosing := True;
   try
-    // Stop the reader before flushing or closing the handle it uses.
+    // Joining a reader must happen before acquiring the transport lock.
     if ReadThread <> nil then
     begin
       ReadThread.FreeOnTerminate := False;
@@ -433,10 +522,17 @@ begin
       ReadThread := nil;
     end;
     FReaderSession := nil;
-
+  except
+    FClosing := False;
+    raise;
+  end;
+  BeginTransport;
+  try
     FTransport.Close;
+    FActive := False;
   finally
     FClosing := False;
+    EndTransport;
   end;
 end;
 
@@ -445,6 +541,8 @@ begin
   inherited;
   //FHandle:=-1;
   ReadThread := nil;
+  FTransportLock := TCriticalSection.Create;
+  FStatusSession := TSerialReaderSession.Create(Self);
   FTransport := TLazSynapseSerialTransport.Create;
   //FHardflow:=false;
   //FSoftflow:=false;
@@ -467,24 +565,28 @@ end;
 function TLazSerial.DataAvailable: boolean;
 begin
   CheckMainThread('TLazSerial.DataAvailable');
-  if not FTransport.IsOpen then begin
-    result:=false;
-    exit;
-  end;
-  result:=CanReadData(0);
+  Result := CanReadData(0);
 end;
 
 function TLazSerial.CanReadData(const ATimeout: Integer): Boolean;
 begin
-  if FRcvLineCRLF then
-    Result := FTransport.CanReadLine(ATimeout)
-  else
-    Result := FTransport.CanRead(ATimeout);
+  BeginTransport;
+  try
+    if not FTransport.IsOpen then
+      Exit(False);
+    if FRcvLineCRLF then
+      Result := FTransport.CanReadLine(ATimeout)
+    else
+      Result := FTransport.CanRead(ATimeout);
+  finally
+    EndTransport;
+  end;
 end;
 
 destructor TLazSerial.Destroy;
 begin
   FDestroying := True;
+  FStatusSession.Detach;
   FSerialWatcher.OnComDisconnected := nil;
   if FReaderSession <> nil then
     FReaderSession.Detach;
@@ -492,6 +594,8 @@ begin
   FTransport.SetStatusHandler(nil);
   FTransport.Free;
   FReaderSession := nil;
+  FStatusSession := nil;
+  FTransportLock.Free;
   inherited;
 end;
 
@@ -549,13 +653,18 @@ end;
 function TLazSerial.ReadData: string;
 begin
   CheckMainThread('TLazSerial.ReadData');
-  result:='';
-  if not FTransport.IsOpen then
-    ComException('can not read from a closed port.');
-  if FRcvLineCRLF then
-  result:=FTransport.ReadString(0)
-  else
-  result:=FTransport.ReadPacket(0);
+  BeginTransport;
+  try
+    result:='';
+    if not FTransport.IsOpen then
+      ComException('can not read from a closed port.');
+    if FRcvLineCRLF then
+      Result := FTransport.ReadString(0)
+    else
+      Result := FTransport.ReadPacket(0);
+  finally
+    EndTransport;
+  end;
 end;
 
 procedure TLazSerial.ReplaceTransportForTesting(
@@ -582,50 +691,48 @@ end;
 procedure TLazSerial.SetActive(state: boolean);
 begin
   CheckMainThread('TLazSerial.Active');
-  if state=FActive then exit;
-
-  if state then
-  begin
-    FSerialWatcher.Refresh;
-    DeviceOpen;
-  end
+  if state = FActive then
+    Exit;
+  if not state then
+    DeviceClose
   else
-    DeviceClose;
-
-  FActive:=state;
+  begin
+    BeginTransport;
+    try
+      FSerialWatcher.Refresh;
+      DeviceOpen;
+      FActive := True;
+    finally
+      EndTransport;
+    end;
+  end;
 end;
 
 procedure TLazSerial.SetBaudRate(br: TBaudRate);
 begin
   CheckMainThread('TLazSerial.BaudRate');
-  FBaudRate:=br;
-  if (FCustomBaudRate > -1) then exit;
-  if FTransport.IsOpen then begin
-    FTransport.Configure(ConstsBaud[FBaudRate], ConstsBits[FDataBits],
-      ConstsParity[FParity], ConstsStopBits[FStopBits], FFlowControl);
-  end;
+  FBaudRate := br;
+  if FCustomBaudRate < 0 then
+    ConfigurePort;
 end;
 
 procedure TLazSerial.SetCustomBaudrate(br: Integer);
 begin
   CheckMainThread('TLazSerial.CustomBaudRate');
-  if (FCustomBaudRate = br) then exit;
+  if FCustomBaudRate = br then
+    Exit;
   FCustomBaudRate := br;
-  if (FCustomBaudRate < 0)
-    then SetBaudRate(FBaudRate)
-    else if FTransport.IsOpen then
-      FTransport.Configure(FCustomBaudRate, ConstsBits[FDataBits],
-        ConstsParity[FParity], ConstsStopBits[FStopBits], FFlowControl);
+  if FCustomBaudRate < 0 then
+    SetBaudRate(FBaudRate)
+  else
+    ConfigurePort;
 end;
 
 procedure TLazSerial.SetDataBits(db: TDataBits);
 begin
   CheckMainThread('TLazSerial.DataBits');
-  FDataBits:=db;
-  if FTransport.IsOpen then begin
-    FTransport.Configure(AppliedBaudrate, ConstsBits[FDataBits],
-      ConstsParity[FParity], ConstsStopBits[FStopBits], FFlowControl);
-  end;
+  FDataBits := db;
+  ConfigurePort;
 end;
 
 procedure TLazSerial.SetDevice(const ADevice: string);
@@ -660,11 +767,10 @@ end;}
 procedure TLazSerial.SetFlowControl(aFlowControl: TFlowControl);
 begin
   CheckMainThread('TLazSerial.FlowControl');
-  if (FFlowControl = aFlowControl) then exit;
+  if FFlowControl = aFlowControl then
+    Exit;
   FFlowControl := aFlowControl;
-  if FTransport.IsOpen then
-    FTransport.Configure(AppliedBaudrate, ConstsBits[FDataBits],
-      ConstsParity[FParity], ConstsStopBits[FStopBits], FFlowControl);
+  ConfigurePort;
 end;
 
 
@@ -682,11 +788,8 @@ end;
 procedure TLazSerial.SetParity(pr: TParity);
 begin
   CheckMainThread('TLazSerial.Parity');
-  FParity:=pr;
-  if FTransport.IsOpen then begin
-    FTransport.Configure(AppliedBaudrate, ConstsBits[FDataBits],
-      ConstsParity[FParity], ConstsStopBits[FStopBits], FFlowControl);
-  end;
+  FParity := pr;
+  ConfigurePort;
 end;
 
 procedure TLazSerial.SetRcvLineCRLF(AValue: Boolean);
@@ -698,62 +801,74 @@ end;
 procedure TLazSerial.SetStopBits(sb: TStopBits);
 begin
   CheckMainThread('TLazSerial.StopBits');
-  FStopBits:=sb;
-  if FTransport.IsOpen then begin
-    FTransport.Configure(AppliedBaudrate, ConstsBits[FDataBits],
-      ConstsParity[FParity], ConstsStopBits[FStopBits], FFlowControl);
-  end;
+  FStopBits := sb;
+  ConfigurePort;
 end;
 
 function TLazSerial.WriteBuffer(var buf; size: integer): integer;
 begin
   CheckMainThread('TLazSerial.WriteBuffer');
-  if not FTransport.IsOpen then
-    ComException('can not write to a closed port.');
-  result:= FTransport.SendBuffer(Pointer(@buf), size);
+  BeginTransport;
+  try
+    if not FTransport.IsOpen then
+      ComException('can not write to a closed port.');
+    result:= FTransport.SendBuffer(Pointer(@buf), size);
+  finally
+    EndTransport;
+  end;
 end;
 
 function TLazSerial.WriteData(data: string): integer;
 begin
   CheckMainThread('TLazSerial.WriteData');
-  if not FTransport.IsOpen then
-    ComException('can not write to a closed port.');
-  result:=FTransport.SendString(data);
+  BeginTransport;
+  try
+    if not FTransport.IsOpen then
+      ComException('can not write to a closed port.');
+    result:=FTransport.SendString(data);
+  finally
+    EndTransport;
+  end;
 end;
 
 
 function TLazSerial.ModemSignals: TModemSignals;
 begin
   CheckMainThread('TLazSerial.ModemSignals');
-  result:=[];
-  if FTransport.GetCTS then result := result + [ msCTS ];
-  if FTransport.GetCarrier then result := result + [ msCD ];
-  if FTransport.GetRing then result := result + [ msRI ];
-  if FTransport.GetDSR then result := result + [ msDSR ];
+  BeginTransport;
+  try
+    result:=[];
+    if FTransport.GetCTS then result := result + [ msCTS ];
+    if FTransport.GetCarrier then result := result + [ msCD ];
+    if FTransport.GetRing then result := result + [ msRI ];
+    if FTransport.GetDSR then result := result + [ msDSR ];
+  finally
+    EndTransport;
+  end;
 end;
 
 function TLazSerial.GetDSR: boolean;
 begin
   CheckMainThread('TLazSerial.GetDSR');
-  result := FTransport.GetDSR;
+  result := ReadModemSignal(msDSR);
 end;
 
 function TLazSerial.GetCTS: boolean;
 begin
   CheckMainThread('TLazSerial.GetCTS');
-  result := FTransport.GetCTS;
+  result := ReadModemSignal(msCTS);
 end;
 
 function TLazSerial.GetRing: boolean;
 begin
   CheckMainThread('TLazSerial.GetRing');
-  result := FTransport.GetRing;
+  result := ReadModemSignal(msRI);
 end;
 
 function TLazSerial.GetCarrier: boolean;
 begin
   CheckMainThread('TLazSerial.GetCarrier');
-  result := FTransport.GetCarrier;
+  result := ReadModemSignal(msCD);
 end;
 
 {procedure TLazSerial.SetBreak(OnOff: boolean);
@@ -768,14 +883,24 @@ end;  }
 procedure TLazSerial.SetDTR(OnOff: boolean);
 begin
   CheckMainThread('TLazSerial.SetDTR');
-  FTransport.SetDTR(OnOff);
+  BeginTransport;
+  try
+    FTransport.SetDTR(OnOff);
+  finally
+    EndTransport;
+  end;
 end;
 
 
 procedure TLazSerial.SetRTS(OnOff: boolean);
 begin
   CheckMainThread('TLazSerial.SetRTS');
-  FTransport.SetRTS(OnOff);
+  BeginTransport;
+  try
+    FTransport.SetRTS(OnOff);
+  finally
+    EndTransport;
+  end;
 end;
 
 procedure TLazSerial.ComException(str: string);
@@ -792,9 +917,29 @@ end;
 
 procedure TLazSerial.SynSerStatus(Sender: TObject;
   Reason: THookSerialReason; const Value: string);
+var
+  Delivery: TSerialReaderEventDelivery;
+  Session: ISerialReaderSession;
 begin
   if FDestroying then
     Exit;
+  if FTransportDepth > 0 then
+  begin
+    if GetCurrentThreadID = MainThreadID then
+      Session := FStatusSession
+    else
+      Session := FReaderSession;
+    if FPendingStatuses = nil then
+      FPendingStatuses := TList.Create;
+    Delivery := TSerialReaderEventDelivery.CreateStatus(Session, Sender, Reason, Value);
+    try
+      FPendingStatuses.Add(Delivery);
+    except
+      Delivery.Free;
+      raise;
+    end;
+    Exit;
+  end;
   if (ReadThread <> nil) and
     (GetCurrentThreadID = ReadThread.ThreadID) then
   begin
@@ -871,8 +1016,10 @@ procedure TComPortReadThread.Execute;
 begin
   try
     while not Terminated do begin
-      if Owner.CanReadData(100) then
-        QueueReceive;
+      if Owner.CanReadData(10) then
+        QueueReceive
+      else if not Terminated then
+        FSession.WaitForReader(1);
     end;
   finally
     Terminate;

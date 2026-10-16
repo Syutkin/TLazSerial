@@ -52,6 +52,12 @@ begin
     RunSelectorLifetimeHelper(ParamStr(2) = 'owner');
     Halt(0);
   end;
+  if (ParamCount = 2) and (ParamStr(1) = '--synchronization-helper') then
+  begin
+    KeepReleased := True;
+    RunSerialSynchronizationHelper(ParamStr(2));
+    Halt(0);
+  end;
   Runner := TTestRunner.Create(nil);
   Runner.Initialize;
   Runner.Run;

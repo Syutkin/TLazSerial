@@ -14,10 +14,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - Device-refresh callbacks can safely destroy their watcher, selector or owner
   without accessing freed memory or delivering further events.
-- Serial configuration failures now raise an error even when
-  `SynSer.RaiseExcept` is false, allowing failed opens to close the port and
-  leave `Active` false. Errors while reading the current port settings are
-  preserved instead of being masked by an attempt to apply new settings.
+- Serial configuration errors, including failed reads of port settings, are
+  preserved and reported even with `SynSer.RaiseExcept` disabled. Failed opens
+  leave the port closed and `Active` false. Reader activity cannot mask these
+  errors, and status callbacks can safely read data or close the port.
 - `WriteData` now returns the actual buffer-write result instead of the
   requested string length, preserving short writes and failures.
 - In CRLF mode, incomplete buffered lines no longer cause repeated `OnRxData`

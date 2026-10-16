@@ -137,10 +137,26 @@ type
     procedure ReadDataPreservesReadException;
   end;
 
+type
+  TLazSerialSynchronizationTests = class(TTestCase)
+  private
+    procedure CheckOperation(const AOperation: Integer);
+    procedure CheckStatusCallback(const AMode: string);
+  published
+    procedure WriteDoesNotOverlapReader;
+    procedure PacketReadDoesNotOverlapReader;
+    procedure LineReadDoesNotOverlapReader;
+    procedure StatusHandlerCanReadData;
+    procedure StatusHandlerCanClose;
+    procedure DestroyFromWriteStatusCancelsRemainingStatuses;
+  end;
+
+procedure RunSerialSynchronizationHelper(const AMode: string);
+
 implementation
 
 uses
-  SysUtils;
+  SysUtils, SerialCommandRunner;
 
 type
   TScriptedReadSerial = class(TBlockSerial)
@@ -962,7 +978,294 @@ begin
   end;
 end;
 
+type
+  TCoordinatedSerialTransport = class(TFakeSerialTransport)
+  private
+    FSerial: TBlockSerial;
+    FHook: THookSerialStatus;
+    procedure CheckOperation;
+  public
+    BlockNextRead: LongInt;
+    InsideRead: LongInt;
+    EmitReadStatus: LongInt;
+    Faults: Boolean;
+    OverlappedRead: Boolean;
+    ReadStarted, ReleaseRead, OperationEntered: TEvent;
+    constructor Create;
+    destructor Destroy; override;
+    function CanRead(const ATimeout: Integer): Boolean; override;
+    function NativeSerial: TBlockSerial; override;
+    function ReadPacket(const ATimeout: Integer): AnsiString; override;
+    function ReadString(const ATimeout: Integer): AnsiString; override;
+    function SendBuffer(ABuffer: Pointer; ASize: Integer): Integer; override;
+    function SendString(const AData: AnsiString): Integer; override;
+    procedure SetStatusHandler(const AHandler: THookSerialStatus); override;
+  end;
+
+  TReleaseReadThread = class(TThread)
+  public
+    Transport: TCoordinatedSerialTransport;
+    procedure Execute; override;
+  end;
+
+  TSynchronizationStatusProbe = class
+  public
+    Serial: TTestableLazSerial;
+    Mode: string;
+    Calls: Integer;
+    Data: string;
+    procedure Status(Sender: TObject; Reason: THookSerialReason;
+      const Value: string);
+  end;
+
+constructor TCoordinatedSerialTransport.Create;
+begin
+  inherited Create;
+  FSerial := TBlockSerial.Create;
+  ReadStarted := TEvent.Create(nil, True, False, '');
+  ReleaseRead := TEvent.Create(nil, True, False, '');
+  OperationEntered := TEvent.Create(nil, True, False, '');
+end;
+
+destructor TCoordinatedSerialTransport.Destroy;
+begin
+  OperationEntered.Free;
+  ReleaseRead.Free;
+  ReadStarted.Free;
+  FSerial.Free;
+  inherited Destroy;
+end;
+
+function TCoordinatedSerialTransport.CanRead(const ATimeout: Integer): Boolean;
+begin
+  if InterlockedExchange(BlockNextRead, 0) = 1 then
+  begin
+    InterlockedExchange(InsideRead, 1);
+    ReadStarted.SetEvent;
+    if ReleaseRead.WaitFor(1000) <> wrSignaled then
+      raise Exception.Create('Readiness barrier was not released');
+    InterlockedExchange(InsideRead, 0);
+  end;
+  Result := InterlockedExchange(EmitReadStatus, 0) = 1;
+  if Result then
+  begin
+    if Assigned(FHook) then
+      FHook(Self, HR_CanRead, '');
+  end
+  else if ATimeout > 0 then
+    Sleep(ATimeout);
+  FSerial.SetSynaError(0);
+end;
+
+function TCoordinatedSerialTransport.NativeSerial: TBlockSerial;
+begin
+  Result := FSerial;
+end;
+
+procedure TCoordinatedSerialTransport.CheckOperation;
+begin
+  if not Faults then
+    Exit;
+  OverlappedRead := InterlockedCompareExchange(InsideRead, 0, 0) <> 0;
+  OperationEntered.SetEvent;
+  FSerial.RaiseSynaError(ErrWrongParameter);
+end;
+
+function TCoordinatedSerialTransport.ReadPacket(const ATimeout: Integer): AnsiString;
+begin
+  CheckOperation;
+  Result := 'payload';
+end;
+
+function TCoordinatedSerialTransport.ReadString(const ATimeout: Integer): AnsiString;
+begin
+  CheckOperation;
+  Result := 'payload';
+end;
+
+function TCoordinatedSerialTransport.SendBuffer(ABuffer: Pointer;
+  ASize: Integer): Integer;
+begin
+  CheckOperation;
+  if Assigned(FHook) then
+  begin
+    FHook(Self, HR_WriteCount, 'first');
+    FHook(Self, HR_WriteCount, 'second');
+  end;
+  Result := ASize;
+end;
+
+function TCoordinatedSerialTransport.SendString(const AData: AnsiString): Integer;
+begin
+  Result := SendBuffer(Pointer(AData), Length(AData));
+end;
+
+procedure TCoordinatedSerialTransport.SetStatusHandler(
+  const AHandler: THookSerialStatus);
+begin
+  FHook := AHandler;
+end;
+
+procedure TReleaseReadThread.Execute;
+begin
+  // An unprotected operation enters immediately. A serialized operation
+  // remains blocked until the readiness check is released here.
+  Transport.OperationEntered.WaitFor(100);
+  Transport.ReleaseRead.SetEvent;
+end;
+
+procedure TLazSerialSynchronizationTests.CheckOperation(const AOperation: Integer);
+var
+  Serial: TTestableLazSerial;
+  Transport: TCoordinatedSerialTransport;
+  Releaser: TReleaseReadThread;
+  Raised: Boolean;
+begin
+  Serial := TTestableLazSerial.Create(nil);
+  Releaser := nil;
+  Transport := TCoordinatedSerialTransport.Create;
+  Serial.InstallTransport(Transport);
+  try
+    Transport.BlockNextRead := 1;
+    Transport.Faults := True;
+    Transport.NativeSerial.RaiseExcept := True;
+    Serial.RcvLineCRLF := AOperation = 2;
+    Serial.Open;
+    AssertEquals(Ord(wrSignaled), Ord(Transport.ReadStarted.WaitFor(1000)));
+    Releaser := TReleaseReadThread.Create(True);
+    Releaser.Transport := Transport;
+    Releaser.Start;
+    Raised := False;
+    try
+      if AOperation = 0 then
+        Serial.WriteData('payload')
+      else
+        Serial.ReadData;
+    except
+      on E: ESynaSerError do
+      begin
+        Raised := True;
+        AssertEquals(ErrWrongParameter, E.ErrorCode);
+      end;
+    end;
+    AssertTrue('Operation must retain its own error', Raised);
+    AssertFalse('Driver operations must not overlap a readiness check',
+      Transport.OverlappedRead);
+  finally
+    Transport.ReleaseRead.SetEvent;
+    if Releaser <> nil then
+    begin
+      Releaser.WaitFor;
+      Releaser.Free;
+    end;
+    Serial.Free;
+  end;
+end;
+
+procedure TLazSerialSynchronizationTests.WriteDoesNotOverlapReader;
+begin
+  CheckOperation(0);
+end;
+
+procedure TLazSerialSynchronizationTests.PacketReadDoesNotOverlapReader;
+begin
+  CheckOperation(1);
+end;
+
+procedure TLazSerialSynchronizationTests.LineReadDoesNotOverlapReader;
+begin
+  CheckOperation(2);
+end;
+
+procedure TSynchronizationStatusProbe.Status(Sender: TObject;
+  Reason: THookSerialReason; const Value: string);
+var
+  ToFree: TTestableLazSerial;
+begin
+  if not (Reason in [HR_CanRead, HR_WriteCount]) then
+    Exit;
+  Inc(Calls);
+  if Mode = 'read' then
+    Data := Serial.ReadData
+  else if Mode = 'close' then
+    Serial.Close
+  else
+  begin
+    ToFree := Serial;
+    Serial := nil;
+    ToFree.Free;
+  end;
+end;
+
+procedure RunSerialSynchronizationHelper(const AMode: string);
+var
+  Probe: TSynchronizationStatusProbe;
+  Transport: TCoordinatedSerialTransport;
+  Deadline: QWord;
+begin
+  Probe := TSynchronizationStatusProbe.Create;
+  try
+    Probe.Mode := AMode;
+    Probe.Serial := TTestableLazSerial.Create(nil);
+    Transport := TCoordinatedSerialTransport.Create;
+    Probe.Serial.InstallTransport(Transport);
+    Probe.Serial.OnStatus := @Probe.Status;
+    Probe.Serial.Open;
+    if AMode = 'destroy' then
+    begin
+      Probe.Serial.WriteData('payload');
+      TAssert.AssertNull(Probe.Serial);
+    end
+    else
+    begin
+      InterlockedExchange(Transport.EmitReadStatus, 1);
+      Deadline := GetTickCount64 + 1000;
+      repeat
+        CheckSynchronize(1);
+      until (Probe.Calls > 0) or (GetTickCount64 >= Deadline);
+      if AMode = 'read' then
+        TAssert.AssertEquals('payload', Probe.Data)
+      else
+        TAssert.AssertFalse(Probe.Serial.Active);
+    end;
+    TAssert.AssertEquals('No callbacks after destruction', 1, Probe.Calls);
+    WriteLn('synchronization helper completed');
+  finally
+    Probe.Serial.Free;
+    Probe.Free;
+  end;
+end;
+
+procedure TLazSerialSynchronizationTests.CheckStatusCallback(const AMode: string);
+var
+  Output: string;
+  Success: Boolean;
+begin
+  Success := RunSerialCommand(ExpandFileName(ParamStr(0)),
+    ['--synchronization-helper', AMode], 5000, Output);
+  AssertTrue('Status callback helper failed: ' + Output, Success);
+  AssertTrue(Pos('synchronization helper completed', Output) > 0);
+  AssertEquals('HeapTrc detected access to freed memory: ' + Output,
+    0, Pos('marked memory', LowerCase(Output)));
+end;
+
+procedure TLazSerialSynchronizationTests.StatusHandlerCanReadData;
+begin
+  CheckStatusCallback('read');
+end;
+
+procedure TLazSerialSynchronizationTests.StatusHandlerCanClose;
+begin
+  CheckStatusCallback('close');
+end;
+
+procedure TLazSerialSynchronizationTests.DestroyFromWriteStatusCancelsRemainingStatuses;
+begin
+  CheckStatusCallback('destroy');
+end;
+
 initialization
+  RegisterTest(TLazSerialSynchronizationTests);
   RegisterTest(TLazSerialPacketTests);
   RegisterTest(TLazSerialTransportTests);
   RegisterTest(TLazSerialSendTests);

@@ -43,6 +43,7 @@ type
     {$IFDEF LINUX}
     procedure UnsupportedCustomSpeedIsRejectedOnOpen;
     procedure UnsupportedLiveSpeedPreservesActualSpeed;
+    procedure RejectedSpeedPreservesSettingsAndAllowsValidSpeeds;
     procedure DisconnectedPtyCloseReleasesHandleWithExceptions;
     procedure DisconnectedPtyCloseReleasesHandleWithoutExceptions;
     procedure NativeCloseCleansUpAfterEachFailure;
@@ -383,6 +384,64 @@ begin
     AssertTrue('Unsupported live speed must raise', Raised);
   finally
     Serial.Free;
+    fpClose(Slave);
+    fpClose(Master);
+  end;
+end;
+
+procedure TLazSerialLifecycleTests.RejectedSpeedPreservesSettingsAndAllowsValidSpeeds;
+const
+  Speeds: array[0..2] of Integer = (0, 9600, 115200);
+  NativeSpeeds: array[0..2] of Cardinal = (B0, B9600, B115200);
+var
+  Master, Slave: cint;
+  Name: array[0..255] of Char;
+  BeforeSettings, AfterSettings: Termios;
+  Transport: TLazSynapseSerialTransport;
+  RaiseNative: Boolean;
+  I, ErrorCode: Integer;
+begin
+  AssertEquals(0, OpenPty(@Master, @Slave, @Name[0], nil, nil));
+  try
+    for RaiseNative := False to True do
+    begin
+      Transport := TLazSynapseSerialTransport.Create;
+      try
+        Transport.Connect(StrPas(Name));
+        Transport.NativeSerial.RaiseExcept := RaiseNative;
+        for I := Low(Speeds) to High(Speeds) do
+        begin
+          Transport.Configure(Speeds[I], 8, 'N', SB1, fcNone);
+          BeforeSettings := Default(Termios);
+          AssertEquals(0, TCGetAttr(Slave, BeforeSettings));
+          AssertTrue('Valid speed must still be applied, including explicit B0',
+            (BeforeSettings.c_cflag and CBAUD) = NativeSpeeds[I]);
+        end;
+        ErrorCode := 0;
+        try
+          Transport.Configure(250123, 7, 'E', SB2, fcRTS_CTS);
+        except
+          on E: ESynaSerError do
+            ErrorCode := E.ErrorCode;
+        end;
+        AssertEquals(ErrWrongParameter, ErrorCode);
+        AssertEquals(ErrWrongParameter, Transport.NativeSerial.LastError);
+        AssertEquals(RaiseNative, Transport.NativeSerial.RaiseExcept);
+        AfterSettings := Default(Termios);
+        AssertEquals(0, TCGetAttr(Slave, AfterSettings));
+        AssertTrue('Rejected speed must preserve all driver settings',
+          CompareMem(@BeforeSettings, @AfterSettings, SizeOf(Termios)));
+        Transport.Configure(9600, 8, 'N', SB1, fcNone);
+        AssertEquals(0, Transport.NativeSerial.LastError);
+        AssertEquals(0, TCGetAttr(Slave, AfterSettings));
+        AssertTrue('A valid configuration must work after rejection',
+          (AfterSettings.c_cflag and CBAUD) = B9600);
+      finally
+        Transport.NativeSerial.RaiseExcept := False;
+        Transport.Free;
+      end;
+    end;
+  finally
     fpClose(Slave);
     fpClose(Master);
   end;

@@ -1649,6 +1649,16 @@ var
   n: integer;
   x: cardinal;
 begin
+  n := 0;
+  while (n <= MaxRates) and (Rates[n, 0] <> dcb.BaudRate) do
+    Inc(n);
+  if n > MaxRates then
+  begin
+    RaiseSynaError(ErrWrongParameter);
+    Exit;
+  end;
+  x := Rates[n, 1];
+  SetSynaError(sOK);
   //others
   cfmakeraw(term);
   term.c_cflag := term.c_cflag or CREAD;
@@ -1697,13 +1707,6 @@ begin
   else
     term.c_cflag := term.c_cflag and (not CSTOPB);
   //set baudrate;
-  x := 0;
-  for n := 0 to Maxrates do
-    if rates[n, 0] = dcb.BaudRate then
-    begin
-      x := rates[n, 1];
-      break;
-    end;
   cfsetospeed(term, x);
   cfsetispeed(term, x);
 end;
@@ -1770,6 +1773,8 @@ end;
 procedure TBlockSerial.SetCommState;
 begin
   DcbToTermios(dcb, termiosstruc);
+  if FLastError <> sOK then
+    Exit;
   SerialCheck(tcsetattr(FHandle, TCSANOW, termiosstruc));
   ExceptCheck;
 end;

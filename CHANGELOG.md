@@ -14,10 +14,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - Device-refresh callbacks can safely destroy their watcher, selector or owner
   without accessing freed memory or delivering further events.
-- Serial configuration errors, including failed reads of port settings, are
-  preserved and reported even with `SynSer.RaiseExcept` disabled. Failed opens
-  leave the port closed and `Active` false. Reader activity cannot mask these
-  errors, and status callbacks can safely read data or close the port.
+- Serial configuration errors, including failed reads of port settings and
+  unsupported Unix baud rates, are preserved and reported even with
+  `SynSer.RaiseExcept` disabled. Failed opens leave the port closed and `Active`
+  false; rejected speeds preserve port settings. Reader activity and failed
+  open cleanup cannot mask these errors, and status callbacks can safely read
+  data or close the port.
 - Closing a port bounds output draining by `SynSer.DeadlockTimeout`, releases
   its handle and resets `Active` even after I/O errors, preserving the first
   error. Destruction completes cleanup without propagating serial-close errors.

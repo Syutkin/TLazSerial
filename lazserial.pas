@@ -657,7 +657,12 @@ begin
   except
     FReaderSession := nil;
     FreeAndNil(ReadThread);
-    FTransport.Close;
+    try
+      FTransport.Close;
+    except
+      // Cleanup must not replace the error that prevented opening the port.
+      on E: ESynaSerError do ;
+    end;
     raise;
   end;
 end;

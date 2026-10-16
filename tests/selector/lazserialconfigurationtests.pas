@@ -18,6 +18,7 @@ type
     procedure ApplyFailurePreservesNativeExceptions;
     procedure ReadStateFailureDoesNotApplyConfiguration;
     procedure OpenFailureClosesPortAndCanRetry;
+    procedure OpenFailurePreservesErrorWhenCleanupAlsoFails;
     procedure LiveParameterFailuresAreReported;
     procedure ReaderCannotEraseConfigurationError;
     procedure FailedBaudRateKeepsPreviousValue;
@@ -59,6 +60,47 @@ type
     function CanRead(const ATimeout: Integer): Boolean; override;
     function TestSerial: TConfigurationTestSerial;
   end;
+
+  TFailingCleanupTransport = class(TConfigurationTestTransport)
+  public
+    procedure Close; override;
+  end;
+
+procedure TFailingCleanupTransport.Close;
+begin
+  inherited Close;
+  NativeSerial.RaiseSynaError(ErrNoDeviceAnswer);
+end;
+
+procedure TLazSerialConfigurationTests.OpenFailurePreservesErrorWhenCleanupAlsoFails;
+var
+  Serial: TTestableLazSerial;
+  Transport: TFailingCleanupTransport;
+  ErrorCode: Integer;
+begin
+  Serial := TTestableLazSerial.Create(nil);
+  try
+    Transport := TFailingCleanupTransport.Create;
+    Serial.InstallTransport(Transport);
+    Transport.TestSerial.ApplyError := ErrWrongParameter;
+    Transport.NativeSerial.RaiseExcept := True;
+    ErrorCode := 0;
+    try
+      Serial.Open;
+    except
+      on E: ESynaSerError do
+        ErrorCode := E.ErrorCode;
+    end;
+    AssertEquals('Cleanup must preserve the original configuration error',
+      ErrWrongParameter, ErrorCode);
+    AssertFalse(Serial.Active);
+    AssertFalse(Transport.IsOpen);
+    AssertEquals(1, Transport.CloseCount);
+    AssertTrue(Transport.NativeSerial.RaiseExcept);
+  finally
+    Serial.Free;
+  end;
+end;
 
 procedure TConfigurationTestSerial.GetCommState;
 begin

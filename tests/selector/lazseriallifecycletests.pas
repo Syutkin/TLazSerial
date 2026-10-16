@@ -47,6 +47,7 @@ type
     procedure DisconnectedPtyCloseReleasesHandleWithoutExceptions;
     procedure NativeCloseCleansUpAfterEachFailure;
     procedure DestroyDisconnectedSerialReleasesOwnedComponents;
+    procedure PtyClosePreservesTransmittedBytes;
     procedure ReportedZeroSpeedMatchesPtySettings;
     procedure Reported9600SpeedMatchesPtySettings;
     procedure Reported38400SpeedMatchesPtySettings;
@@ -269,6 +270,54 @@ begin
   State := Default(TDCB);
   TermiosToDcb(ASettings, State);
   Result := State.BaudRate;
+end;
+
+procedure TLazSerialLifecycleTests.PtyClosePreservesTransmittedBytes;
+const
+  Payload: AnsiString = 'last packet'#0#13#10;
+var
+  Master, Slave, Pending: cint;
+  Name: array[0..255] of Char;
+  Buffer: array[0..63] of Char;
+  Serial: TLazSerial;
+  Received, Chunk: AnsiString;
+  Started: QWord;
+  Count: Int64;
+begin
+  AssertEquals(0, OpenPty(@Master, @Slave, @Name[0], nil, nil));
+  Serial := TLazSerial.Create(nil);
+  try
+    AssertTrue(fpFcntl(Master, F_SETFL, O_NONBLOCK) >= 0);
+    Serial.Device := StrPas(Name);
+    Serial.SynSer.DeadlockTimeout := 100;
+    Serial.Open;
+    AssertEquals(Length(Payload), Serial.WriteData(Payload));
+    AssertEquals(0, fpIoctl(Serial.SynSer.Handle, TIOCOUTQ, @Pending));
+    AssertEquals('SendingData must agree with the OS queue query',
+      Pending, Serial.SynSer.SendingData);
+    AssertEquals(0, Serial.SynSer.LastError);
+    Serial.Close;
+    AssertFalse(Serial.Active);
+    Started := GetTickCount64;
+    Received := '';
+    repeat
+      Count := fpRead(Master, Buffer[0], SizeOf(Buffer));
+      if Count > 0 then
+      begin
+        SetString(Chunk, PChar(@Buffer[0]), Count);
+        Received := Received + Chunk;
+      end
+      else
+        Sleep(1);
+    until (Length(Received) >= Length(Payload)) or
+      (GetTickCount64 - Started >= 1000);
+    AssertEquals('Closing must preserve bytes already transmitted',
+      Payload, Received);
+  finally
+    Serial.Free;
+    fpClose(Slave);
+    fpClose(Master);
+  end;
 end;
 
 procedure TLazSerialLifecycleTests.UnsupportedCustomSpeedIsRejectedOnOpen;

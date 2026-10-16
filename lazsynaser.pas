@@ -1615,8 +1615,15 @@ end;
 {$IFNDEF MSWINDOWS}
 function TBlockSerial.SendingData: integer;
 begin
-  SetSynaError(sOK);
   Result := 0;
+  {$IFNDEF FPC}
+  SerialCheck(ioctl(FHandle, TIOCOUTQ, @Result));
+  {$ELSE}
+  SerialCheck(fpIoctl(FHandle, TIOCOUTQ, @Result));
+  {$ENDIF}
+  if FLastError <> sOK then
+    Result := 0;
+  ExceptCheck;
 end;
 {$ELSE}
 function TBlockSerial.SendingData: integer;
@@ -1624,11 +1631,15 @@ var
   stat: TComStat;
   err: DWORD;
 begin
-  SetSynaError(sOK);
-  if not ClearCommError(FHandle, err, @stat) then
-    serialcheck(sErr);
+  Result := 0;
+  if ClearCommError(FHandle, err, @stat) then
+  begin
+    SetSynaError(sOK);
+    Result := stat.cbOutQue;
+  end
+  else
+    SerialCheck(sErr);
   ExceptCheck;
-  result := stat.cbOutQue;
 end;
 {$ENDIF}
 

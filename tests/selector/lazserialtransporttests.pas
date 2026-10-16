@@ -137,6 +137,15 @@ type
     procedure ReadDataPreservesReadException;
   end;
 
+  TLazSerialCloseTests = class(TTestCase)
+  published
+    procedure CloseWaitsUntilQueueDrains;
+    procedure CloseTimeoutPurgesAndDeactivates;
+    procedure NonPositiveCloseTimeoutDoesNotWait;
+    procedure QueueErrorSurvivesCleanup;
+    procedure SendingDataReportsInvalidHandle;
+  end;
+
 type
   TLazSerialSynchronizationTests = class(TTestCase)
   private
@@ -159,6 +168,28 @@ uses
   SysUtils, SerialCommandRunner;
 
 type
+  TDrainTestSerial = class(TBlockSerial)
+  public
+    PendingBytes, DrainAfterChecks, QueueChecks: Integer;
+    QueueError, CleanupError, CloseCount, FlushCount: Integer;
+    PendingAtClose: Integer;
+    procedure OpenForTest;
+    function SendingData: Integer; override;
+    procedure Flush; override;
+    procedure CloseSocket; override;
+  end;
+
+  TDrainTestTransport = class(TLazSynapseSerialTransport)
+  protected
+    function CreateSerial: TBlockSerial; override;
+  public
+    procedure Connect(const ADevice: string); override;
+    procedure Configure(ABaudRate, ADataBits: Integer; AParity: Char;
+      AStopBits: Integer; AFlowControl: TFlowControl); override;
+    function CanRead(const ATimeout: Integer): Boolean; override;
+    function IsOpen: Boolean; override;
+  end;
+
   TScriptedReadSerial = class(TBlockSerial)
   protected
     function PreTestFailing: Boolean; override;
@@ -201,6 +232,232 @@ type
     function IsOpen: Boolean; override;
     function SendBuffer(ABuffer: Pointer; ASize: Integer): Integer; override;
   end;
+
+procedure TDrainTestSerial.OpenForTest;
+begin
+  FInstanceActive := True;
+end;
+
+function TDrainTestSerial.SendingData: Integer;
+begin
+  Inc(QueueChecks);
+  if (DrainAfterChecks > 0) and (QueueChecks >= DrainAfterChecks) then
+    PendingBytes := 0;
+  RaiseSynaError(QueueError);
+  Result := PendingBytes;
+end;
+
+procedure TDrainTestSerial.Flush;
+begin
+  // A real blocking Flush could hang the test runner on the old implementation.
+  Inc(FlushCount);
+  SetSynaError(0);
+end;
+
+procedure TDrainTestSerial.CloseSocket;
+begin
+  if not FInstanceActive then
+    Exit;
+  Inc(CloseCount);
+  PendingAtClose := PendingBytes;
+  PendingBytes := 0;
+  FInstanceActive := False;
+  RaiseSynaError(CleanupError);
+end;
+
+function TDrainTestTransport.CreateSerial: TBlockSerial;
+begin
+  Result := TDrainTestSerial.Create;
+end;
+
+procedure TDrainTestTransport.Connect(const ADevice: string);
+begin
+  TDrainTestSerial(NativeSerial).OpenForTest;
+end;
+
+procedure TDrainTestTransport.Configure(ABaudRate, ADataBits: Integer;
+  AParity: Char; AStopBits: Integer; AFlowControl: TFlowControl);
+begin
+end;
+
+function TDrainTestTransport.CanRead(const ATimeout: Integer): Boolean;
+begin
+  if ATimeout > 0 then
+    Sleep(ATimeout);
+  Result := False;
+end;
+
+function TDrainTestTransport.IsOpen: Boolean;
+begin
+  Result := NativeSerial.InstanceActive;
+end;
+
+procedure TLazSerialCloseTests.CloseWaitsUntilQueueDrains;
+var
+  Transport: TDrainTestTransport;
+  Driver: TDrainTestSerial;
+begin
+  Transport := TDrainTestTransport.Create;
+  try
+    Transport.Connect('test');
+    Driver := TDrainTestSerial(Transport.NativeSerial);
+    Driver.PendingBytes := 10;
+    Driver.DrainAfterChecks := 3;
+    Driver.DeadlockTimeout := 1000;
+    Transport.Close;
+    AssertEquals('Close must wait for pending output', 3, Driver.QueueChecks);
+    AssertEquals('A drained queue must not lose pending data', 0,
+      Driver.PendingAtClose);
+    AssertEquals('Close must not call the unbounded Flush', 0, Driver.FlushCount);
+    AssertEquals(0, Driver.LastError);
+    AssertEquals(1, Driver.CloseCount);
+    Transport.Close;
+    AssertEquals(1, Driver.CloseCount);
+  finally
+    Transport.Free;
+  end;
+end;
+
+procedure TLazSerialCloseTests.CloseTimeoutPurgesAndDeactivates;
+var
+  Serial: TTestableLazSerial;
+  Transport: TDrainTestTransport;
+  Driver: TDrainTestSerial;
+  Started, Elapsed: QWord;
+  ErrorCode: Integer;
+  RaiseNative: Boolean;
+begin
+  for RaiseNative := False to True do
+  begin
+    Serial := TTestableLazSerial.Create(nil);
+    try
+      Transport := TDrainTestTransport.Create;
+      Serial.InstallTransport(Transport);
+      Driver := TDrainTestSerial(Transport.NativeSerial);
+      Driver.DeadlockTimeout := 20;
+      Driver.PendingBytes := 10;
+      Driver.CleanupError := ErrWrongParameter;
+      Driver.RaiseExcept := RaiseNative;
+      Serial.Open;
+      Started := GetTickCount64;
+      ErrorCode := 0;
+      try
+        Serial.Close;
+      except
+        on E: ESynaSerError do
+          ErrorCode := E.ErrorCode;
+      end;
+      Elapsed := GetTickCount64 - Started;
+      AssertTrue('Allow transmission until the deadline', Elapsed >= 20);
+      AssertTrue('Stopped transmission must not block Close', Elapsed < 1000);
+      AssertFalse(Serial.Active);
+      AssertFalse(Transport.IsOpen);
+      AssertEquals(10, Driver.PendingAtClose);
+      AssertEquals('Unsent bytes must be purged', 0, Driver.PendingBytes);
+      AssertEquals(ErrTimeout, Driver.LastError);
+      AssertEquals(RaiseNative, Driver.RaiseExcept);
+      if RaiseNative then
+        AssertEquals(ErrTimeout, ErrorCode)
+      else
+        AssertEquals(0, ErrorCode);
+      AssertEquals(0, Driver.FlushCount);
+      Serial.Close;
+      AssertEquals(1, Driver.CloseCount);
+    finally
+      Serial.Free;
+    end;
+  end;
+end;
+
+procedure TLazSerialCloseTests.NonPositiveCloseTimeoutDoesNotWait;
+var
+  Transport: TDrainTestTransport;
+  Driver: TDrainTestSerial;
+  Timeout: Integer;
+begin
+  for Timeout := -1 to 0 do
+  begin
+    Transport := TDrainTestTransport.Create;
+    try
+      Transport.Connect('test');
+      Driver := TDrainTestSerial(Transport.NativeSerial);
+      Driver.DeadlockTimeout := Timeout;
+      Driver.PendingBytes := 10;
+      Transport.Close;
+      AssertEquals(1, Driver.QueueChecks);
+      AssertEquals(ErrTimeout, Driver.LastError);
+      AssertEquals(1, Driver.CloseCount);
+      AssertEquals(0, Driver.FlushCount);
+    finally
+      Transport.Free;
+    end;
+  end;
+end;
+
+procedure TLazSerialCloseTests.QueueErrorSurvivesCleanup;
+var
+  Transport: TDrainTestTransport;
+  Driver: TDrainTestSerial;
+  RaiseNative: Boolean;
+  ErrorCode: Integer;
+begin
+  for RaiseNative := False to True do
+  begin
+    Transport := TDrainTestTransport.Create;
+    try
+      Transport.Connect('test');
+      Driver := TDrainTestSerial(Transport.NativeSerial);
+      Driver.QueueError := ErrNoDeviceAnswer;
+      Driver.CleanupError := ErrWrongParameter;
+      Driver.RaiseExcept := RaiseNative;
+      ErrorCode := 0;
+      try
+        Transport.Close;
+      except
+        on E: ESynaSerError do
+          ErrorCode := E.ErrorCode;
+      end;
+      AssertEquals(ErrNoDeviceAnswer, Driver.LastError);
+      if RaiseNative then
+        AssertEquals(ErrNoDeviceAnswer, ErrorCode)
+      else
+        AssertEquals(0, ErrorCode);
+      AssertEquals(1, Driver.CloseCount);
+      AssertFalse(Transport.IsOpen);
+    finally
+      Transport.Free;
+    end;
+  end;
+end;
+
+procedure TLazSerialCloseTests.SendingDataReportsInvalidHandle;
+var
+  Driver: TBlockSerial;
+  RaiseNative: Boolean;
+  ErrorCode: Integer;
+begin
+  for RaiseNative := False to True do
+  begin
+    Driver := TBlockSerial.Create;
+    try
+      Driver.RaiseExcept := RaiseNative;
+      ErrorCode := 0;
+      try
+        AssertEquals(0, Driver.SendingData);
+      except
+        on E: ESynaSerError do
+          ErrorCode := E.ErrorCode;
+      end;
+      AssertTrue('A failed queue query must report an error', Driver.LastError <> 0);
+      if RaiseNative then
+        AssertEquals(Driver.LastError, ErrorCode)
+      else
+        AssertEquals(0, ErrorCode);
+    finally
+      Driver.Free;
+    end;
+  end;
+end;
 
 function TScriptedReadSerial.PreTestFailing: Boolean;
 begin
@@ -1265,6 +1522,7 @@ begin
 end;
 
 initialization
+  RegisterTest(TLazSerialCloseTests);
   RegisterTest(TLazSerialSynchronizationTests);
   RegisterTest(TLazSerialPacketTests);
   RegisterTest(TLazSerialTransportTests);

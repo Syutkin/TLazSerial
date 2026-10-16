@@ -69,6 +69,9 @@ type
 
 implementation
 
+uses
+  SysUtils;
+
 function TLazSerialTransport.CanReadLine(const ATimeout: Integer): Boolean;
 begin
   Result := CanRead(ATimeout);
@@ -95,8 +98,9 @@ end;
 
 procedure TLazSynapseSerialTransport.Close;
 var
-  ErrorCode: Integer;
+  ErrorCode, PendingBytes, Timeout: Integer;
   RaiseNative: Boolean;
+  Started: QWord;
 begin
   if not IsOpen then
     Exit;
@@ -105,9 +109,22 @@ begin
   ErrorCode := 0;
   try
     try
-      FSerial.Flush;
-      ErrorCode := FSerial.LastError;
+      Timeout := FSerial.DeadlockTimeout;
+      Started := GetTickCount64;
+      repeat
+        PendingBytes := FSerial.SendingData;
+        ErrorCode := FSerial.LastError;
+        if (ErrorCode <> 0) or (PendingBytes = 0) then
+          Break;
+        if (Timeout <= 0) or (GetTickCount64 - Started >= QWord(Timeout)) then
+        begin
+          ErrorCode := ErrTimeout;
+          Break;
+        end;
+        Sleep(1);
+      until False;
     finally
+      // CloseSocket purges any output still queued after the deadline.
       FSerial.CloseSocket;
     end;
   finally

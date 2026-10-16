@@ -218,6 +218,8 @@ type
     destructor Destroy; override;
 
     procedure Open;
+    // Wait up to SynSer.DeadlockTimeout for queued output, then purge and close.
+    // A nonpositive timeout skips waiting; unfinished output reports ErrTimeout.
     procedure Close;
     // show a port settings dialog form
     procedure ShowSetupDialog;

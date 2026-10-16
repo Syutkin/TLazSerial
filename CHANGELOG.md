@@ -25,10 +25,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   error. Destruction completes cleanup without propagating serial-close errors.
 - `WriteData` now returns the actual buffer-write result instead of the
   requested string length, preserving short writes and failures.
-- In CRLF mode, incomplete buffered lines no longer cause repeated `OnRxData`
-  callbacks or keep `DataAvailable` true without new bytes.
-- Non-blocking line reads now append available bytes to an incomplete line
-  when `SynSer.InterPacketTimeout` is false.
+- CRLF reads preserve incomplete lines across timeouts and read exceptions.
+  Incomplete buffers do not cause repeated `OnRxData` callbacks or keep
+  `DataAvailable` true without new bytes; non-blocking reads also append
+  available bytes when `SynSer.InterPacketTimeout` is false.
 
 ## [0.8.1] - 2026-09-29
 

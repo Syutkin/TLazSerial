@@ -28,6 +28,7 @@ type
     procedure WriteReportsFailedWait;
     procedure ReadWaitsForIncompleteResult;
     procedure WriteWaitsForIncompleteResult;
+    procedure ReadErrorPreservesPartialLine;
   end;
 {$ENDIF}
 
@@ -54,6 +55,93 @@ type
     WasRead: Boolean;
     FinishCount: Integer;
   end;
+
+  TReadErrorLineSerial = class(TScriptedWindowsSerial)
+  protected
+    function StartOverlappedIO(ARead: Boolean; ABuffer: Pointer;
+      ALength: DWord; var ATransferred: DWord;
+      AOverlapped: POverlapped): Boolean; override;
+    function ClearOverlappedIOError(var AError: DWord): Boolean; override;
+  public
+    Incoming: AnsiString;
+    FailRead: Boolean;
+    function WaitingData: Integer; override;
+    function CanRead(Timeout: Integer): Boolean; override;
+  end;
+
+function TReadErrorLineSerial.StartOverlappedIO(ARead: Boolean;
+  ABuffer: Pointer; ALength: DWord; var ATransferred: DWord;
+  AOverlapped: POverlapped): Boolean;
+begin
+  ATransferred := Length(Incoming);
+  if ATransferred > ALength then
+    ATransferred := ALength;
+  if ATransferred > 0 then
+    Move(Incoming[1], ABuffer^, ATransferred);
+  Delete(Incoming, 1, ATransferred);
+  Result := True;
+end;
+
+function TReadErrorLineSerial.ClearOverlappedIOError(var AError: DWord): Boolean;
+begin
+  AError := 0;
+  if FailRead then
+  begin
+    AError := CE_FRAME;
+    FailRead := False;
+  end;
+  Result := True;
+end;
+
+function TReadErrorLineSerial.WaitingData: Integer;
+begin
+  Result := Length(Incoming);
+end;
+
+function TReadErrorLineSerial.CanRead(Timeout: Integer): Boolean;
+begin
+  Result := WaitingData > 0;
+  SetSynaError(0);
+end;
+
+procedure TLazSerialWindowsIoTests.ReadErrorPreservesPartialLine;
+var
+  Serial: TReadErrorLineSerial;
+  RaiseNative, Raised: Boolean;
+begin
+  for RaiseNative := False to True do
+  begin
+    Serial := TReadErrorLineSerial.Create;
+    try
+      Serial.RaiseExcept := RaiseNative;
+      Serial.LineBuffer := 'prefix-';
+      Serial.Incoming := 'abc' + #13;
+      Serial.FailRead := True;
+      Raised := False;
+      try
+        Serial.RecvString(0);
+      except
+        on E: ESynaSerError do
+        begin
+          Raised := True;
+          AssertEquals(ErrFrame, E.ErrorCode);
+        end;
+      end;
+      AssertEquals(RaiseNative, Raised);
+      AssertEquals(ErrFrame, Serial.LastError);
+      AssertEquals('Preserve old and newly read bytes before raising',
+        'prefix-abc' + #13, Serial.LineBuffer);
+      AssertEquals(RaiseNative, Serial.RaiseExcept);
+      Serial.Incoming := #10 + 'next' + #13#10;
+      AssertEquals('prefix-abc', Serial.RecvString(0));
+      AssertEquals('next', Serial.RecvString(0));
+      AssertEquals(0, Serial.LastError);
+      AssertEquals('', Serial.LineBuffer);
+    finally
+      Serial.Free;
+    end;
+  end;
+end;
 
 function TScriptedWindowsSerial.PreTestFailing: Boolean;
 begin

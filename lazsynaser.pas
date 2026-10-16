@@ -301,6 +301,8 @@ type
 
   {:@abstract(Main class implementing all communication routines)}
   TBlockSerial = class(TPersistent)
+  private
+    FLastReadCount: Integer;
   protected
     FOnStatus: THookSerialStatus;
     Fhandle: THandle;
@@ -1286,6 +1288,9 @@ begin
   if err <> 0 then
     DecodeCommError(err);
 {$ENDIF}
+  FLastReadCount := Result;
+  if FLastReadCount < 0 then
+    FLastReadCount := 0;
   ExceptCheck;
   DoStatus(HR_ReadCount, IntToStr(Result));
 end;
@@ -1350,6 +1355,23 @@ end;
 function TBlockSerial.RecvPacket(Timeout: Integer): AnsiString;
 var
   x: integer;
+
+  procedure ReadAvailable;
+  begin
+    SetLength(Result, x);
+    FLastReadCount := 0;
+    try
+      x := RecvBuffer(Pointer(Result), x);
+    except
+      // RecvBuffer may have received bytes before reporting an I/O error.
+      SetLength(Result, FLastReadCount);
+      FBuffer := Result + FBuffer;
+      raise;
+    end;
+    if x >= 0 then
+      SetLength(Result, x);
+  end;
+
 begin
   Result := '';
   if PreTestFailing then   {HGJ}
@@ -1366,12 +1388,7 @@ begin
     Sleep(0);
     x := WaitingData;
     if x > 0 then
-    begin
-      SetLength(Result, x);
-      x := RecvBuffer(Pointer(Result), x);
-      if x >= 0 then
-        SetLength(Result, x);
-    end
+      ReadAvailable
     else
     begin
       if CanRead(Timeout) then
@@ -1380,18 +1397,18 @@ begin
         if x = 0 then
           SetSynaError(ErrTimeout);
         if x > 0 then
-        begin
-          SetLength(Result, x);
-          x := RecvBuffer(Pointer(Result), x);
-          if x >= 0 then
-            SetLength(Result, x);
-        end;
+          ReadAvailable;
       end
       else
         SetSynaError(ErrTimeout);
     end;
   end;
-  ExceptCheck;
+  try
+    ExceptCheck;
+  except
+    FBuffer := Result + FBuffer;
+    raise;
+  end;
 end;
 
 
@@ -1435,7 +1452,12 @@ begin
   repeat
     ti := GetTick;
     //get rest of FBuffer or incomming new data...
-    s := s + RecvPacket(Timeout);
+    try
+      s := s + RecvPacket(Timeout);
+    except
+      FBuffer := s + FBuffer;
+      raise;
+    end;
     if FLastError <> sOK then
       Break;
     x := 0;

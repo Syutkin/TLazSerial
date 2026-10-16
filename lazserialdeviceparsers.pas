@@ -433,15 +433,25 @@ end;
 
 function MacOSTokenMatches(const AToken, AValue: string): Boolean;
 var
+  MatchEnd: Integer;
+  Position: Integer;
   Token: string;
   Value: string;
 begin
+  Result := False;
   Token := LowerCase(Trim(AToken));
   Value := LowerCase(Trim(AValue));
-  Result := (Token <> '') and (Value <> '') and
-    ((Token = Value) or
-    ((Length(Value) >= 4) and (Pos(Value, Token) > 0)) or
-    ((Length(Token) >= 4) and (Pos(Token, Value) > 0)));
+  if Length(Value) < 4 then
+    Exit;
+  Position := Pos(Value, Token);
+  while Position > 0 do
+  begin
+    MatchEnd := Position + Length(Value);
+    if ((Position = 1) or (Token[Position - 1] in ['-', '_', '.'])) and
+      ((MatchEnd > Length(Token)) or (Token[MatchEnd] in ['-', '_', '.'])) then
+      Exit(True);
+    Position := PosEx(Value, Token, Position + 1);
+  end;
 end;
 
 function ParseMacOSSystemProfilerDevice(
@@ -449,8 +459,12 @@ function ParseMacOSSystemProfilerDevice(
 ): TSerialDeviceInfo;
 var
   DeviceToken: string;
+  DeviceLocation: string;
   I: Integer;
   LocationToken: string;
+  MatchIndex: Integer;
+  MatchKind: Integer;
+  Matches: Boolean;
   Sections: TMacOSProfilerSections;
 begin
   Result := Default(TSerialDeviceInfo);
@@ -458,15 +472,32 @@ begin
   DeviceToken := MacOSDeviceToken(Result.Device);
   if DeviceToken = '' then
     Exit;
+  DeviceLocation := NormalizeMacOSLocationId(DeviceToken);
 
   Sections := ParseMacOSProfilerSections(ASnapshot);
-  for I := Low(Sections) to High(Sections) do
+  // Exact serial, exact location, then bounded identifiers in composite names.
+  for MatchKind := 0 to 2 do
   begin
-    LocationToken := NormalizeMacOSLocationId(Sections[I].LocationId);
-    if not MacOSTokenMatches(DeviceToken, Sections[I].SerialNumber) and
-      not MacOSTokenMatches(DeviceToken, LocationToken) then
+    MatchIndex := -1;
+    for I := Low(Sections) to High(Sections) do
+    begin
+      LocationToken := NormalizeMacOSLocationId(Sections[I].LocationId);
+      case MatchKind of
+        0: Matches := SameText(DeviceToken, Trim(Sections[I].SerialNumber));
+        1: Matches := (DeviceLocation <> '') and (DeviceLocation = LocationToken);
+        2: Matches := MacOSTokenMatches(DeviceToken, Sections[I].SerialNumber) or
+          MacOSTokenMatches(DeviceToken, LocationToken);
+      end;
+      if not Matches then
+        Continue;
+      if MatchIndex >= 0 then
+        Exit; // Ambiguous at this priority: leave all metadata empty.
+      MatchIndex := I;
+    end;
+    if MatchIndex < 0 then
       Continue;
 
+    I := MatchIndex;
     Result.Vendor := Trim(Sections[I].Manufacturer);
     if Result.Vendor = '' then
       Result.Vendor := Trim(Sections[I].VendorDescription);

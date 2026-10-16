@@ -17,6 +17,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   times without false disconnections. Device-refresh callbacks can safely
   destroy their watcher, selector or owner without accessing freed memory
   or delivering further events.
+- macOS device metadata prefers exact serial and location matches, rejects
+  ambiguous matches and respects identifier boundaries in composite port names.
 - Serial configuration errors, including failed reads of port settings and
   unsupported Unix baud rates, are preserved and reported even with
   `SynSer.RaiseExcept` disabled. Failed opens leave the port closed and `Active`

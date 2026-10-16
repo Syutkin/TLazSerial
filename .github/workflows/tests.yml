@@ -135,8 +135,8 @@ jobs:
             tests/deviceinfo/serialdeviceinfotests.lpi \
             2>&1 | tee ci-artifacts/build-deviceinfo-tests.log
           lazbuild --lazarusdir="$LAZARUS_DIR" --build-all --ws=gtk2 \
-            tests/selector/serialselectortests.lpi \
-            2>&1 | tee ci-artifacts/build-selector-tests.log
+            tests/lazserialtests.lpi \
+            2>&1 | tee ci-artifacts/build-lazserial-tests.log
           lazbuild --lazarusdir="$LAZARUS_DIR" --build-all --ws=gtk2 \
             examples/serial-selector/serialselectorexample.lpi \
             2>&1 | tee ci-artifacts/build-serial-selector-example.log
@@ -154,10 +154,10 @@ jobs:
             --file=ci-artifacts/deviceinfo-results.xml \
             2>&1 | tee ci-artifacts/run-deviceinfo-tests.log
           xvfb-run --auto-servernum \
-            tests/selector/.test_build/serialselectortests \
+            tests/.test_build/lazserialtests \
             --all --format=xml \
-            --file=ci-artifacts/selector-results.xml \
-            2>&1 | tee ci-artifacts/run-selector-tests.log
+            --file=ci-artifacts/lazserial-results.xml \
+            2>&1 | tee ci-artifacts/run-lazserial-tests.log
 
       - name: Validate test reports
         if: always()
@@ -188,7 +188,7 @@ jobs:
           }
 
           validate_report ci-artifacts/deviceinfo-results.xml deviceinfo
-          validate_report ci-artifacts/selector-results.xml selector
+          validate_report ci-artifacts/lazserial-results.xml lazserial
 
       - name: Upload test reports
         if: always()
@@ -207,7 +207,7 @@ jobs:
           path: |
             ci-artifacts/
             tests/deviceinfo/.test_build/
-            tests/selector/.test_build/
+            tests/.test_build/
           if-no-files-found: warn
           retention-days: 14
 
@@ -330,8 +330,8 @@ jobs:
             'LazSerialPort.lpk'
           Invoke-LazBuild 'ci-artifacts/build-deviceinfo-tests.log' `
             'tests/deviceinfo/serialdeviceinfotests.lpi'
-          Invoke-LazBuild 'ci-artifacts/build-selector-tests.log' `
-            'tests/selector/serialselectortests.lpi'
+          Invoke-LazBuild 'ci-artifacts/build-lazserial-tests.log' `
+            'tests/lazserialtests.lpi'
           Invoke-LazBuild 'ci-artifacts/build-serial-selector-example.log' `
             'examples/serial-selector/serialselectorexample.lpi'
           Invoke-LazBuild 'ci-artifacts/build-serial-gps-example.log' `
@@ -350,12 +350,12 @@ jobs:
             throw "Device-info tests failed: exit code $LASTEXITCODE"
           }
 
-          & .\tests\selector\.test_build\serialselectortests.exe `
+          & .\tests\.test_build\lazserialtests.exe `
             --all --format=xml `
-            --file=ci-artifacts/selector-results.xml *>&1 |
-            Tee-Object -FilePath ci-artifacts/run-selector-tests.log
+            --file=ci-artifacts/lazserial-results.xml *>&1 |
+            Tee-Object -FilePath ci-artifacts/run-lazserial-tests.log
           if ($LASTEXITCODE -ne 0) {
-            throw "Selector tests failed: exit code $LASTEXITCODE"
+            throw "LazSerial tests failed: exit code $LASTEXITCODE"
           }
 
       - name: Validate test reports
@@ -392,7 +392,7 @@ jobs:
           }
 
           Test-FpcUnitReport 'ci-artifacts/deviceinfo-results.xml' 'deviceinfo'
-          Test-FpcUnitReport 'ci-artifacts/selector-results.xml' 'selector'
+          Test-FpcUnitReport 'ci-artifacts/lazserial-results.xml' 'lazserial'
 
       - name: Upload test reports
         if: always()
@@ -411,7 +411,7 @@ jobs:
           path: |
             ci-artifacts/
             tests/deviceinfo/.test_build/
-            tests/selector/.test_build/
+            tests/.test_build/
           if-no-files-found: warn
           retention-days: 14
 
@@ -563,8 +563,8 @@ jobs:
             2>&1 | tee ci-artifacts/build-deviceinfo-tests.log
           lazbuild --lazarusdir="$LAZARUS_DIR" --build-all --ws=cocoa \
             --opt=-k-ld_classic \
-            tests/selector/serialselectortests.lpi \
-            2>&1 | tee ci-artifacts/build-selector-tests.log
+            tests/lazserialtests.lpi \
+            2>&1 | tee ci-artifacts/build-lazserial-tests.log
           lazbuild --lazarusdir="$LAZARUS_DIR" --build-all --ws=cocoa \
             --opt=-k-ld_classic \
             examples/serial-selector/serialselectorexample.lpi \
@@ -583,10 +583,10 @@ jobs:
             --all --format=xml \
             --file=ci-artifacts/deviceinfo-results.xml \
             2>&1 | tee ci-artifacts/run-deviceinfo-tests.log
-          tests/selector/.test_build/serialselectortests \
+          tests/.test_build/lazserialtests \
             --all --format=xml \
-            --file=ci-artifacts/selector-results.xml \
-            2>&1 | tee ci-artifacts/run-selector-tests.log
+            --file=ci-artifacts/lazserial-results.xml \
+            2>&1 | tee ci-artifacts/run-lazserial-tests.log
 
       - name: Validate test reports
         if: always()
@@ -617,7 +617,7 @@ jobs:
           }
 
           validate_report ci-artifacts/deviceinfo-results.xml deviceinfo
-          validate_report ci-artifacts/selector-results.xml selector
+          validate_report ci-artifacts/lazserial-results.xml lazserial
 
       - name: Upload test reports
         if: always()
@@ -636,6 +636,6 @@ jobs:
           path: |
             ci-artifacts/
             tests/deviceinfo/.test_build/
-            tests/selector/.test_build/
+            tests/.test_build/
           if-no-files-found: warn
           retention-days: 14

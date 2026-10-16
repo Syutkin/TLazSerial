@@ -19,13 +19,13 @@
         <PackageName Value="LazUtils"/>
       </Item2>
     </RequiredPackages>
-    <Units Count="4">
+    <Units Count="7">
       <Unit0>
         <Filename Value="serialdeviceinfotests.lpr"/>
         <IsPartOfProject Value="True"/>
       </Unit0>
       <Unit1>
-        <Filename Value="serialcommandrunnertests.pas"/>
+        <Filename Value="../infrastructure/serialcommandrunnertests.pas"/>
         <IsPartOfProject Value="True"/>
         <UnitName Value="SerialCommandRunnerTests"/>
       </Unit1>
@@ -39,6 +39,21 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="SerialPlatformCollectorSmokeTests"/>
       </Unit3>
+      <Unit4>
+        <Filename Value="serialdeviceformattests.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="SerialDeviceFormatTests"/>
+      </Unit4>
+      <Unit5>
+        <Filename Value="serialdeviceparsertests.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="SerialDeviceParserTests"/>
+      </Unit5>
+      <Unit6>
+        <Filename Value="serialdevicecollectortests.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="SerialDeviceCollectorTests"/>
+      </Unit6>
     </Units>
   </ProjectOptions>
   <CompilerOptions>
@@ -48,7 +63,7 @@
       <Filename Value=".test_build/serialdeviceinfotests"/>
     </Target>
     <SearchPaths>
-      <OtherUnitFiles Value="../..;."/>
+      <OtherUnitFiles Value="../..;.;../infrastructure"/>
       <UnitOutputDirectory Value=".test_build/lib/$(TargetCPU)-$(TargetOS)"/>
     </SearchPaths>
     <Parsing>

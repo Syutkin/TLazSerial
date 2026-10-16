@@ -5,7 +5,7 @@
     <PathDelim Value="/"/>
     <General>
       <SessionStorage Value="InProjectDir"/>
-      <Title Value="SerialSelectorTests"/>
+      <Title Value="LazSerialTests"/>
       <ResourceType Value="res"/>
     </General>
     <BuildModes Count="1">
@@ -27,86 +27,86 @@
     </RequiredPackages>
     <Units Count="17">
       <Unit0>
-        <Filename Value="serialselectortests.lpr"/>
+        <Filename Value="lazserialtests.lpr"/>
         <IsPartOfProject Value="True"/>
       </Unit0>
       <Unit1>
-        <Filename Value="serialselectorcomponenttests.pas"/>
+        <Filename Value="selector/serialselectorcomponenttests.pas"/>
         <IsPartOfProject Value="True"/>
         <UnitName Value="SerialSelectorComponentTests"/>
       </Unit1>
       <Unit2>
-        <Filename Value="serialwatchercomponenttests.pas"/>
+        <Filename Value="watcher/serialwatchercomponenttests.pas"/>
         <IsPartOfProject Value="True"/>
         <UnitName Value="SerialWatcherComponentTests"/>
       </Unit2>
       <Unit3>
-        <Filename Value="lazseriallifecycletests.pas"/>
+        <Filename Value="serial/lazseriallifecycletests.pas"/>
         <IsPartOfProject Value="True"/>
         <UnitName Value="LazSerialLifecycleTests"/>
       </Unit3>
       <Unit4>
-        <Filename Value="lazserialthreadcontracttests.pas"/>
+        <Filename Value="serial/lazserialthreadcontracttests.pas"/>
         <IsPartOfProject Value="True"/>
         <UnitName Value="LazSerialThreadContractTests"/>
       </Unit4>
       <Unit5>
-        <Filename Value="seriallinuxchangesourcetests.pas"/>
+        <Filename Value="watcher/seriallinuxchangesourcetests.pas"/>
         <IsPartOfProject Value="True"/>
         <UnitName Value="SerialLinuxChangeSourceTests"/>
       </Unit5>
       <Unit6>
-        <Filename Value="serialwindowschangesourcetests.pas"/>
+        <Filename Value="watcher/serialwindowschangesourcetests.pas"/>
         <IsPartOfProject Value="True"/>
         <UnitName Value="SerialWindowsChangeSourceTests"/>
       </Unit6>
       <Unit7>
-        <Filename Value="serialmacchangesourcetests.pas"/>
+        <Filename Value="watcher/serialmacchangesourcetests.pas"/>
         <IsPartOfProject Value="True"/>
         <UnitName Value="SerialMacChangeSourceTests"/>
       </Unit7>
       <Unit8>
-        <Filename Value="lazserialsetuptests.pas"/>
+        <Filename Value="serial/lazserialsetuptests.pas"/>
         <IsPartOfProject Value="True"/>
         <UnitName Value="LazSerialSetupTests"/>
       </Unit8>
       <Unit9>
-        <Filename Value="serialinfrastructuretests.pas"/>
+        <Filename Value="infrastructure/serialinfrastructuretests.pas"/>
         <IsPartOfProject Value="True"/>
         <UnitName Value="SerialInfrastructureTests"/>
       </Unit9>
       <Unit10>
-        <Filename Value="lazserialtransporttests.pas"/>
+        <Filename Value="serial/lazserialtransporttests.pas"/>
         <IsPartOfProject Value="True"/>
         <UnitName Value="LazSerialTransportTests"/>
       </Unit10>
       <Unit11>
-        <Filename Value="lazserialiolifecycletests.pas"/>
+        <Filename Value="serial/lazserialiolifecycletests.pas"/>
         <IsPartOfProject Value="True"/>
         <UnitName Value="LazSerialIoLifecycleTests"/>
       </Unit11>
       <Unit12>
-        <Filename Value="serialplatformchangesourcesmoketests.pas"/>
+        <Filename Value="watcher/serialplatformchangesourcesmoketests.pas"/>
         <IsPartOfProject Value="True"/>
         <UnitName Value="SerialPlatformChangeSourceSmokeTests"/>
       </Unit12>
       <Unit13>
-        <Filename Value="lazseriallinetests.pas"/>
+        <Filename Value="serial/lazseriallinetests.pas"/>
         <IsPartOfProject Value="True"/>
         <UnitName Value="LazSerialLineTests"/>
       </Unit13>
       <Unit14>
-        <Filename Value="lazserialconfigurationtests.pas"/>
+        <Filename Value="serial/lazserialconfigurationtests.pas"/>
         <IsPartOfProject Value="True"/>
         <UnitName Value="LazSerialConfigurationTests"/>
       </Unit14>
       <Unit15>
-        <Filename Value="lazsynautiltimetests.pas"/>
+        <Filename Value="infrastructure/lazsynautiltimetests.pas"/>
         <IsPartOfProject Value="True"/>
         <UnitName Value="LazSynaUtilTimeTests"/>
       </Unit15>
       <Unit16>
-        <Filename Value="lazserialwindowsiotests.pas"/>
+        <Filename Value="serial/lazserialwindowsiotests.pas"/>
         <IsPartOfProject Value="True"/>
         <UnitName Value="LazSerialWindowsIoTests"/>
       </Unit16>
@@ -116,10 +116,10 @@
     <Version Value="11"/>
     <PathDelim Value="/"/>
     <Target>
-      <Filename Value=".test_build/serialselectortests"/>
+      <Filename Value=".test_build/lazserialtests"/>
     </Target>
     <SearchPaths>
-      <OtherUnitFiles Value="../..;."/>
+      <OtherUnitFiles Value="..;serial;selector;watcher;infrastructure"/>
       <UnitOutputDirectory Value=".test_build/lib/$(TargetCPU)-$(TargetOS)"/>
     </SearchPaths>
     <Parsing>

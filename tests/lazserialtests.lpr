@@ -1,4 +1,4 @@
-program SerialSelectorTests;
+program LazSerialTests;
 
 {$mode ObjFPC}{$H+}
 

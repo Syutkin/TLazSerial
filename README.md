@@ -172,18 +172,28 @@ sudo rfcomm bind 0 xx:xx:xx:xx:xx:xx 1
   options, connect/disconnect, hotplug handling and serial data exchange. The
   accompanying `serialselectorexample.ino` sketch can be flashed to an Arduino
   or compatible board for a hardware test;
-- `tests/deviceinfo/` covers formatters, parsers and platform collectors;
-- `tests/selector/` covers selector and watcher behavior.
+- `tests/serial/` covers serial I/O, configuration, lifecycle and setup;
+- `tests/selector/` covers selector behavior;
+- `tests/watcher/` covers device watching and platform change sources;
+- `tests/infrastructure/` covers refresh delivery, scheduling, command execution
+  and timing utilities;
+- `tests/deviceinfo/` covers formatters, parsers and platform collectors,
+  with parser fixtures in `tests/deviceinfo/fixtures/`.
 
 A screenshot of the original GPS example is available
 [here](https://user-images.githubusercontent.com/9909302/160068324-3467fac2-90e4-4625-9bfb-9cc0ef058bad.PNG).
 
-The test projects are built with Lazarus:
+The main suite combines the serial, selector, watcher and infrastructure tests.
+Device-info and command-runner tests use a separate console project. Build both
+with Lazarus:
 
 ```text
 lazbuild --ws=qt6 tests/deviceinfo/serialdeviceinfotests.lpi
-lazbuild --ws=qt6 tests/selector/serialselectortests.lpi
+lazbuild --ws=qt6 tests/lazserialtests.lpi
 ```
+
+Run the suites with `tests/.test_build/lazserialtests --all` and
+`tests/deviceinfo/.test_build/serialdeviceinfotests --all` (add `.exe` on Windows).
 
 ## History and license
 

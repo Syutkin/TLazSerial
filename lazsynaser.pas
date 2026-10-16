@@ -1369,7 +1369,9 @@ var
       raise;
     end;
     if x >= 0 then
-      SetLength(Result, x);
+      SetLength(Result, x)
+    else
+      Result := '';
   end;
 
 begin

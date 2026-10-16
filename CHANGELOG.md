@@ -25,6 +25,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   error. Destruction completes cleanup without propagating serial-close errors.
 - `WriteData` now returns the actual buffer-write result instead of the
   requested string length, preserving short writes and failures.
+- Packet reads return only received bytes, returning an empty string on a
+  negative read result while preserving the error.
 - CRLF reads preserve incomplete lines across timeouts and read exceptions.
   Incomplete buffers do not cause repeated `OnRxData` callbacks or keep
   `DataAvailable` true without new bytes; non-blocking reads also append

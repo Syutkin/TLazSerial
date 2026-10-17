@@ -14,6 +14,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   main thread and nonblocking cleanup when closing during a write.
 - Add opt-in buffered reads with bounded storage, memory-only result access
   and background cancellation and cleanup shared with asynchronous writes.
+- Add console examples for synchronous I/O and buffered reads with
+  asynchronous writes.
 
 ### Changed
 

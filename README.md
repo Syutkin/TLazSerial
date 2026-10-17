@@ -341,6 +341,11 @@ sudo rfcomm bind 0 xx:xx:xx:xx:xx:xx 1
 
 ## Examples and tests
 
+- `examples/console/legacy.lpr` shows console I/O with `ReadData` and
+  synchronous `WriteData`; `buffered.lpr` uses `BufferedRead`, `TryReadData`
+  and `WriteDataAsync`. Both list ports for selection, accept a manually
+  entered device or an optional port argument, and use 115200 8N1 without
+  flow control. Enter sends the typed line with CRLF; `/quit` exits;
 - `examples/serial-gps/` contains a serial-port receiver, the setup-dialog
   example and a GPS simulator. The simulator sends NMEA GGA, GLL and RMC
   frames; speed and heading can be changed while it is running. Received data
@@ -359,6 +364,22 @@ sudo rfcomm bind 0 xx:xx:xx:xx:xx:xx 1
 
 A screenshot of the original GPS example is available
 [here](https://user-images.githubusercontent.com/9909302/160068324-3467fac2-90e4-4625-9bfb-9cc0ef058bad.PNG).
+
+Build and run the console examples from a terminal:
+
+```sh
+lazbuild --ws=qt6 examples/console/legacy.lpi
+lazbuild --ws=qt6 examples/console/buffered.lpi
+examples/console/.example_build/legacy
+examples/console/.example_build/buffered
+```
+
+Append a port such as `/dev/ttyUSB0` or `COM3` to skip selection. The examples
+create no windows but depend on LCL; on a headless Linux host, set
+`QT_QPA_PLATFORM=offscreen`. If the Qt6 linker requires it, add
+`--opt=-k-lQt6DBus` to the build commands. Incoming bytes may arrive in several
+chunks or combine several writes. The main loop pumps `CheckSynchronize`
+while polling the keyboard so callbacks also run while a line is being typed.
 
 All tests use one LCL test runner, including the serial, selector, watcher,
 infrastructure and device-info tests. Build it with Lazarus:

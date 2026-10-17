@@ -58,4 +58,5 @@ Temporary Items
 /examples/serial-selector/backup/
 /examples/serial-selector/link*.res
 /examples/serial-selector/ppas.sh
+/examples/**/.example_build/
 /tests/**/.test_build/

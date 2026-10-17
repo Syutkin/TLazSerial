@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CONFIG>
+  <ProjectOptions>
+    <Version Value="12"/>
+    <PathDelim Value="/"/>
+    <General>
+      <SessionStorage Value="InProjectDir"/>
+      <Title Value="LegacySerialConsole"/>
+      <ResourceType Value="res"/>
+    </General>
+    <BuildModes Count="1">
+      <Item1 Name="default" Default="True"/>
+    </BuildModes>
+    <RequiredPackages Count="2">
+      <Item1><PackageName Value="LCL"/></Item1>
+      <Item2><PackageName Value="LazSerialPort"/></Item2>
+    </RequiredPackages>
+    <Units Count="2">
+      <Unit0><Filename Value="legacy.lpr"/><IsPartOfProject Value="True"/></Unit0>
+      <Unit1><Filename Value="consolecommon.pas"/><IsPartOfProject Value="True"/><UnitName Value="ConsoleCommon"/></Unit1>
+    </Units>
+  </ProjectOptions>
+  <CompilerOptions>
+    <Version Value="11"/>
+    <PathDelim Value="/"/>
+    <Target><Filename Value=".example_build/legacy"/></Target>
+    <SearchPaths>
+      <UnitOutputDirectory Value=".example_build/legacy-units/$(TargetCPU)-$(TargetOS)"/>
+    </SearchPaths>
+    <Linking><Options><Win32><GraphicApplication Value="False"/></Win32></Options></Linking>
+  </CompilerOptions>
+</CONFIG>

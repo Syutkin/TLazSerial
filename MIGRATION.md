@@ -69,61 +69,9 @@ internal detail.
 
 `TLazSerial.ShowSetupDialog` no longer accepts legacy enumeration options.
 
-## Opting in to asynchronous writes (unreleased)
+## `TBlockSerial` descendants (unreleased)
 
-Existing synchronous write signatures remain unchanged. To use asynchronous
-writes, call `WriteDataAsync(Data, TimeoutMs)` from the main thread and handle
-`OnWriteCompleted`. The return value is an operation identifier; the result
-event carries the actual byte count and error. `OnError` retains its reader
-error contract.
-
-There is one pending write per component. During that operation, synchronous
-writes, configuration changes and direct `SynSer` access are rejected.
-`CancelWrite` requests cancellation without waiting for completion. Closing
-during a write starts background cleanup; wait for `WritePending = False`
-before reopening. See [Asynchronous writes](README.md#asynchronous-writes)
-for the complete lifecycle and result contract.
-
-## Opting in to buffered reads (unreleased)
-
-No change is needed for the existing receive mode. Set `BufferedRead := True`
-before `Open` to opt in, and set the positive `ReadBufferLimit` while closed
-(default: 65536 bytes). Configure `SynSer.MaxLineLength`, `ConvertLineEnd` and
-other low-level settings before opening; direct `SynSer` access and live port
-configuration are rejected while the buffered receiver is active.
-
-Use `TryReadData(out Data)` to distinguish a completed empty line (`True`)
-from no ready result (`False`). `ReadData` and `DataAvailable` remain available
-and operate only on memory in this mode. `TryReadData` is not supported in the
-default receive mode. A line exceeding `MaxLineLength` raises `ESynaSerError`
-with `ErrMaxBuffer` regardless of `RaiseExcept`; handle it in `OnRxData` to
-continue receiving subsequent lines. Exhausting the general receive limit
-instead closes the session and reports `ErrReadBufferOverflow` through
-`OnError`.
-
-Buffered `Close` starts background cancellation and purges queued input/output.
-Reopen only after both `ClosePending` and `WritePending` become false. An
-`OnError` handler may run while `ClosePending` is still true; reopening from
-that handler must respect the cleanup state. Synchronous writes retain their
-blocking contract; asynchronous writes can run alongside reception.
-
-Custom transport descendants remain source-compatible. Override
-`CreateReadOperation` to support the new mode; its default implementation
-raises `EInvalidOperation` rather than silently using synchronous reads.
-See [Buffered reads](README.md#buffered-reads) for the complete contract.
-
-## Synaser receive storage (unreleased)
-
-`TBlockSerial.LineBuffer` remains a readable and writable `AnsiString` property.
-Receive storage now lives in `TSerialRingBuffer` from `SerialRingBuffer`; the
-existing synchronous read methods and line parser retain their contracts.
-
-For descendants, protected `FBuffer` is now a string property backed by that
-same ring buffer. Reading and assigning it remain supported. Code that passes
-`FBuffer` as a `var`/`out` argument, takes its address or edits its characters in
-place must use a local string and assign the result back. There is no separate
-persistent string buffer.
-
-`TSerialRingBuffer` stores binary bytes, supports optional capacity limits and
-does not perform I/O or synchronize access between threads. Extracting storage
-does not itself make serial reads nonblocking.
+Protected `FBuffer` is now a string property rather than a field. Descendants
+that pass it as a `var`/`out` argument, take its address or edit its characters
+in place must use a local string and assign the result back to `FBuffer`.
+Ordinary reads and assignments require no changes.

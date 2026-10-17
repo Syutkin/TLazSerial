@@ -50,7 +50,9 @@ type
     Label6: TLabel;
     procedure FormCreate(Sender: TObject);
   private
-    { Private declarations }
+    FInitialBaudRate: TBaudRate;
+    FCustomBaudRateIndex: Integer;
+    procedure LoadCustomBaudRate(const AValue: Integer);
   public
     procedure LoadSettings(const ASettings: TComPortSettings);
     function ReadSettings: TComPortSettings;
@@ -78,6 +80,9 @@ implementation
 uses lazsynaser;
 
 {$R *.lfm}
+
+resourcestring
+  SCustomBaudRate = '%d (custom)';
 
 const
   StopBitsStrings: array[TStopBits] of string = ('1', '1.5', '2');
@@ -188,6 +193,7 @@ begin
   SetupForm := TComSetupFrm.Create(nil);
   try
     SetupForm.LoadSettings(ReadComPortSettings(ComPort));
+    SetupForm.LoadCustomBaudRate(ComPort.CustomBaudRate);
     ApplyComPortSetupResult(ComPort, SetupForm, SetupForm.ShowModal);
   finally
     SetupForm.Free;
@@ -213,6 +219,10 @@ begin
     Exit;
   Settings := SetupForm.ReadSettings;
   ComPort.Close;
+  if (Settings.BaudRate <> ComPort.BaudRate) or
+    ((SetupForm.FCustomBaudRateIndex >= 0) and
+     (SetupForm.ComComboBox2.ItemIndex <> SetupForm.FCustomBaudRateIndex)) then
+    ComPort.CustomBaudRate := -1;
   ComPort.Device := Settings.Device;
   ComPort.BaudRate := Settings.BaudRate;
   ComPort.DataBits := Settings.DataBits;
@@ -228,6 +238,7 @@ procedure TComSetupFrm.FormCreate(Sender: TObject);
 var
   Rate: TBaudRate;
 begin
+  FCustomBaudRateIndex := -1;
   SerialSelector1.ShowHint := true;
   ComComboBox2.Items.Clear;
   ComComboBox3.Items.Clear;
@@ -242,8 +253,19 @@ begin
   StringArrayToList(ComComboBox6.Items,FlowControlStrings) ;
 end;
 
+procedure TComSetupFrm.LoadCustomBaudRate(const AValue: Integer);
+begin
+  if AValue < 0 then Exit;
+  FCustomBaudRateIndex := ComComboBox2.Items.Add(Format(SCustomBaudRate, [AValue]));
+  ComComboBox2.ItemIndex := FCustomBaudRateIndex;
+end;
+
 procedure TComSetupFrm.LoadSettings(const ASettings: TComPortSettings);
 begin
+  if FCustomBaudRateIndex >= 0 then
+    ComComboBox2.Items.Delete(FCustomBaudRateIndex);
+  FCustomBaudRateIndex := -1;
+  FInitialBaudRate := ASettings.BaudRate;
   SerialSelector1.Device := ASettings.Device;
   ComComboBox2.Text := BaudRateToStr(ASettings.BaudRate);
   ComComboBox3.Text := DataBitsToStr(ASettings.DataBits);
@@ -255,7 +277,11 @@ end;
 function TComSetupFrm.ReadSettings: TComPortSettings;
 begin
   Result.Device := SerialSelector1.Device;
-  Result.BaudRate := StrToBaudRate(ComComboBox2.Text);
+  if (FCustomBaudRateIndex >= 0) and
+    (ComComboBox2.ItemIndex = FCustomBaudRateIndex) then
+    Result.BaudRate := FInitialBaudRate
+  else
+    Result.BaudRate := StrToBaudRate(ComComboBox2.Text);
   Result.DataBits := StrToDataBits(ComComboBox3.Text);
   Result.StopBits := StrToStopBits(ComComboBox4.Text);
   Result.Parity := StrToParity(ComComboBox5.Text);

@@ -13,6 +13,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- The setup dialog shows the active custom baud rate, preserves it on unchanged
+  confirmation, and disables the override when a preset is selected.
 - Manual device refresh requests received during enumeration are coalesced
   into one subsequent refresh, without recursive reloads from callbacks.
 - Hotplug tracks the actually opened port and supported aliases, without

@@ -5,7 +5,8 @@ unit LazSerialWrite;
 interface
 
 uses
-  Classes, SysUtils, SyncObjs, LazSerialCommon, LazSynaSer;
+  Classes, SysUtils, SyncObjs, LazSerialCommon, LazSynaSer
+  {$IFDEF MSWINDOWS}, Windows{$ELSE}, BaseUnix{$ENDIF};
 
 type
   TSerialWriteFinished = procedure(const AResult: TSerialWriteResult) of object;
@@ -27,9 +28,17 @@ type
   TSerialWritePort = class(TInterfacedObject, ISerialWritePort, ISerialPortLifecycle)
   private
     FSerial: TBlockSerial;
-    FLock: TCriticalSection;
+    FLock: SyncObjs.TCriticalSection;
     FReaders, FWriters: Integer;
+    FReadSettings: Boolean;
+    {$IFDEF MSWINDOWS}
+    FPreviousTimeouts: TCommTimeouts;
+    {$ELSE}
+    FPreviousFlags: Integer;
+    {$ENDIF}
     FCloseRequested, FClosing, FClosed: Boolean;
+    procedure ConfigureReader;
+    procedure RestoreReader;
     procedure StartClose;
     procedure RunClose;
   public
@@ -52,7 +61,7 @@ type
 
   TSerialWriteOperation = class(TInterfacedObject, ISerialWriteOperation)
   private
-    FLock: TCriticalSection;
+    FLock: SyncObjs.TCriticalSection;
     FCancelEvent: TEvent;
     FStopReason: LongInt;
     FPort: ISerialWritePort;
@@ -122,7 +131,7 @@ type
 constructor TSerialWritePort.Create(ASerial: TBlockSerial);
 begin
   inherited Create;
-  FLock := TCriticalSection.Create;
+  FLock := SyncObjs.TCriticalSection.Create;
   FSerial := ASerial;
 end;
 
@@ -151,6 +160,55 @@ begin
   FOwner.RunClose;
 end;
 
+procedure TSerialWritePort.ConfigureReader;
+{$IFDEF MSWINDOWS}
+var Timeouts: TCommTimeouts;
+{$ELSE}
+var Error: Integer;
+{$ENDIF}
+begin
+  if FReadSettings or (FSerial.Handle = INVALID_HANDLE_VALUE) then Exit;
+  {$IFDEF MSWINDOWS}
+  if not Windows.GetCommTimeouts(FSerial.Handle, FPreviousTimeouts) then
+    RaiseLastOSError;
+  Timeouts := FPreviousTimeouts;
+  Timeouts.ReadIntervalTimeout := MAXDWORD;
+  Timeouts.ReadTotalTimeoutMultiplier := 0;
+  Timeouts.ReadTotalTimeoutConstant := 10;
+  if not Windows.SetCommTimeouts(FSerial.Handle, Timeouts) then RaiseLastOSError;
+  {$ELSE}
+  FPreviousFlags := fpFcntl(FSerial.Handle, F_GETFL);
+  if (FPreviousFlags < 0) or
+    (fpFcntl(FSerial.Handle, F_SETFL, FPreviousFlags or O_NONBLOCK) < 0) then
+  begin
+    Error := fpGetErrno;
+    raise EOSError.CreateFmt('Cannot configure native reader: %d', [Error]);
+  end;
+  {$ENDIF}
+  FReadSettings := True;
+end;
+
+procedure TSerialWritePort.RestoreReader;
+{$IFDEF MSWINDOWS}
+var Timeouts: TCommTimeouts;
+{$ENDIF}
+begin
+  if not FReadSettings then Exit;
+  {$IFDEF MSWINDOWS}
+  // All operation leases have ended, so no writer can race this merge.
+  if Windows.GetCommTimeouts(FSerial.Handle, Timeouts) then
+  begin
+    Timeouts.ReadIntervalTimeout := FPreviousTimeouts.ReadIntervalTimeout;
+    Timeouts.ReadTotalTimeoutMultiplier := FPreviousTimeouts.ReadTotalTimeoutMultiplier;
+    Timeouts.ReadTotalTimeoutConstant := FPreviousTimeouts.ReadTotalTimeoutConstant;
+    Windows.SetCommTimeouts(FSerial.Handle, Timeouts);
+  end;
+  {$ELSE}
+  fpFcntl(FSerial.Handle, F_SETFL, FPreviousFlags);
+  {$ENDIF}
+  FReadSettings := False;
+end;
+
 procedure TSerialWritePort.AcquireIO(ARead: Boolean);
 begin
   FLock.Acquire;
@@ -163,7 +221,13 @@ begin
     end;
     if FCloseRequested then
       raise EInvalidOperation.Create('Serial port is closing');
-    if ARead then Inc(FReaders) else Inc(FWriters);
+    if ARead then
+    begin
+      if FReaders <> 0 then raise EInvalidOperation.Create('A reader already owns the port');
+      ConfigureReader;
+      Inc(FReaders);
+    end
+    else Inc(FWriters);
   finally
     FLock.Release;
   end;
@@ -201,6 +265,7 @@ begin
       if FWriters = 0 then raise EInvalidOperation.Create('Unbalanced write lease');
       Dec(FWriters);
     end;
+    if (FReaders = 0) and (FWriters = 0) then RestoreReader;
     StartClose;
   finally
     FLock.Release;
@@ -278,7 +343,7 @@ begin
   inherited Create;
   if ATimeoutMs = 0 then
     raise EArgumentException.Create('Write timeout must be greater than zero');
-  FLock := TCriticalSection.Create;
+  FLock := SyncObjs.TCriticalSection.Create;
   FCancelEvent := TEvent.Create(nil, True, False, '');
   FPort := APort;
   Supports(FPort, ISerialPortLifecycle, FLifecycle);

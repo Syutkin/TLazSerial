@@ -56,6 +56,8 @@ type
   public
     constructor Create;
     destructor Destroy; override;
+    function CreateReadOperation(const ABufferLimit: Integer;
+      const AOnChanged: TSerialReadChanged): ISerialReadOperation; override;
     function CreateWriteOperation(const AData: AnsiString; const AId: QWord;
       const ATimeoutMs: Cardinal; const AOnFinished: TSerialWriteFinished):
       ISerialWriteOperation; override;
@@ -85,7 +87,7 @@ type
 implementation
 
 uses
-  Classes, SysUtils, LazSerialNativeWrite;
+  Classes, SysUtils, LazSerialNativeWrite, LazSerialNativeRead;
 
 function TLazSerialTransport.CanReadLine(const ATimeout: Integer): Boolean;
 begin
@@ -122,6 +124,12 @@ end;
 function TLazSynapseSerialTransport.CreateSerial: TBlockSerial;
 begin
   Result := TBlockSerial.Create;
+end;
+
+function TLazSynapseSerialTransport.CreateReadOperation(const ABufferLimit: Integer;
+  const AOnChanged: TSerialReadChanged): ISerialReadOperation;
+begin
+  Result := TNativeSerialReadOperation.Create(FSerialOwner, ABufferLimit, AOnChanged);
 end;
 
 destructor TLazSynapseSerialTransport.Destroy;

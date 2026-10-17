@@ -13,6 +13,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Stream sends complete partial writes, including length headers, and stop
+  without losing the original error when output fails or makes no progress.
 - Unix buffered reads retry interrupted system calls without reporting a
   terminal error or losing received bytes.
 - Line-ending conversion resets on purge and when opening a new connection.

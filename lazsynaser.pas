@@ -310,6 +310,7 @@ type
     FDiscardPrefix: AnsiString;
     function GetLineBuffer: AnsiString;
     procedure SetLineBuffer(const AValue: AnsiString);
+    function SendBufferFully(Buffer: Pointer; Count: Integer): Boolean;
 {$IFDEF MSWINDOWS}
     function TransferBuffer(ARead: Boolean; ABuffer: Pointer;
       ALength: Integer): Integer;
@@ -1454,29 +1455,42 @@ begin
   SendString(Data);
 end;
 
+function TBlockSerial.SendBufferFully(Buffer: Pointer; Count: Integer): Boolean;
+var
+  Offset, Written: Integer;
+begin
+  Result := False;
+  Offset := 0;
+  while Offset < Count do
+  begin
+    Written := SendBuffer(PAnsiChar(Buffer) + Offset, Count - Offset);
+    if FLastError <> sOK then Exit;
+    if Written <= 0 then
+    begin
+      RaiseSynaError(ErrTimeout);
+      Exit;
+    end;
+    Inc(Offset, Written);
+  end;
+  Result := True;
+end;
+
 procedure TBlockSerial.SendStreamRaw(const Stream: TStream);
 var
-  si: integer;
-  x, y, yr: integer;
-  s: AnsiString;
+  Remaining: Int64;
+  Count, ReadCount: Integer;
+  Buffer: AnsiString;
 begin
-  si := Stream.Size - Stream.Position;
-  x := 0;
-  while x < si do
+  Remaining := Stream.Size - Stream.Position;
+  while Remaining > 0 do
   begin
-    y := si - x;
-    if y > cSerialChunk then
-      y := cSerialChunk;
-    Setlength(s, y);
-    yr := Stream.read(PAnsiChar(s)^, y);
-    if yr > 0 then
-    begin
-      SetLength(s, yr);
-      SendString(s);
-      Inc(x, yr);
-    end
-    else
-      break;
+    if Remaining > cSerialChunk then Count := cSerialChunk
+    else Count := Remaining;
+    SetLength(Buffer, Count);
+    ReadCount := Stream.Read(Buffer[1], Count);
+    if ReadCount <= 0 then Exit;
+    if not SendBufferFully(Pointer(Buffer), ReadCount) then Exit;
+    Dec(Remaining, ReadCount);
   end;
 end;
 
@@ -1486,8 +1500,8 @@ var
 begin
   si := Stream.Size - Stream.Position;
   si := Swapbytes(si);
-  SendInteger(si);
-  SendStreamRaw(Stream);
+  if SendBufferFully(@si, SizeOf(si)) then
+    SendStreamRaw(Stream);
 end;
 
 procedure TBlockSerial.SendStream(const Stream: TStream);
@@ -1495,8 +1509,8 @@ var
   si: integer;
 begin
   si := Stream.Size - Stream.Position;
-  SendInteger(si);
-  SendStreamRaw(Stream);
+  if SendBufferFully(@si, SizeOf(si)) then
+    SendStreamRaw(Stream);
 end;
 
 function TBlockSerial.RecvBuffer(buffer: pointer; length: integer): integer;

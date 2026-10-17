@@ -7,7 +7,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [0.9.0] - 2026-10-17
 
 This release makes it easier to receive messages with custom delimiters and
-send data asynchronously through an optional queue. Devices can be found by
+send data asynchronously through an optional queue. Port settings can now be
+saved and applied together. Devices can be found by
 stable identifiers and reconnected automatically when plugged back in, with
 notifications describing device changes. Connection statistics help monitor
 activity, while DTR/RTS settings control the signal states used when opening
@@ -24,6 +25,8 @@ a port.
 - Add opt-in `WriteQueueEnabled` for FIFO `WriteDataAsync` calls, bounded by
   bytes and item count, with per-operation results and cancellation of the
   remaining sequence on failure, timeout or cancellation. Closing clears it.
+- Add `TSerialSettings`, `GetSettings` and `ApplySettings` to save and apply
+  the port data format in one operation, with validation and rollback on failure.
 - Add opt-in `AutoReconnect` for identifiable devices after USB removal,
   including renamed ports, bounded opening retries and main-thread completion
   events. Defaults are a 1000 ms interval and five attempts; manual closing

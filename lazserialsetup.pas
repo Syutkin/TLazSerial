@@ -81,6 +81,33 @@ uses lazsynaser;
 
 {$R *.lfm}
 
+type
+  // Closing can deliver status callbacks that destroy the component or owner.
+  TSetupSerialGuard = class(TComponent)
+  private
+    FSerial: TLazSerial;
+  protected
+    procedure Notification(AComponent: TComponent;
+      Operation: TOperation); override;
+  public
+    constructor Create(ASerial: TLazSerial); reintroduce;
+    property Serial: TLazSerial read FSerial;
+  end;
+
+constructor TSetupSerialGuard.Create(ASerial: TLazSerial);
+begin
+  inherited Create(nil);
+  FSerial := ASerial;
+  ASerial.FreeNotification(Self);
+end;
+
+procedure TSetupSerialGuard.Notification(AComponent: TComponent;
+  Operation: TOperation);
+begin
+  inherited Notification(AComponent, Operation);
+  if (Operation = opRemove) and (AComponent = FSerial) then FSerial := nil;
+end;
+
 resourcestring
   SCustomBaudRate = '%d (custom)';
 
@@ -214,21 +241,32 @@ procedure ApplyComPortSetupResult(ComPort: TLazSerial;
   SetupForm: TComSetupFrm; const AModalResult: TModalResult);
 var
   Settings: TComPortSettings;
+  PortSettings: TSerialSettings;
+  Lifetime: TSetupSerialGuard;
 begin
   if AModalResult <> mrOK then
     Exit;
   Settings := SetupForm.ReadSettings;
-  ComPort.Close;
-  if (Settings.BaudRate <> ComPort.BaudRate) or
+  PortSettings := ComPort.GetSettings;
+  if (Settings.BaudRate <> PortSettings.BaudRate) or
     ((SetupForm.FCustomBaudRateIndex >= 0) and
      (SetupForm.ComComboBox2.ItemIndex <> SetupForm.FCustomBaudRateIndex)) then
-    ComPort.CustomBaudRate := -1;
-  ComPort.Device := Settings.Device;
-  ComPort.BaudRate := Settings.BaudRate;
-  ComPort.DataBits := Settings.DataBits;
-  ComPort.StopBits := Settings.StopBits;
-  ComPort.Parity := Settings.Parity;
-  ComPort.FlowControl := Settings.FlowControl;
+    PortSettings.CustomBaudRate := -1;
+  PortSettings.BaudRate := Settings.BaudRate;
+  PortSettings.DataBits := Settings.DataBits;
+  PortSettings.StopBits := Settings.StopBits;
+  PortSettings.Parity := Settings.Parity;
+  PortSettings.FlowControl := Settings.FlowControl;
+  Lifetime := TSetupSerialGuard.Create(ComPort);
+  try
+    ComPort.Close;
+    if Lifetime.Serial = nil then Exit;
+    ComPort.Device := Settings.Device;
+    ComPort.ApplySettings(PortSettings);
+    // ApplySettings may also deliver callbacks; use only the local guard below.
+  finally
+    Lifetime.Free;
+  end;
 end;
 
 { TComSetupFrm }

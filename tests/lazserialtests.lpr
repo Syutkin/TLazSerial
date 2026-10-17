@@ -41,6 +41,7 @@ uses
   LazSerialWriteQueueTests,
   LazSerialAsyncWindowsIoTests,
   LazSerialConfigurationTests,
+  LazSerialSettingsTests,
   LazSerialIoLifecycleTests,
   LazSerialLineTests,
   LazSerialReadRequirementTests,

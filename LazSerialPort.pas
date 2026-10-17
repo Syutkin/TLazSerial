@@ -15,7 +15,7 @@ uses
   SerialWindowsChangeSource, SerialMacChangeSource, LazSerialTransport,
   LazSerialWrite, LazSerialNativeWrite, SerialRingBuffer, LazSerialRead,
   LazSerialNativeRead, LazSerialStatistics, LazSerialReconnect,
-  LazSerialWriteQueue, LazarusPackageIntf;
+  LazSerialWriteQueue, LazSerialSettings, LazarusPackageIntf;
 
 implementation
 

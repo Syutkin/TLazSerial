@@ -5,6 +5,7 @@ This guide describes the runtime contracts of the current LCL-based package.
 
 - [Threading and ownership](#threading-and-ownership)
 - [Opening and control lines](#opening-a-serial-port)
+- [Settings snapshots](#settings-snapshots)
 - [Default reads and reader errors](#default-reads-and-reader-errors)
 - [Buffered reads and delimiters](#buffered-reads)
 - [Asynchronous writes and queue limits](#asynchronous-writes)
@@ -50,6 +51,51 @@ data. `ShowSetupDialog` opens the bundled port-settings dialog.
 With a legacy connection and no pending asynchronous write, changing `Device`
 sets the port for the next opening. Hotplug continues to track the port that
 is currently open.
+
+### Settings snapshots
+
+`GetSettings: TSerialSettings` returns a copy of the component's configured
+`BaudRate`, `CustomBaudRate`, `DataBits`, `Parity`, `StopBits` and `FlowControl`.
+It is a main-thread memory snapshot, available while closed, receiving,
+writing or cleaning up, and does not query the driver.
+
+`ApplySettings(const ASettings: TSerialSettings)` applies the complete record.
+Start with `GetSettings` when editing a subset:
+
+```pascal
+Saved := Serial.GetSettings;
+Settings := Saved;
+Settings.BaudRate := br115200;
+Settings.CustomBaudRate := -1; // any negative value selects BaudRate
+Settings.Parity := pEven;
+Serial.ApplySettings(Settings);
+// Restore later, when configuration is permitted:
+Serial.ApplySettings(Saved);
+```
+
+A nonnegative `CustomBaudRate` overrides `BaudRate`. Initialize every field;
+`Default(TSerialSettings)` sets that override to zero, not to -1. Enum values
+and conflicts with opening-line settings are checked before any changes;
+invalid candidates raise `EArgumentException`. Driver support is checked when
+configuring an open port or on the next opening.
+
+While closed, the validated record is saved for the next `Open`. While open,
+the entire format is passed to one transport configuration call. Component
+properties are committed together before status callbacks. On configuration
+failure, previous properties are retained and the built-in transport restores
+the driver state; if restoration fails, the connection closes. The original
+configuration error is raised regardless of `SynSer.RaiseExcept`.
+
+`ApplySettings` requires the main thread and rejects an active buffered reader,
+pending writes (including queued entries/results), or cleanup with
+`EInvalidOperation`. These restrictions also apply to an unchanged record.
+`Device`, initial DTR/RTS states, read modes, queue settings and AutoReconnect
+remain separate; applying a record does not open or switch ports. Individual
+property setters continue to work through the same configuration path.
+
+`TSerialSettings` is defined in `LazSerialSettings`, which has no LCL
+dependency, and is also accessible through `LazSerial`.
+This does not remove the component's existing LCL requirement.
 
 ### Initial DTR/RTS states
 

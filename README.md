@@ -60,6 +60,21 @@ Declare `Receive(Sender: TObject)` in the form class. With `RcvLineCRLF = True`,
 `WriteData` is synchronous and returns the number of bytes sent. Use
 `ShowSetupDialog` to edit port settings interactively.
 
+## Settings snapshots
+
+Use `TSerialSettings` to save or apply the port's data format as one operation.
+Existing individual properties remain available:
+
+```pascal
+Settings := Serial.GetSettings;
+Settings.BaudRate := br115200;
+Settings.CustomBaudRate := -1;
+Settings.Parity := pEven;
+Serial.ApplySettings(Settings);
+```
+
+See [settings and rollback rules](docs/API.md#settings-snapshots).
+
 ## Buffered reads
 
 Enable buffered input before opening to keep native reads out of the GUI thread:

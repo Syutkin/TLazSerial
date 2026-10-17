@@ -61,7 +61,7 @@ uses
 {$ENDIF}
   SysUtils, SyncObjs, lazsynaser,  LResources, Forms, Controls, Graphics, Dialogs,
   PropEdits, SerialWatcher, LazSerialCommon, LazSerialStatistics, LazSerialDevices,
-  LazSerialReconnect, LazSerialWriteQueue,
+  LazSerialReconnect, LazSerialWriteQueue, LazSerialSettings,
   LazSerialTransport, LazSerialWrite, LazSerialRead;
 
 const
@@ -72,23 +72,11 @@ const
 
 
 type
-{$IFDEF UNIX}
-  TBaudRate=(br_____0, br____50, br____75, br___110, br___134, br___150,
-             br___200, br___300, br___600, br__1200, br__1800, br__2400,
-             br__4800, br__9600, br_19200, br_38400, br_57600, br115200,
-             br230400
-   {$IFNDEF DARWIN}   // LINUX
-             , br460800, br500000, br576000, br921600, br1000000, br1152000,
-             br1500000, br2000000, br2500000, br3000000, br3500000, br4000000
-   {$ENDIF} );
-{$ELSE}      // MSWINDOWS
-   TBaudRate=(br___110,br___300, br___600, br__1200, br__2400, br__4800,
-           br__9600,br_14400, br_19200, br_38400,br_56000, br_57600,
-           br115200,br128000, br230400, br250000, br256000, br460800, br921600);
-{$ENDIF}
-  TDataBits=(db8bits,db7bits,db6bits,db5bits);
-  TParity=(pNone,pOdd,pEven,pMark,pSpace);
-  TStopBits=(sbOne,sbOneAndHalf,sbTwo);
+  TBaudRate = LazSerialSettings.TBaudRate;
+  TDataBits = LazSerialSettings.TDataBits;
+  TParity = LazSerialSettings.TParity;
+  TStopBits = LazSerialSettings.TStopBits;
+  TSerialSettings = LazSerialSettings.TSerialSettings;
 
   TModemSignal = (msRI,msCD,msCTS,msDSR);
   TModemSignals = Set of TModemSignal;
@@ -97,6 +85,74 @@ type
     const ErrorMessage: string) of object;
 
 const
+{$IFDEF UNIX}
+  br_____0 = LazSerialSettings.br_____0;
+  br____50 = LazSerialSettings.br____50;
+  br____75 = LazSerialSettings.br____75;
+  br___110 = LazSerialSettings.br___110;
+  br___134 = LazSerialSettings.br___134;
+  br___150 = LazSerialSettings.br___150;
+  br___200 = LazSerialSettings.br___200;
+  br___300 = LazSerialSettings.br___300;
+  br___600 = LazSerialSettings.br___600;
+  br__1200 = LazSerialSettings.br__1200;
+  br__1800 = LazSerialSettings.br__1800;
+  br__2400 = LazSerialSettings.br__2400;
+  br__4800 = LazSerialSettings.br__4800;
+  br__9600 = LazSerialSettings.br__9600;
+  br_19200 = LazSerialSettings.br_19200;
+  br_38400 = LazSerialSettings.br_38400;
+  br_57600 = LazSerialSettings.br_57600;
+  br115200 = LazSerialSettings.br115200;
+  br230400 = LazSerialSettings.br230400;
+{$IFNDEF DARWIN}
+  br460800 = LazSerialSettings.br460800;
+  br500000 = LazSerialSettings.br500000;
+  br576000 = LazSerialSettings.br576000;
+  br921600 = LazSerialSettings.br921600;
+  br1000000 = LazSerialSettings.br1000000;
+  br1152000 = LazSerialSettings.br1152000;
+  br1500000 = LazSerialSettings.br1500000;
+  br2000000 = LazSerialSettings.br2000000;
+  br2500000 = LazSerialSettings.br2500000;
+  br3000000 = LazSerialSettings.br3000000;
+  br3500000 = LazSerialSettings.br3500000;
+  br4000000 = LazSerialSettings.br4000000;
+{$ENDIF}
+{$ELSE}      // MSWINDOWS
+  br___110 = LazSerialSettings.br___110;
+  br___300 = LazSerialSettings.br___300;
+  br___600 = LazSerialSettings.br___600;
+  br__1200 = LazSerialSettings.br__1200;
+  br__2400 = LazSerialSettings.br__2400;
+  br__4800 = LazSerialSettings.br__4800;
+  br__9600 = LazSerialSettings.br__9600;
+  br_14400 = LazSerialSettings.br_14400;
+  br_19200 = LazSerialSettings.br_19200;
+  br_38400 = LazSerialSettings.br_38400;
+  br_56000 = LazSerialSettings.br_56000;
+  br_57600 = LazSerialSettings.br_57600;
+  br115200 = LazSerialSettings.br115200;
+  br128000 = LazSerialSettings.br128000;
+  br230400 = LazSerialSettings.br230400;
+  br250000 = LazSerialSettings.br250000;
+  br256000 = LazSerialSettings.br256000;
+  br460800 = LazSerialSettings.br460800;
+  br921600 = LazSerialSettings.br921600;
+{$ENDIF}
+  db8bits = LazSerialSettings.db8bits;
+  db7bits = LazSerialSettings.db7bits;
+  db6bits = LazSerialSettings.db6bits;
+  db5bits = LazSerialSettings.db5bits;
+  pNone = LazSerialSettings.pNone;
+  pOdd = LazSerialSettings.pOdd;
+  pEven = LazSerialSettings.pEven;
+  pMark = LazSerialSettings.pMark;
+  pSpace = LazSerialSettings.pSpace;
+  sbOne = LazSerialSettings.sbOne;
+  sbOneAndHalf = LazSerialSettings.sbOneAndHalf;
+  sbTwo = LazSerialSettings.sbTwo;
+
 {$IFDEF UNIX}
     ConstsBaud: array[TBaudRate] of integer=
     (0, 50, 75, 110, 134, 150, 200, 300, 600, 1200, 1800, 2400, 4800, 9600,
@@ -311,6 +367,11 @@ type
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
 
+    // Main-thread value snapshot; reading it never accesses the driver.
+    function GetSettings: TSerialSettings;
+    // Apply the complete data format in one configuration operation.
+    // Existing configuration restrictions and rollback behavior apply.
+    procedure ApplySettings(const ASettings: TSerialSettings);
     procedure Open;
     // Wait up to SynSer.DeadlockTimeout for queued output, then purge and close.
     // A nonpositive timeout skips waiting; unfinished output reports ErrTimeout.
@@ -697,6 +758,43 @@ begin
       TObject(Statuses[I]).Free;
     Statuses.Free;
   end;
+end;
+
+function TLazSerial.GetSettings: TSerialSettings;
+begin
+  CheckMainThread('TLazSerial.GetSettings');
+  Result.BaudRate := FBaudRate;
+  Result.CustomBaudRate := FCustomBaudRate;
+  Result.DataBits := FDataBits;
+  Result.Parity := FParity;
+  Result.StopBits := FStopBits;
+  Result.FlowControl := FFlowControl;
+end;
+
+procedure TLazSerial.ApplySettings(const ASettings: TSerialSettings);
+
+  procedure CheckEnum(AValue, AMaximum: Integer; const AName: string);
+  begin
+    if (AValue < 0) or (AValue > AMaximum) then
+      raise EArgumentException.CreateFmt('Invalid %s in serial settings', [AName]);
+  end;
+
+begin
+  CheckMainThread('TLazSerial.ApplySettings');
+  CheckPortConfiguration('TLazSerial.ApplySettings');
+  // Validate the entire candidate before indexing enum tables or changing
+  // driver/component state, including when saving settings for a later Open.
+  CheckEnum(Ord(ASettings.BaudRate), Ord(High(TBaudRate)), 'BaudRate');
+  CheckEnum(Ord(ASettings.DataBits), Ord(High(TDataBits)), 'DataBits');
+  CheckEnum(Ord(ASettings.Parity), Ord(High(TParity)), 'Parity');
+  CheckEnum(Ord(ASettings.StopBits), Ord(High(TStopBits)), 'StopBits');
+  CheckEnum(Ord(ASettings.FlowControl), Ord(High(TFlowControl)), 'FlowControl');
+  ValidateSerialOpenLines(FDtrOnOpen, FRtsOnOpen, ASettings.FlowControl);
+  // ConfigurePort commits all properties together and delivers status callbacks
+  // last. They may close, reopen or destroy this component.
+  ConfigurePort(ASettings.BaudRate, ASettings.CustomBaudRate,
+    ASettings.DataBits, ASettings.Parity, ASettings.StopBits,
+    ASettings.FlowControl);
 end;
 
 procedure TLazSerial.ConfigurePort(ABaudRate: TBaudRate;

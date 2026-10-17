@@ -64,6 +64,7 @@ type
     procedure InvalidRequestsDoNotConsumeAnIdentifier;
     procedure GenericExceptionReturnsCodeZero;
     procedure AsyncApiRejectsWorkerThread;
+    procedure ClosedNativePortRejectsAsyncRequest;
   end;
 
   {$IFDEF UNIX}
@@ -87,6 +88,7 @@ type
     procedure BackpressureCanBeCancelled;
     procedure RestoresDescriptorFlags;
     procedure ReaderReceivesDuringBlockedWrite;
+    procedure LongDeadlineDoesNotOverflowPolling;
   end;
   {$ENDIF}
 
@@ -581,6 +583,26 @@ begin
   end;
 end;
 
+procedure TLazSerialAsyncComponentTests.ClosedNativePortRejectsAsyncRequest;
+var
+  Raised: Boolean;
+begin
+  FSerial.SynSer.CloseSocket;
+  Raised := False;
+  try
+    FSerial.WriteDataAsync('closed', 1000);
+  except
+    on E: Exception do
+    begin
+      Raised := True;
+      AssertTrue(Pos('closed port', E.Message) > 0);
+    end;
+  end;
+  AssertTrue(Raised);
+  AssertFalse(FSerial.WritePending);
+  AssertEquals(0, FGateObject.CreatedOperations);
+end;
+
 procedure TScriptedWriteOperation.ExecuteWrite(var AResult: TSerialWriteResult);
 begin
   if WaitForStop then
@@ -838,6 +860,14 @@ begin
   TLazSerial(FSerial).CancelWrite;
   AwaitCompletion;
   AssertEquals(Ord(swoCancelled), Ord(FResult.Outcome));
+end;
+
+procedure TLazSerialNativeWriteTests.LongDeadlineDoesNotOverflowPolling;
+begin
+  TLazSerial(FSerial).WriteDataAsync('long', High(Cardinal));
+  AwaitCompletion;
+  AssertEquals(Ord(swoCompleted), Ord(FResult.Outcome));
+  AssertEquals(4, FResult.BytesWritten);
 end;
 {$ENDIF}
 

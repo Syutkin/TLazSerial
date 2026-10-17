@@ -183,7 +183,8 @@ function TNativeSerialWriteOperation.WriteChunk(ABuffer: Pointer;
   ACount: Integer; out ATransferred: Integer): Integer;
 var
   PollDescriptor: TPollFD;
-  Ready, Delay: Integer;
+  Ready: Integer;
+  Delay: Cardinal;
 begin
   Result := 0;
   ATransferred := 0;

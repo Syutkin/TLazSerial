@@ -6,6 +6,7 @@ structured API for enumerating serial devices.
 
 The current public API version is 0.8.1. Version 0.8.0 removed the legacy
 string-based device enumeration API; see [MIGRATION.md](MIGRATION.md).
+The asynchronous-write API described below is currently unreleased.
 
 ## Features
 
@@ -14,6 +15,8 @@ string-based device enumeration API; see [MIGRATION.md](MIGRATION.md).
 - standard and custom baud rates, configurable data bits, parity, flow control
   and one, one-and-a-half or two stop bits;
 - `OnRxData`, `OnStatus`, `OnError` and `OnRemoved` events;
+- asynchronous writes with an operation deadline, cancellation and
+  `OnWriteCompleted` results delivered on the main thread;
 - `RcvLineCRLF`, which makes `ReadData` use line-oriented `RecvString` instead
   of `RecvPacket`;
 - a bundled setup dialog opened with `ShowSetupDialog`;
@@ -61,6 +64,79 @@ the port changes `SynSer.LastError`. `ErrorCode = 0` identifies an exception
 without a native serial error code. Readiness timeouts keep the reader running
 and do not trigger `OnError`. The handler may reopen or destroy the component;
 closing or destroying it before delivery cancels the old notification.
+If a pending asynchronous write is being cancelled, reopening must wait for
+`WritePending = False`.
+
+## Asynchronous writes
+
+Use `WriteDataAsync` to send data without waiting for serial transmission in
+the LCL thread. Set `OnWriteCompleted` before starting the operation:
+
+```pascal
+Serial.OnWriteCompleted := @WriteCompleted;
+OperationId := Serial.WriteDataAsync('hello' + #0, 1000);
+```
+
+The returned nonzero `QWord` identifies the accepted operation. The component
+copies the string's bytes, including embedded zeroes; the caller may change or
+release its original string immediately. `ATimeoutMs` must be greater than
+zero and covers the whole operation, including retries after partial writes.
+Passing zero raises `EArgumentException`.
+
+The completion handler receives `TSerialWriteResult`, available from
+`LazSerial`:
+
+```pascal
+procedure TMainForm.WriteCompleted(Sender: TObject;
+  const AResult: TSerialWriteResult);
+begin
+  Memo.Lines.Add(Format('Write %d: %d/%d bytes, error %d: %s',
+    [AResult.OperationId, AResult.BytesWritten, AResult.BytesRequested,
+     AResult.ErrorCode, AResult.ErrorMessage]));
+end;
+```
+
+`Outcome` is `swoCompleted`, `swoFailed`, `swoCancelled` or `swoTimedOut`.
+`BytesWritten` preserves actual progress on failure or cancellation. A timeout
+reports `ErrTimeout`; a requested cancellation reports error code zero.
+Other failures preserve their original code and message; an exception without
+a native code reports zero with its exception message. Results are independent
+of `SynSer.LastError` and `RaiseExcept`. `OnError` continues to report reader
+failures. Write completion does not acknowledge receipt by the remote device.
+
+Only one asynchronous write may be pending. `WritePending` stays true through
+native completion and cancellation cleanup. The completion event is always
+queued, even for an empty string or immediate success. Before calling the
+handler, the component clears `WritePending`, allowing the handler to start
+the next write, close the port or destroy the component. Handler exceptions
+remain main-thread exceptions.
+
+While `WritePending` is true, another write, synchronous `WriteData` or
+`WriteBuffer`, changing the device or serial settings, setting modem control
+lines and accessing `SynSer` raise `EInvalidOperation`. Previously saved
+`SynSer` references must also remain unused until completion. Reading and
+reader events continue while the port is active.
+
+Call `CancelWrite` to request cancellation without waiting for the driver.
+It does nothing when no write is pending. If the write has already finished,
+its actual result is retained. The operation keeps its buffer and native I/O
+storage alive until cancellation actually completes. A slow or faulty Windows
+driver may extend cancellation beyond the operation deadline; the worker
+performs that wait outside the LCL thread.
+
+`Close` during an asynchronous write sets `Active = False`, suppresses that
+operation's public completion event and starts cancellation and port cleanup.
+`WritePending` remains true until cleanup completes; `Open` raises
+`EInvalidOperation` during that interval. Once pending becomes false, the port
+can be reopened. Old-session notifications are discarded. Destroying the
+component detaches its callbacks while cleanup retains the resources it needs.
+When reopening after cancellation, let the LCL event loop continue and check
+`WritePending` from a later UI event or timer callback.
+
+Existing synchronous write signatures and behavior remain available when no
+asynchronous write is pending. Normal close waits for queued output up to
+`SynSer.DeadlockTimeout`. After a failed write, close purges pending output
+immediately and preserves the original write error.
 
 ## Threading contract
 
@@ -69,12 +145,14 @@ thread. This includes opening and closing the port, reading and writing data,
 changing serial settings and accessing the low-level `SynSer` object. Calls to
 the transport API from another thread raise `ELazSerialThreadError`.
 
-The reader thread is an internal implementation detail. It only waits for data;
-the corresponding callbacks are delivered on the main thread. Worker threads
-that need to use `TLazSerial` must queue their work to the main thread.
+The reader thread only waits for data. Asynchronous writes use a separate
+internal worker with operation-local state. Their callbacks are delivered on
+the main thread. Application worker threads that need to use `TLazSerial`
+must queue their work to the main thread.
 
 `SynSer` is read-only as a `TLazSerial` property: its settings remain available,
-but the owned `TBlockSerial` instance cannot be replaced.
+but the owned `TBlockSerial` instance cannot be replaced. Access is unavailable
+while an asynchronous write or its cleanup is pending.
 
 ## Structured device enumeration
 

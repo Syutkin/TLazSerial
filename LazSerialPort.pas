@@ -13,7 +13,7 @@ uses
   SerialCommandRunner, LazSerialWindowsDevices, LazSynaFpc, LazSynaUtil,
   LazSynaSer, lazserialsetup, SerialWatcherSupport, SerialLinuxChangeSource,
   SerialWindowsChangeSource, SerialMacChangeSource, LazSerialTransport,
-  LazarusPackageIntf;
+  LazSerialWrite, LazSerialNativeWrite, LazarusPackageIntf;
 
 implementation
 

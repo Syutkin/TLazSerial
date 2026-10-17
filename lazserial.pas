@@ -252,6 +252,8 @@ type
     procedure Open;
     // Wait up to SynSer.DeadlockTimeout for queued output, then purge and close.
     // A nonpositive timeout skips waiting; unfinished output reports ErrTimeout.
+    // A pending asynchronous write is cancelled and closed in the background;
+    // wait for WritePending = False before opening the port again.
     procedure Close;
     // show a port settings dialog form
     procedure ShowSetupDialog;
@@ -265,6 +267,7 @@ type
     function WriteBuffer(var buf; size: integer): integer;
     function WriteDataAsync(const AData: string;
       const ATimeoutMs: Cardinal): QWord;
+    // Requests cancellation; WritePending stays true until native completion.
     procedure CancelWrite;
     property WritePending: Boolean read GetWritePending;
 
@@ -1088,6 +1091,8 @@ begin
   NextId := FWriteId + 1;
   BeginTransport;
   try
+    if not FTransport.IsOpen then
+      ComException('can not write to a closed port.');
     Operation := FTransport.CreateWriteOperation(AData, NextId, ATimeoutMs,
       @WriteFinished);
     FWriteOperation := Operation;

@@ -68,3 +68,18 @@ internal detail.
 - `TSerialSelector.DeviceList`, `DeviceListFriend` and `Options`.
 
 `TLazSerial.ShowSetupDialog` no longer accepts legacy enumeration options.
+
+## Opting in to asynchronous writes (unreleased)
+
+Existing synchronous write signatures remain unchanged. To use asynchronous
+writes, call `WriteDataAsync(Data, TimeoutMs)` from the main thread and handle
+`OnWriteCompleted`. The return value is an operation identifier; the result
+event carries the actual byte count and error. `OnError` retains its reader
+error contract.
+
+There is one pending write per component. During that operation, synchronous
+writes, configuration changes and direct `SynSer` access are rejected.
+`CancelWrite` requests cancellation without waiting for completion. Closing
+during a write starts background cleanup; wait for `WritePending = False`
+before reopening. See [Asynchronous writes](README.md#asynchronous-writes)
+for the complete lifecycle and result contract.

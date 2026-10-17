@@ -94,6 +94,7 @@ function TLazSerialTransport.CreateWriteOperation(const AData: AnsiString;
   const AId: QWord; const ATimeoutMs: Cardinal;
   const AOnFinished: TSerialWriteFinished): ISerialWriteOperation;
 begin
+  Result := nil;
   raise EInvalidOperation.Create('Transport does not support asynchronous writes');
 end;
 

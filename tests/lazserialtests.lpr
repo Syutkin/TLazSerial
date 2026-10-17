@@ -28,6 +28,7 @@ uses
   LazSerialConfigurationTests,
   LazSerialIoLifecycleTests,
   LazSerialLineTests,
+  LazSerialReadRequirementTests,
   LazSynaUtilTimeTests,
   LazSerialWindowsIoTests,
   SerialPlatformChangeSourceSmokeTests,

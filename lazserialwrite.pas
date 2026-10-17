@@ -30,6 +30,7 @@ type
     procedure Cancel;
     procedure ClosePort;
     procedure Detach;
+    procedure DeferDelivery;
   end;
 
   TSerialWriteOperation = class(TInterfacedObject, ISerialWriteOperation)
@@ -43,6 +44,7 @@ type
     FStartedAt: QWord;
     FStarted, FCompleted, FCloseRequested, FClosing, FClosed: Boolean;
     FDelivered: Boolean;
+    FDeliveryDeferred: Boolean;
     FResult: TSerialWriteResult;
     FOnFinished: TSerialWriteFinished;
     FQueuedReference: ISerialWriteOperation;
@@ -70,6 +72,7 @@ type
     procedure Cancel;
     procedure ClosePort;
     procedure Detach;
+    procedure DeferDelivery;
   end;
 
 implementation
@@ -234,7 +237,8 @@ end;
 
 procedure TSerialWriteOperation.QueueDelivery;
 begin
-  if Assigned(FOnFinished) and not FDelivered and (FQueuedReference = nil) then
+  if Assigned(FOnFinished) and not FDelivered and not FDeliveryDeferred and
+    (FQueuedReference = nil) then
   begin
     FQueuedReference := Self;
     TThread.ForceQueue(nil, @Deliver);
@@ -281,6 +285,7 @@ begin
   FLock.Acquire;
   try
     FCloseRequested := True;
+    FDeliveryDeferred := False;
     DropDelivery;
     NeedsWorker := FCompleted and not FClosed and not FClosing;
     if NeedsWorker then
@@ -299,6 +304,17 @@ begin
       Worker.Free;
       raise;
     end;
+  end;
+end;
+
+procedure TSerialWriteOperation.DeferDelivery;
+begin
+  FLock.Acquire;
+  try
+    FDeliveryDeferred := True;
+    DropDelivery;
+  finally
+    FLock.Release;
   end;
 end;
 

@@ -61,7 +61,7 @@ uses
 {$ENDIF}
   SysUtils, SyncObjs, lazsynaser,  LResources, Forms, Controls, Graphics, Dialogs,
   PropEdits, SerialWatcher, LazSerialCommon, LazSerialDevices,
-  LazSerialTransport;
+  LazSerialTransport, LazSerialWrite;
 
 const
   { Version of this TLazSerial package, matching LazSerialPort.lpk. It is
@@ -194,6 +194,10 @@ type
     FOnStatus: TStatusEvent;
     FOnError: TSerialErrorEvent;
     FOnRemoved: TNotifyEvent;
+    FOnWriteCompleted: TSerialWriteCompletedEvent;
+    FWriteOperation: ISerialWriteOperation;
+    FWriteId: QWord;
+    FWriteCloseRequested: Boolean;
     FClosing: Boolean;
     FDestroying: Boolean;
     FReaderSession: ISerialReaderSession;
@@ -222,6 +226,9 @@ type
     function CanReadData(const ATimeout: Integer;
       const ACheckError: Boolean = False): Boolean;
     function GetSynSer: TBlockSerial;
+    function GetWritePending: Boolean;
+    procedure CheckWriteIdle(const AOperation: string);
+    procedure WriteFinished(const AResult: TSerialWriteResult);
 
   protected
     procedure AdoptWatcherSnapshotForTesting(
@@ -256,6 +263,10 @@ type
     // write data to port
     function WriteData(data: string): integer;
     function WriteBuffer(var buf; size: integer): integer;
+    function WriteDataAsync(const AData: string;
+      const ATimeoutMs: Cardinal): QWord;
+    procedure CancelWrite;
+    property WritePending: Boolean read GetWritePending;
 
     // read pin states
     function ModemSignals: TModemSignals;
@@ -292,6 +303,8 @@ type
     property OnError: TSerialErrorEvent read FOnError write FOnError;
     // Triggers if the device is removed during an active connection.
     property OnRemoved : TNotifyEvent read FOnRemoved write FOnRemoved;
+    property OnWriteCompleted: TSerialWriteCompletedEvent
+      read FOnWriteCompleted write FOnWriteCompleted;
   end;
 
 { Returns the version of TLazSerial itself, not TBlockSerial.GetVersion's
@@ -568,6 +581,7 @@ var
   Lifetime: ISerialReaderSession;
   Serial: TLazSerial;
 begin
+  CheckWriteIdle('TLazSerial.ConfigurePort');
   Lifetime := FStatusSession;
   try
     BeginTransport;
@@ -616,6 +630,8 @@ end;
 
 function TLazSerial.ReadModemSignal(ASignal: TModemSignal): Boolean;
 begin
+  if FWriteCloseRequested then
+    raise EInvalidOperation.Create('Serial write cleanup is pending');
   BeginTransport;
   try
     case ASignal of
@@ -640,6 +656,11 @@ var
   Delivery: TSerialReaderEventDelivery;
 begin
   FClosing := True;
+  if FWriteOperation <> nil then
+  begin
+    FWriteCloseRequested := True;
+    FWriteOperation.DeferDelivery;
+  end;
   try
     // Joining a reader must happen before acquiring the transport lock.
     if ReadThread <> nil then
@@ -666,6 +687,20 @@ begin
   except
     FClosing := False;
     raise;
+  end;
+  if FWriteOperation <> nil then
+  begin
+    // The reader is stopped. The operation retains the native port while its
+    // cancellation and close finish without holding the component's lock.
+    FTransport.SetStatusHandler(nil);
+    FActive := False;
+    FWriteCloseRequested := True;
+    try
+      FWriteOperation.ClosePort;
+    finally
+      FClosing := False;
+    end;
+    Exit;
   end;
   BeginTransport;
   try
@@ -717,6 +752,8 @@ var
 begin
   BeginTransport;
   try
+    if FWriteCloseRequested then
+      Exit(False);
     if not FTransport.IsOpen then
       Exit(False);
     if FRcvLineCRLF then
@@ -756,6 +793,11 @@ begin
     end;
   finally
     try
+      if FWriteOperation <> nil then
+      begin
+        FWriteOperation.Detach;
+        FWriteOperation := nil;
+      end;
       FTransport.SetStatusHandler(nil);
       FTransport.Free;
     finally
@@ -776,6 +818,7 @@ end;
 procedure TLazSerial.ShowSetupDialog;
 begin
   CheckMainThread('TLazSerial.ShowSetupDialog');
+  CheckWriteIdle('TLazSerial.ShowSetupDialog');
   EditComPort(Self);
 end;
 
@@ -789,6 +832,7 @@ end;
 function TLazSerial.GetSynSer: TBlockSerial;
 begin
   CheckMainThread('TLazSerial.SynSer');
+  CheckWriteIdle('TLazSerial.SynSer');
   Result := FTransport.NativeSerial;
 end;
 
@@ -826,6 +870,8 @@ end;
 function TLazSerial.ReadData: string;
 begin
   CheckMainThread('TLazSerial.ReadData');
+  if FWriteCloseRequested then
+    ComException('can not read from a closed port.');
   BeginTransport;
   try
     result:='';
@@ -844,6 +890,7 @@ procedure TLazSerial.ReplaceTransportForTesting(
   ATransport: TLazSerialTransport);
 begin
   CheckMainThread('TLazSerial.ReplaceTransportForTesting');
+  CheckWriteIdle('TLazSerial.ReplaceTransportForTesting');
   if ATransport = nil then
     raise EArgumentNilException.Create('ATransport');
   if FActive or (ReadThread <> nil) then
@@ -864,6 +911,8 @@ end;
 procedure TLazSerial.SetActive(state: boolean);
 begin
   CheckMainThread('TLazSerial.Active');
+  if state and FWriteCloseRequested then
+    raise EInvalidOperation.Create('Serial write cleanup is pending');
   if (state = FActive) and (state or (ReadThread = nil)) then
     Exit;
   if not state then
@@ -886,6 +935,7 @@ end;
 procedure TLazSerial.SetBaudRate(br: TBaudRate);
 begin
   CheckMainThread('TLazSerial.BaudRate');
+  CheckWriteIdle('TLazSerial.BaudRate');
   if FCustomBaudRate < 0 then
     ConfigurePort(br, FCustomBaudRate, FDataBits, FParity, FStopBits, FFlowControl)
   else
@@ -895,6 +945,7 @@ end;
 procedure TLazSerial.SetCustomBaudrate(br: Integer);
 begin
   CheckMainThread('TLazSerial.CustomBaudRate');
+  CheckWriteIdle('TLazSerial.CustomBaudRate');
   if FCustomBaudRate = br then
     Exit;
   ConfigurePort(FBaudRate, br, FDataBits, FParity, FStopBits, FFlowControl);
@@ -909,6 +960,7 @@ end;
 procedure TLazSerial.SetDevice(const ADevice: string);
 begin
   CheckMainThread('TLazSerial.Device');
+  CheckWriteIdle('TLazSerial.Device');
   FDevice := ADevice;
 end;
 
@@ -938,6 +990,7 @@ end;}
 procedure TLazSerial.SetFlowControl(aFlowControl: TFlowControl);
 begin
   CheckMainThread('TLazSerial.FlowControl');
+  CheckWriteIdle('TLazSerial.FlowControl');
   if FFlowControl = aFlowControl then
     Exit;
   ConfigurePort(FBaudRate, FCustomBaudRate, FDataBits, FParity, FStopBits,
@@ -965,6 +1018,7 @@ end;
 procedure TLazSerial.SetRcvLineCRLF(AValue: Boolean);
 begin
   CheckMainThread('TLazSerial.RcvLineCRLF');
+  CheckWriteIdle('TLazSerial.RcvLineCRLF');
   FRcvLineCRLF := AValue;
 end;
 
@@ -977,6 +1031,7 @@ end;
 function TLazSerial.WriteBuffer(var buf; size: integer): integer;
 begin
   CheckMainThread('TLazSerial.WriteBuffer');
+  CheckWriteIdle('TLazSerial.WriteBuffer');
   BeginTransport;
   try
     if not FTransport.IsOpen then
@@ -990,6 +1045,7 @@ end;
 function TLazSerial.WriteData(data: string): integer;
 begin
   CheckMainThread('TLazSerial.WriteData');
+  CheckWriteIdle('TLazSerial.WriteData');
   BeginTransport;
   try
     if not FTransport.IsOpen then
@@ -1000,10 +1056,91 @@ begin
   end;
 end;
 
+function TLazSerial.GetWritePending: Boolean;
+begin
+  CheckMainThread('TLazSerial.WritePending');
+  Result := FWriteOperation <> nil;
+end;
+
+procedure TLazSerial.CheckWriteIdle(const AOperation: string);
+begin
+  if FWriteOperation <> nil then
+    raise EInvalidOperation.CreateFmt('%s: an asynchronous write is pending',
+      [AOperation]);
+end;
+
+function TLazSerial.WriteDataAsync(const AData: string;
+  const ATimeoutMs: Cardinal): QWord;
+var
+  Operation: ISerialWriteOperation;
+  NextId: QWord;
+begin
+  CheckMainThread('TLazSerial.WriteDataAsync');
+  CheckWriteIdle('TLazSerial.WriteDataAsync');
+  if ATimeoutMs = 0 then
+    raise EArgumentException.Create('Write timeout must be greater than zero');
+  if Length(AData) > High(Integer) then
+    raise EArgumentException.Create('Write buffer is too large');
+  if not FActive then
+    ComException('can not write to a closed port.');
+  if FWriteId = High(QWord) then
+    raise EInvalidOperation.Create('Write operation identifiers exhausted');
+  NextId := FWriteId + 1;
+  BeginTransport;
+  try
+    Operation := FTransport.CreateWriteOperation(AData, NextId, ATimeoutMs,
+      @WriteFinished);
+    FWriteOperation := Operation;
+    FWriteCloseRequested := False;
+    try
+      Operation.Start;
+      FWriteId := NextId;
+    except
+      Operation.Detach;
+      FWriteOperation := nil;
+      raise;
+    end;
+  finally
+    EndTransport;
+  end;
+  Result := NextId;
+end;
+
+procedure TLazSerial.CancelWrite;
+begin
+  CheckMainThread('TLazSerial.CancelWrite');
+  if FWriteOperation <> nil then
+    FWriteOperation.Cancel;
+end;
+
+procedure TLazSerial.WriteFinished(const AResult: TSerialWriteResult);
+var
+  Operation: ISerialWriteOperation;
+  Handler: TSerialWriteCompletedEvent;
+begin
+  if (FWriteOperation = nil) or (AResult.OperationId <> FWriteId) then
+    Exit;
+  Operation := FWriteOperation;
+  FWriteOperation := nil;
+  Operation.Detach;
+  if FWriteCloseRequested then
+  begin
+    FWriteCloseRequested := False;
+    Exit;
+  end;
+  FTransport.CompleteWrite(AResult);
+  Handler := FOnWriteCompleted;
+  // Do not access component state after calling user code.
+  if not FDestroying and Assigned(Handler) then
+    Handler(Self, AResult);
+end;
+
 
 function TLazSerial.ModemSignals: TModemSignals;
 begin
   CheckMainThread('TLazSerial.ModemSignals');
+  if FWriteCloseRequested then
+    raise EInvalidOperation.Create('Serial write cleanup is pending');
   BeginTransport;
   try
     result:=[];
@@ -1052,6 +1189,7 @@ end;  }
 procedure TLazSerial.SetDTR(OnOff: boolean);
 begin
   CheckMainThread('TLazSerial.SetDTR');
+  CheckWriteIdle('TLazSerial.SetDTR');
   BeginTransport;
   try
     FTransport.SetDTR(OnOff);
@@ -1064,6 +1202,7 @@ end;
 procedure TLazSerial.SetRTS(OnOff: boolean);
 begin
   CheckMainThread('TLazSerial.SetRTS');
+  CheckWriteIdle('TLazSerial.SetRTS');
   BeginTransport;
   try
     FTransport.SetRTS(OnOff);

@@ -47,12 +47,17 @@ type
     FSerialOwner: ISerialWritePort;
     FConfigured: Boolean;
     FWriteError: Integer;
+    FSkipDrain: Boolean;
     function RestoreConfiguration(const APrevious: TDCB): Boolean;
   protected
     function CreateSerial: TBlockSerial; virtual;
   public
     constructor Create;
     destructor Destroy; override;
+    function CreateWriteOperation(const AData: AnsiString; const AId: QWord;
+      const ATimeoutMs: Cardinal; const AOnFinished: TSerialWriteFinished):
+      ISerialWriteOperation; override;
+    procedure CompleteWrite(const AResult: TSerialWriteResult); override;
     procedure Close; override;
     procedure Configure(ABaudRate, ADataBits: Integer; AParity: Char;
       AStopBits: Integer; AFlowControl: TFlowControl); override;
@@ -78,7 +83,7 @@ type
 implementation
 
 uses
-  Classes, SysUtils;
+  Classes, SysUtils, LazSerialNativeWrite;
 
 function TLazSerialTransport.CanReadLine(const ATimeout: Integer): Boolean;
 begin
@@ -116,6 +121,24 @@ begin
   inherited Destroy;
 end;
 
+function TLazSynapseSerialTransport.CreateWriteOperation(const AData: AnsiString;
+  const AId: QWord; const ATimeoutMs: Cardinal;
+  const AOnFinished: TSerialWriteFinished): ISerialWriteOperation;
+begin
+  Result := TNativeSerialWriteOperation.Create(FSerialOwner, AData, AId,
+    ATimeoutMs, AOnFinished);
+end;
+
+procedure TLazSynapseSerialTransport.CompleteWrite(const AResult: TSerialWriteResult);
+begin
+  if AResult.Outcome <> swoCompleted then
+  begin
+    FSkipDrain := True;
+    if FWriteError = 0 then
+      FWriteError := AResult.ErrorCode;
+  end;
+end;
+
 procedure TLazSynapseSerialTransport.Close;
 var
   ErrorCode, PendingBytes, Timeout: Integer;
@@ -131,7 +154,7 @@ begin
   ErrorCode := FWriteError;
   try
     try
-      if ErrorCode = 0 then
+      if (ErrorCode = 0) and not FSkipDrain then
       begin
         Timeout := FSerial.DeadlockTimeout;
         Started := GetTickCount64;
@@ -154,6 +177,7 @@ begin
     end;
   finally
     FWriteError := 0;
+    FSkipDrain := False;
     FSerial.RaiseExcept := RaiseNative;
     if ErrorCode <> 0 then
       FSerial.SetSynaError(ErrorCode);
@@ -223,7 +247,10 @@ procedure TLazSynapseSerialTransport.Connect(const ADevice: string);
 begin
   FConfigured := False;
   if not IsOpen then
+  begin
     FWriteError := 0;
+    FSkipDrain := False;
+  end;
   FSerial.Connect(ADevice);
 end;
 

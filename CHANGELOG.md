@@ -13,6 +13,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Cleanup-thread startup failures release the port synchronously and complete
+  read/write state instead of leaving operations pending, while preserving
+  the original operation error.
 - The setup dialog shows the active custom baud rate, preserves it on unchanged
   confirmation, and disables the override when a preset is selected.
 - Hotplug tracks the actually opened port and supported aliases, without

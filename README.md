@@ -153,6 +153,10 @@ while cleanup is still pending. Closing or a terminal error discards unread
 input; old data and notifications never enter the next session. Destruction
 detaches callbacks while the operations retain the resources they need.
 
+If a cleanup thread cannot be created or started, cleanup runs synchronously
+in the calling thread before the startup error is reported. In this exceptional
+case, `Close` can wait for native cleanup; normal closing remains asynchronous.
+
 The built-in native transport supports buffered input. Existing custom
 transport classes continue to compile; enabling buffered input on a transport
 without `CreateReadOperation` support fails and rolls back opening.
@@ -223,6 +227,8 @@ Old-session notifications are discarded. Destroying the
 component detaches its callbacks while cleanup retains the resources it needs.
 When reopening after cancellation, let the LCL event loop continue and check
 `WritePending` from a later UI event or timer callback.
+The synchronous fallback on cleanup-thread startup failure described above
+also applies when closing during an asynchronous write.
 
 Existing synchronous write signatures and behavior remain available when no
 asynchronous write is pending. In the default receive mode, normal close waits

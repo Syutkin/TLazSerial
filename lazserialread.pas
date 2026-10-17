@@ -356,10 +356,18 @@ begin
       on E: Exception do Fail(0, E.Message);
     end;
   finally
-    FLifecycle.ReleaseIO(True);
-    FLock.Acquire;
-    try FCompleted := True;
-    finally FLock.Release; end;
+    try
+      try
+        FLifecycle.ReleaseIO(True);
+      except
+        on E: ESynaSerError do Fail(E.ErrorCode, E.ErrorMessage);
+        on E: Exception do Fail(0, E.Message);
+      end;
+    finally
+      FLock.Acquire;
+      try FCompleted := True;
+      finally FLock.Release; end;
+    end;
   end;
 end;
 

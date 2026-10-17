@@ -128,6 +128,21 @@ type
     constructor Create(ATarget: TSerialWriteOperation; ACloseOnly: Boolean);
   end;
 
+procedure SetWriteFailure(var AResult: TSerialWriteResult; E: Exception);
+begin
+  AResult.Outcome := swoFailed;
+  if E is ESynaSerError then
+  begin
+    AResult.ErrorCode := ESynaSerError(E).ErrorCode;
+    AResult.ErrorMessage := ESynaSerError(E).ErrorMessage;
+  end
+  else
+  begin
+    AResult.ErrorCode := 0;
+    AResult.ErrorMessage := E.Message;
+  end;
+end;
+
 constructor TSerialWritePort.Create(ASerial: TBlockSerial);
 begin
   inherited Create;
@@ -260,13 +275,25 @@ begin
   // Called under FLock. The worker owns the port even after transport teardown.
   if not FCloseRequested or FClosing or FClosed or FConfiguring or FRestoring or
     (FReaders <> 0) or (FWriters <> 0) then Exit;
-  Worker := TSerialPortCloseWorker.Create(Self);
+  Worker := nil;
   FClosing := True;
   try
+    Worker := TSerialPortCloseWorker.Create(Self);
     Worker.Start;
   except
-    FClosing := False;
-    Worker.Free;
+    // No new I/O can enter. Keep the closing reservation, but never hold the
+    // lifecycle lock across synchronous recovery from a worker startup error.
+    FLock.Release;
+    try
+      try
+        try
+          if Worker <> nil then Worker.FreeOnTerminate := False;
+          Worker.Free;
+        finally RunClose; end;
+      except
+        // RunClose finalizes the state; report the original startup error.
+      end;
+    finally FLock.Acquire; end;
     raise;
   end;
 end;
@@ -550,11 +577,23 @@ begin
   end;
   if NeedsWorker then
   begin
-    Worker := TSerialWriteWorker.Create(Self, True);
+    Worker := nil;
     try
+      Worker := TSerialWriteWorker.Create(Self, True);
       Worker.Start;
     except
+      if Worker <> nil then
+      begin
+        Worker.OnTerminate := nil;
+        Worker.FreeOnTerminate := False;
+      end;
       Worker.Free;
+      try
+        try RunClose;
+        except
+          // Preserve the startup error after RunClose finalizes the state.
+        end;
+      finally WorkerFinished; end;
       raise;
     end;
   end;
@@ -580,25 +619,18 @@ begin
   try
     ExecuteWrite(WriteResult);
   except
-    on E: Exception do
-    begin
-      WriteResult.Outcome := swoFailed;
-      if E is ESynaSerError then
-      begin
-        WriteResult.ErrorCode := ESynaSerError(E).ErrorCode;
-        WriteResult.ErrorMessage := ESynaSerError(E).ErrorMessage;
-      end
-      else
-      begin
-        WriteResult.ErrorCode := 0;
-        WriteResult.ErrorMessage := E.Message;
-      end;
-    end;
+    on E: Exception do SetWriteFailure(WriteResult, E);
   end;
   if FReserved then
   begin
     FReserved := False;
-    FLifecycle.ReleaseIO(False);
+    try
+      FLifecycle.ReleaseIO(False);
+    except
+      on E: Exception do
+        if WriteResult.Outcome = swoCompleted then
+          SetWriteFailure(WriteResult, E);
+    end;
   end;
   FLock.Acquire;
   try
@@ -629,6 +661,13 @@ begin
       // CloseSocket releases the handle even on an I/O error. Preserve the
       // operation result rather than replacing it with a cleanup exception.
       on E: ESynaSerError do ;
+      on E: Exception do
+      begin
+        FLock.Acquire;
+        try
+          if FResult.Outcome = swoCompleted then SetWriteFailure(FResult, E);
+        finally FLock.Release; end;
+      end;
     end;
   finally
     FLock.Acquire;

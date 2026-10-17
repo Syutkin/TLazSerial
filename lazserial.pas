@@ -701,7 +701,16 @@ begin
       FWriteOperation.Cancel;
     end;
     try
-      FReadOperation.ClosePort;
+      try
+        FReadOperation.ClosePort;
+      except
+        if FWriteOperation <> nil then
+          try FWriteOperation.ClosePort;
+          except
+            // Complete TX cleanup without replacing the RX startup error.
+          end;
+        raise;
+      end;
       if FWriteOperation <> nil then FWriteOperation.ClosePort;
     finally
       FClosing := False;

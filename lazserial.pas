@@ -687,20 +687,25 @@ end;
 procedure TLazSerial.DeviceClose;
 var
   Delivery: TSerialReaderEventDelivery;
+  TransportLocked: Boolean;
 begin
+  TransportLocked := False;
   FClosing := True;
-  if FReadOperation <> nil then
-  begin
-    FActive := False;
-    FTransport.SetStatusHandler(nil);
-    FReadOperation.Detach;
+  try
+    if FReadOperation <> nil then
+    begin
+      FActive := False;
+      FTransport.SetStatusHandler(nil);
+      FReadOperation.Detach;
+    end;
     if FWriteOperation <> nil then
     begin
       FWriteCloseRequested := True;
       FWriteOperation.DeferDelivery;
-      FWriteOperation.Cancel;
+      if FReadOperation <> nil then FWriteOperation.Cancel;
     end;
-    try
+    if FReadOperation <> nil then
+    begin
       try
         FReadOperation.ClosePort;
       except
@@ -712,17 +717,9 @@ begin
         raise;
       end;
       if FWriteOperation <> nil then FWriteOperation.ClosePort;
-    finally
-      FClosing := False;
+      Exit;
     end;
-    Exit;
-  end;
-  if FWriteOperation <> nil then
-  begin
-    FWriteCloseRequested := True;
-    FWriteOperation.DeferDelivery;
-  end;
-  try
+
     // Joining a reader must happen before acquiring the transport lock.
     if ReadThread <> nil then
     begin
@@ -745,31 +742,27 @@ begin
       ReadThread := nil;
     end;
     FReaderSession := nil;
-  except
-    FClosing := False;
-    raise;
-  end;
-  if FWriteOperation <> nil then
-  begin
-    // The reader is stopped. The operation retains the native port while its
-    // cancellation and close finish without holding the component's lock.
-    FTransport.SetStatusHandler(nil);
-    FActive := False;
-    FWriteCloseRequested := True;
-    try
+    if FWriteOperation <> nil then
+    begin
+      // The reader is stopped. The operation retains the native port while its
+      // cancellation and close finish without holding the component's lock.
+      FTransport.SetStatusHandler(nil);
+      FActive := False;
       FWriteOperation.ClosePort;
-    finally
-      FClosing := False;
+      Exit;
     end;
-    Exit;
-  end;
-  BeginTransport;
-  try
-    FTransport.Close;
+
+    BeginTransport;
+    TransportLocked := True;
+    try
+      FTransport.Close;
+    finally
+      FActive := FTransport.IsOpen;
+    end;
   finally
-    FActive := FTransport.IsOpen;
     FClosing := False;
-    EndTransport;
+    // EndTransport can deliver a callback that destroys this component.
+    if TransportLocked then EndTransport;
   end;
 end;
 

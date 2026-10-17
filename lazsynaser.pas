@@ -1159,6 +1159,8 @@ begin
   FReadBuffer.Clear;
   FDiscardLine := False;
   FDiscardPrefix := '';
+  FLastCR := False;
+  FLastLF := False;
   FDevice := comport;
   GetComNr(comport);
 {$IFDEF MSWINDOWS}
@@ -1965,6 +1967,13 @@ begin
   end;
   x := Rates[n, 1];
   SetSynaError(sOK);
+  {$IF NOT DECLARED(CMSPAR)}
+  if dcb.parity in [3, 4] then
+  begin
+    RaiseSynaError(ErrWrongParameter);
+    Exit;
+  end;
+  {$ENDIF}
   //others
   cfmakeraw(term);
   term.c_cflag := term.c_cflag or CREAD;
@@ -1976,10 +1985,11 @@ begin
   else
     term.c_cflag := term.c_cflag and (not CRTSCTS);
   //software handshake
+  term.c_iflag := term.c_iflag and (not (IXON or IXOFF or IXANY));
   if (dcb.flags and dcb_OutX) > 0 then
-    term.c_iflag := term.c_iflag or IXON or IXOFF or IXANY
-  else
-    term.c_iflag := term.c_iflag and (not (IXON or IXOFF or IXANY));
+    term.c_iflag := term.c_iflag or IXON or IXANY;
+  if (dcb.flags and dcb_InX) > 0 then
+    term.c_iflag := term.c_iflag or IXOFF;
   //size of byte
   term.c_cflag := term.c_cflag and (not CSIZE);
   case dcb.bytesize of
@@ -1997,6 +2007,10 @@ begin
       term.c_cflag := term.c_cflag or CS8;
   end;
   //parity
+  term.c_cflag := term.c_cflag and (not PARODD);
+  {$IF DECLARED(CMSPAR)}
+  term.c_cflag := term.c_cflag and (not CMSPAR);
+  {$ENDIF}
   if (dcb.flags and dcb_ParityCheck) > 0 then
     term.c_cflag := term.c_cflag or PARENB
   else
@@ -2006,6 +2020,12 @@ begin
       term.c_cflag := term.c_cflag or PARODD;
     2: //'E'
       term.c_cflag := term.c_cflag and (not PARODD);
+    {$IF DECLARED(CMSPAR)}
+    3: //'M'
+      term.c_cflag := term.c_cflag or CMSPAR or PARODD;
+    4: //'S'
+      term.c_cflag := term.c_cflag or CMSPAR;
+    {$ENDIF}
   end;
   //stop bits
   if dcb.stopbits > 0 then
@@ -2045,10 +2065,11 @@ begin
   else
     dcb.flags := dcb.flags and (not (dcb_RtsControlHandshake or dcb_OutxCtsFlow));
   //software handshake
-  if (term.c_cflag and IXOFF) > 0 then
-    dcb.flags := dcb.flags or dcb_OutX or dcb_InX
-  else
-    dcb.flags := dcb.flags and (not (dcb_OutX or dcb_InX));
+  dcb.flags := dcb.flags and (not (dcb_OutX or dcb_InX));
+  if (term.c_iflag and IXON) > 0 then
+    dcb.flags := dcb.flags or dcb_OutX;
+  if (term.c_iflag and IXOFF) > 0 then
+    dcb.flags := dcb.flags or dcb_InX;
   //size of byte
   case term.c_cflag and CSIZE of
     CS5:
@@ -2066,10 +2087,17 @@ begin
   else
     dcb.flags := dcb.flags and (not dcb_ParityCheck);
   dcb.parity := 0;
-  if (term.c_cflag and PARODD) > 0 then
-    dcb.parity := 1
-  else
-    dcb.parity := 2;
+  if (term.c_cflag and PARENB) > 0 then
+  begin
+    if (term.c_cflag and PARODD) > 0 then
+      dcb.parity := 1
+    else
+      dcb.parity := 2;
+    {$IF DECLARED(CMSPAR)}
+    if (term.c_cflag and CMSPAR) > 0 then
+      Inc(dcb.parity, 2);
+    {$ENDIF}
+  end;
   //stop bits
   if (term.c_cflag and CSTOPB) > 0 then
     dcb.stopbits := 2
@@ -2425,6 +2453,8 @@ begin
   FReadBuffer.Clear;
   FDiscardLine := False;
   FDiscardPrefix := '';
+  FLastCR := False;
+  FLastLF := False;
   ExceptCheck;
 end;
 {$ELSE}
@@ -2439,6 +2469,8 @@ begin
   FReadBuffer.Clear;
   FDiscardLine := False;
   FDiscardPrefix := '';
+  FLastCR := False;
+  FLastLF := False;
   ExceptCheck;
 end;
 {$ENDIF}

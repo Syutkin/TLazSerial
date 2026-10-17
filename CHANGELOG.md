@@ -13,6 +13,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Unix buffered reads retry interrupted system calls without reporting a
+  terminal error or losing received bytes.
+- Line-ending conversion resets on purge and when opening a new connection.
+- Unix software flow control preserves each direction independently; parity
+  conversion handles Mark/Space and rejects them where unsupported.
 - The selector example starts at 9600 baud on macOS, matching Linux and Windows.
 
 ## [0.9.0] - 2026-10-17

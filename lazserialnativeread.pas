@@ -176,6 +176,7 @@ begin
   Descriptor.fd := FHandle;
   Descriptor.events := POLLIN;
   repeat
+    Result := 0;
     if StopRequested then Exit;
     Ready := fpPoll(@Descriptor, 1, 10);
     if Ready < 0 then

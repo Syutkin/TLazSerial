@@ -117,7 +117,7 @@ uses
   Windows,
 {$ENDIF}
   LazSynaFpc,
-  Classes, SysUtils, LazSynaUtil, LazSerialCommon;
+  Classes, SysUtils, LazSynaUtil, LazSerialCommon, SerialRingBuffer;
 
 const
   LockfileDirectory = '/var/lock'; {HGJ}
@@ -302,10 +302,13 @@ type
   {:@abstract(Main class implementing all communication routines)}
   TBlockSerial = class(TPersistent)
   private
+    FReadBuffer: TSerialRingBuffer;
     FLastReadCount: Integer;
     FPacketReadLimit: Integer;
     FDiscardLine: Boolean;
     FDiscardPrefix: AnsiString;
+    function GetLineBuffer: AnsiString;
+    procedure SetLineBuffer(const AValue: AnsiString);
 {$IFDEF MSWINDOWS}
     function TransferBuffer(ARead: Boolean; ABuffer: Pointer;
       ALength: Integer): Integer;
@@ -317,7 +320,6 @@ type
     FDevice: string;
     FLastError: integer;
     FLastErrorDesc: string;
-    FBuffer: AnsiString;
     FRaiseExcept: boolean;
     FRecvBuffer: integer;
     FSendBuffer: integer;
@@ -345,6 +347,10 @@ type
     FNonBlock: Boolean;
 {$IFDEF MSWINDOWS}
     FPortAddr: Word;
+{$ENDIF}
+    // Compatibility accessor; storage lives only in FReadBuffer.
+    property FBuffer: AnsiString read GetLineBuffer write SetLineBuffer;
+{$IFDEF MSWINDOWS}
     function CanEvent(Event: dword; Timeout: integer): boolean;
     function StartOverlappedIO(ARead: Boolean; ABuffer: Pointer;
       ALength: DWord; var ATransferred: DWord;
@@ -733,7 +739,7 @@ type
     property Handle: THandle read Fhandle write FHandle;
 
     {:Internally used read buffer.}
-    property LineBuffer: AnsiString read FBuffer write FBuffer;
+    property LineBuffer: AnsiString read GetLineBuffer write SetLineBuffer;
 
     {:If @true, communication errors raise exceptions. If @false (default), only
      the @link(LastError) value is set.}
@@ -804,7 +810,7 @@ begin
   FDevice := '';
   FComNr:= PortIsClosed;               {HGJ}
   FInstanceActive:= false;             {HGJ}
-  Fbuffer := '';
+  FReadBuffer := TSerialRingBuffer.Create;
   FRTSToggle := False;
   FMaxLineLength := 0;
   FTestDSR := False;
@@ -827,8 +833,22 @@ end;
 
 destructor TBlockSerial.Destroy;
 begin
-  CloseSocket;
-  inherited destroy;
+  try
+    CloseSocket;
+  finally
+    FReadBuffer.Free;
+    inherited Destroy;
+  end;
+end;
+
+function TBlockSerial.GetLineBuffer: AnsiString;
+begin
+  Result := FReadBuffer.Snapshot;
+end;
+
+procedure TBlockSerial.SetLineBuffer(const AValue: AnsiString);
+begin
+  FReadBuffer.Assign(AValue);
 end;
 
 class function TBlockSerial.GetVersion: string;
@@ -1026,7 +1046,7 @@ begin
     RaiseSynaError(ErrAlreadyInUse);
     Exit;                          {HGJ}
   end;                             {HGJ}
-  FBuffer := '';
+  FReadBuffer.Clear;
   FDiscardLine := False;
   FDiscardPrefix := '';
   FDevice := comport;
@@ -1375,7 +1395,7 @@ begin
     end;
   until False;
   delete(s, 1, l);
-  FBuffer := s;
+  FReadBuffer.Assign(s);
   Result := rl;
 end;
 
@@ -1413,7 +1433,7 @@ var
     except
       // RecvBuffer may have received bytes before reporting an I/O error.
       SetLength(Result, FLastReadCount);
-      FBuffer := Result + FBuffer;
+      FReadBuffer.Prepend(Result);
       raise;
     end;
     if x >= 0 then
@@ -1427,18 +1447,12 @@ begin
   if PreTestFailing then   {HGJ}
     Exit;                  {HGJ}
   SetSynaError(sOK);
-  if FBuffer <> '' then
+  if FReadBuffer.Count > 0 then
   begin
     if FPacketReadLimit > 0 then
-    begin
-      Result := Copy(FBuffer, 1, FPacketReadLimit);
-      Delete(FBuffer, 1, Length(Result));
-    end
+      Result := FReadBuffer.Read(FPacketReadLimit)
     else
-    begin
-      Result := FBuffer;
-      FBuffer := '';
-    end;
+      Result := FReadBuffer.Read(FReadBuffer.Count);
   end
   else
   begin
@@ -1464,7 +1478,7 @@ begin
   try
     ExceptCheck;
   except
-    FBuffer := Result + FBuffer;
+    FReadBuffer.Prepend(Result);
     raise;
   end;
 end;
@@ -1476,12 +1490,12 @@ begin
   if PreTestFailing then   {HGJ}
     Exit;                  {HGJ}
   SetSynaError(sOK);
-  if FBuffer = '' then
-    FBuffer := RecvPacket(Timeout);
-  if (FLastError = sOK) and (FBuffer <> '') then
+  if FReadBuffer.Count = 0 then
+    FReadBuffer.Prepend(RecvPacket(Timeout));
+  if (FLastError = sOK) and (FReadBuffer.Count > 0) then
   begin
-    Result := Ord(FBuffer[1]);
-    System.Delete(FBuffer, 1, 1);
+    Result := FReadBuffer.PeekByte(0);
+    FReadBuffer.Discard(1);
   end;
   ExceptCheck;
 end;
@@ -1523,7 +1537,7 @@ begin
         FPacketReadLimit := SavedLimit;
       end;
     except
-      FBuffer := s + FBuffer;
+      FReadBuffer.Prepend(s);
       raise;
     end;
     if FLastError <> sOK then
@@ -1594,7 +1608,7 @@ begin
     if (x > 0) or (Overflow and not FDiscardLine) then
       Break;
     // Report a known overflow without waiting for more of the damaged line.
-    if Overflow and (FBuffer = '') and (WaitingData = 0) then
+    if Overflow and (FReadBuffer.Count = 0) and (WaitingData = 0) then
       Break;
     // Zero means non-blocking: drain available packets, including new bytes
     // after an incomplete FBuffer, before reporting a timeout.
@@ -1615,7 +1629,7 @@ begin
     Result := Copy(s, 1, x - 1);
     System.Delete(s, 1, x + tl - 1);
   end;
-  FBuffer := s + FBuffer;
+  FReadBuffer.Prepend(s);
   ExceptCheck;
 end;
 
@@ -1736,10 +1750,10 @@ end;
 
 function TBlockSerial.WaitingDataEx: integer;
 begin
-	if FBuffer <> '' then
-  	Result := Length(FBuffer)
+  if FReadBuffer.Count > 0 then
+    Result := FReadBuffer.Count
   else
-  	Result := Waitingdata;
+    Result := WaitingData;
 end;
 
 {$IFNDEF MSWINDOWS}
@@ -2166,7 +2180,7 @@ end;
 
 function TBlockSerial.CanReadEx(Timeout: integer): boolean;
 begin
-	if Fbuffer <> '' then
+	if FReadBuffer.Count > 0 then
   	Result := True
   else
   	Result := CanRead(Timeout);
@@ -2181,15 +2195,15 @@ begin
     Start := 1;
     // A complementary byte after a converted single CR/LF belongs to the
     // previous line, not to a new empty line.
-    if FBuffer <> '' then
-      if (FLastCR and (FBuffer[1] = LF)) or
-        (FLastLF and (FBuffer[1] = CR)) then
+    if FReadBuffer.Count > 0 then
+      if (FLastCR and (FReadBuffer.PeekByte(0) = Ord(LF))) or
+        (FLastLF and (FReadBuffer.PeekByte(0) = Ord(CR))) then
         Inc(Start);
-    for I := Start to Length(FBuffer) do
-      if FBuffer[I] in [CR, LF] then
+    for I := Start to FReadBuffer.Count do
+      if Chr(FReadBuffer.PeekByte(I - 1)) in [CR, LF] then
         Exit(True);
   end
-  else if Pos(CRLF, FBuffer) > 0 then
+  else if FReadBuffer.Find(CRLF) >= 0 then
     Exit(True);
   Result := CanRead(Timeout);
 end;
@@ -2244,7 +2258,7 @@ begin
     SerialCheck(fpioctl(FHandle, TCFLSH, Pointer(PtrInt(TCIOFLUSH))));
     {$ENDIF}
   {$ENDIF}
-  FBuffer := '';
+  FReadBuffer.Clear;
   FDiscardLine := False;
   FDiscardPrefix := '';
   ExceptCheck;
@@ -2258,7 +2272,7 @@ begin
   x := PURGE_TXABORT or PURGE_TXCLEAR or PURGE_RXABORT or PURGE_RXCLEAR;
   if not PurgeComm(FHandle, x) then
     SerialCheck(sErr);
-  FBuffer := '';
+  FReadBuffer.Clear;
   FDiscardLine := False;
   FDiscardPrefix := '';
   ExceptCheck;

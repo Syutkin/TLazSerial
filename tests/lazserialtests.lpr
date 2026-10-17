@@ -21,6 +21,7 @@ uses
   SerialWatcherComponentTests,
   LazSerialSetupTests,
   SerialInfrastructureTests,
+  SerialRingBufferTests,
   LazSerialTransportTests,
   LazSerialAsyncWriteTests,
   LazSerialAsyncWindowsIoTests,

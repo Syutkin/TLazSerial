@@ -13,6 +13,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Add cancellable asynchronous serial writes with completion results on the
   main thread and nonblocking cleanup when closing during a write.
 
+### Changed
+
+- Synaser receive storage now uses a separate ring buffer, avoiding shifts of
+  unread bytes when consuming a prefix and preserving the string `LineBuffer` API.
+
 ### Fixed
 
 - Failed device refreshes preserve device lists and no longer cause false

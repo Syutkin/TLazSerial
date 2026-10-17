@@ -83,3 +83,19 @@ writes, configuration changes and direct `SynSer` access are rejected.
 during a write starts background cleanup; wait for `WritePending = False`
 before reopening. See [Asynchronous writes](README.md#asynchronous-writes)
 for the complete lifecycle and result contract.
+
+## Synaser receive storage (unreleased)
+
+`TBlockSerial.LineBuffer` remains a readable and writable `AnsiString` property.
+Receive storage now lives in `TSerialRingBuffer` from `SerialRingBuffer`; the
+existing synchronous read methods and line parser retain their contracts.
+
+For descendants, protected `FBuffer` is now a string property backed by that
+same ring buffer. Reading and assigning it remain supported. Code that passes
+`FBuffer` as a `var`/`out` argument, takes its address or edits its characters in
+place must use a local string and assign the result back. There is no separate
+persistent string buffer.
+
+`TSerialRingBuffer` stores binary bytes, supports optional capacity limits and
+does not perform I/O or synchronize access between threads. Extracting storage
+does not itself make serial reads nonblocking.

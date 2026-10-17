@@ -165,12 +165,7 @@ procedure TSerialWatcher.Refresh;
 begin
   StartWatching;
   if FRefreshPending then
-  begin
-    // Refresh from a delivery callback must not create an endless reload loop.
-    if (FDeviceRefreshThread <> nil) and not FDeviceRefreshThread.Delivering then
-      FRefreshDirty := True;
     Exit;
-  end;
   FRefreshScheduler.Cancel;
   FRefreshDirty := False;
   FFailureRetryCount := 0;

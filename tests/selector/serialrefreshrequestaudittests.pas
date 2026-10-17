@@ -6,11 +6,11 @@ uses Classes, SyncObjs, FpcUnit, TestRegistry, LazSerialDevices,
 type
   TSerialRefreshRequestAuditTests = class(TTestCase)
   published
-    procedure ManualRefreshDuringLoadPublishesLatestSnapshot;
+    procedure ManualRefreshDuringLoadIsIgnored;
     procedure RefreshFromApplyDoesNotLoop;
   end;
 implementation
-procedure TSerialRefreshRequestAuditTests.ManualRefreshDuringLoadPublishesLatestSnapshot;
+procedure TSerialRefreshRequestAuditTests.ManualRefreshDuringLoadIsIgnored;
 var
   Selector: TBackgroundTestSerialSelector;
   Started, Released: TEvent;
@@ -35,9 +35,11 @@ begin
     AssertEquals(1, Selector.LoadCount);
     Released.SetEvent;
     Selector.WaitForRefresh;
-    AssertTrue('Coalesce manual requests into a subsequent refresh',
+    AssertFalse('Ignore manual requests while enumeration is running',
       Selector.RefreshScheduled);
-    Selector.FireScheduledRefresh;
+    AssertEquals(1, Selector.LoadCount);
+    AssertEquals('COM1', Selector.Device);
+    Selector.Refresh;
     Selector.WaitForRefresh;
     AssertEquals(2, Selector.LoadCount);
     AssertEquals('COM2', Selector.Device);

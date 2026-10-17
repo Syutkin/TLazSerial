@@ -16,13 +16,30 @@ type
     function GetSerial: TBlockSerial;
   end;
 
-  TSerialWritePort = class(TInterfacedObject, ISerialWritePort)
+  ISerialPortLifecycle = interface
+    ['{A0BB4841-4671-4A93-AD3E-948C1F0F99E3}']
+    procedure AcquireIO(ARead: Boolean);
+    procedure ReleaseIO(ARead: Boolean);
+    procedure RequestClose;
+    function GetClosePending: Boolean;
+  end;
+
+  TSerialWritePort = class(TInterfacedObject, ISerialWritePort, ISerialPortLifecycle)
   private
     FSerial: TBlockSerial;
+    FLock: TCriticalSection;
+    FReaders, FWriters: Integer;
+    FCloseRequested, FClosing, FClosed: Boolean;
+    procedure StartClose;
+    procedure RunClose;
   public
     constructor Create(ASerial: TBlockSerial);
     destructor Destroy; override;
     function GetSerial: TBlockSerial;
+    procedure AcquireIO(ARead: Boolean);
+    procedure ReleaseIO(ARead: Boolean);
+    procedure RequestClose;
+    function GetClosePending: Boolean;
   end;
 
   ISerialWriteOperation = interface
@@ -39,6 +56,8 @@ type
     FCancelEvent: TEvent;
     FStopReason: LongInt;
     FPort: ISerialWritePort;
+    FLifecycle: ISerialPortLifecycle;
+    FReserved: Boolean;
     FData: AnsiString;
     FTimeoutMs: Cardinal;
     FStartedAt: QWord;
@@ -78,6 +97,16 @@ type
 implementation
 
 type
+  TSerialPortCloseWorker = class(TThread)
+  private
+    FOwner: TSerialWritePort;
+    FReference: ISerialPortLifecycle;
+  protected
+    procedure Execute; override;
+  public
+    constructor Create(AOwner: TSerialWritePort);
+  end;
+
   TSerialWriteWorker = class(TThread)
   private
     FOperation: ISerialWriteOperation;
@@ -93,18 +122,129 @@ type
 constructor TSerialWritePort.Create(ASerial: TBlockSerial);
 begin
   inherited Create;
+  FLock := TCriticalSection.Create;
   FSerial := ASerial;
 end;
 
 destructor TSerialWritePort.Destroy;
 begin
   FSerial.Free;
+  FLock.Free;
   inherited Destroy;
 end;
 
 function TSerialWritePort.GetSerial: TBlockSerial;
 begin
   Result := FSerial;
+end;
+
+constructor TSerialPortCloseWorker.Create(AOwner: TSerialWritePort);
+begin
+  inherited Create(True);
+  FreeOnTerminate := True;
+  FOwner := AOwner;
+  FReference := AOwner;
+end;
+
+procedure TSerialPortCloseWorker.Execute;
+begin
+  FOwner.RunClose;
+end;
+
+procedure TSerialWritePort.AcquireIO(ARead: Boolean);
+begin
+  FLock.Acquire;
+  try
+    // A completed close may be followed by opening this transport again.
+    if FClosed and FSerial.InstanceActive then
+    begin
+      FClosed := False;
+      FCloseRequested := False;
+    end;
+    if FCloseRequested then
+      raise EInvalidOperation.Create('Serial port is closing');
+    if ARead then Inc(FReaders) else Inc(FWriters);
+  finally
+    FLock.Release;
+  end;
+end;
+
+procedure TSerialWritePort.StartClose;
+var
+  Worker: TSerialPortCloseWorker;
+begin
+  // Called under FLock. The worker owns the port even after transport teardown.
+  if not FCloseRequested or FClosing or FClosed or
+    (FReaders <> 0) or (FWriters <> 0) then Exit;
+  Worker := TSerialPortCloseWorker.Create(Self);
+  FClosing := True;
+  try
+    Worker.Start;
+  except
+    FClosing := False;
+    Worker.Free;
+    raise;
+  end;
+end;
+
+procedure TSerialWritePort.ReleaseIO(ARead: Boolean);
+begin
+  FLock.Acquire;
+  try
+    if ARead then
+    begin
+      if FReaders = 0 then raise EInvalidOperation.Create('Unbalanced receive lease');
+      Dec(FReaders);
+    end
+    else
+    begin
+      if FWriters = 0 then raise EInvalidOperation.Create('Unbalanced write lease');
+      Dec(FWriters);
+    end;
+    StartClose;
+  finally
+    FLock.Release;
+  end;
+end;
+
+procedure TSerialWritePort.RequestClose;
+begin
+  FLock.Acquire;
+  try
+    FCloseRequested := True;
+    StartClose;
+  finally
+    FLock.Release;
+  end;
+end;
+
+function TSerialWritePort.GetClosePending: Boolean;
+begin
+  FLock.Acquire;
+  try
+    Result := FCloseRequested and not FClosed;
+  finally
+    FLock.Release;
+  end;
+end;
+
+procedure TSerialWritePort.RunClose;
+begin
+  try
+    try
+      FSerial.CloseSocket;
+    except
+      on E: ESynaSerError do ; // Preserve the operation's original error.
+    end;
+  finally
+    FLock.Acquire;
+    try
+      FClosed := True;
+      FClosing := False;
+    finally
+      FLock.Release;
+    end;
+  end;
 end;
 
 constructor TSerialWriteWorker.Create(ATarget: TSerialWriteOperation;
@@ -141,6 +281,7 @@ begin
   FLock := TCriticalSection.Create;
   FCancelEvent := TEvent.Create(nil, True, False, '');
   FPort := APort;
+  Supports(FPort, ISerialPortLifecycle, FLifecycle);
   FData := Copy(AData, 1, Length(AData));
   FTimeoutMs := ATimeoutMs;
   FResult.OperationId := AId;
@@ -162,13 +303,27 @@ begin
   if FStarted then
     raise EInvalidOperation.Create('Write operation has already started');
   FStartedAt := GetTickCount64;
-  Worker := TSerialWriteWorker.Create(Self, False);
+  if FLifecycle <> nil then
+  begin
+    FLifecycle.AcquireIO(False);
+    FReserved := True;
+  end;
+  try
+    Worker := TSerialWriteWorker.Create(Self, False);
   try
     FStarted := True;
     Worker.Start;
   except
     Worker.Free;
     FStarted := False;
+    raise;
+  end;
+  except
+    if FReserved then
+    begin
+      FReserved := False;
+      FLifecycle.ReleaseIO(False);
+    end;
     raise;
   end;
 end;
@@ -342,6 +497,11 @@ begin
       end;
     end;
   end;
+  if FReserved then
+  begin
+    FReserved := False;
+    FLifecycle.ReleaseIO(False);
+  end;
   FLock.Acquire;
   try
     FResult := WriteResult;
@@ -360,7 +520,12 @@ procedure TSerialWriteOperation.RunClose;
 begin
   try
     try
-      if FPort <> nil then
+      if FLifecycle <> nil then
+      begin
+        FLifecycle.RequestClose;
+        while FLifecycle.GetClosePending do Sleep(1);
+      end
+      else if FPort <> nil then
         FPort.GetSerial.CloseSocket;
     except
       // CloseSocket releases the handle even on an I/O error. Preserve the

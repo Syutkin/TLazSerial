@@ -30,6 +30,7 @@ uses
   LazSerialLineTests,
   LazSerialReadRequirementTests,
   LazSerialBufferedReadTests,
+  LazSerialPortSessionTests,
   LazSynaUtilTimeTests,
   LazSerialWindowsIoTests,
   SerialPlatformChangeSourceSmokeTests,

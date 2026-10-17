@@ -17,6 +17,8 @@ type
       const ATimeoutMs: Cardinal; const AOnFinished: TSerialWriteFinished):
       ISerialWriteOperation; virtual;
     procedure CompleteWrite(const AResult: TSerialWriteResult); virtual;
+    procedure ConfigureOpenLines(ADtr, ARts: TSerialOpenLineState;
+      AFlowControl: TFlowControl); virtual;
     procedure Close; virtual; abstract;
     procedure Configure(ABaudRate, ADataBits: Integer; AParity: Char;
       AStopBits: Integer; AFlowControl: TFlowControl); virtual; abstract;
@@ -51,6 +53,7 @@ type
     FWriteError: Integer;
     FSkipDrain: Boolean;
     function RestoreConfiguration(const APrevious: TDCB): Boolean;
+    procedure CheckSerialError(const AOperation: string);
   protected
     function CreateSerial: TBlockSerial; virtual;
   public
@@ -62,6 +65,8 @@ type
       const ATimeoutMs: Cardinal; const AOnFinished: TSerialWriteFinished):
       ISerialWriteOperation; override;
     procedure CompleteWrite(const AResult: TSerialWriteResult); override;
+    procedure ConfigureOpenLines(ADtr, ARts: TSerialOpenLineState;
+      AFlowControl: TFlowControl); override;
     procedure Close; override;
     procedure Configure(ABaudRate, ADataBits: Integer; AParity: Char;
       AStopBits: Integer; AFlowControl: TFlowControl); override;
@@ -111,6 +116,32 @@ end;
 
 procedure TLazSerialTransport.CompleteWrite(const AResult: TSerialWriteResult);
 begin
+end;
+
+procedure TLazSerialTransport.ConfigureOpenLines(ADtr, ARts: TSerialOpenLineState;
+  AFlowControl: TFlowControl);
+begin
+  ValidateSerialOpenLines(ADtr, ARts, AFlowControl);
+  if (ADtr <> olsDefault) or (ARts <> olsDefault) then
+    raise EInvalidOperation.Create('Transport does not support opening-line settings');
+end;
+
+procedure TLazSynapseSerialTransport.ConfigureOpenLines(ADtr,
+  ARts: TSerialOpenLineState; AFlowControl: TFlowControl);
+begin
+  FSerial.ConfigureOpenLines(ADtr, ARts, AFlowControl);
+end;
+
+procedure TLazSynapseSerialTransport.CheckSerialError(const AOperation: string);
+var
+  Error: ESynaSerError;
+begin
+  if FSerial.LastError = 0 then Exit;
+  Error := ESynaSerError.CreateFmt('Could not %s device %s: %s',
+    [AOperation, FSerial.Device, FSerial.LastErrorDesc]);
+  Error.ErrorCode := FSerial.LastError;
+  Error.ErrorMessage := FSerial.LastErrorDesc;
+  raise Error;
 end;
 
 constructor TLazSynapseSerialTransport.Create;
@@ -271,6 +302,7 @@ begin
     FSerial.ConfigureReadBuffer(0);
   end;
   FSerial.Connect(ADevice);
+  CheckSerialError('open');
 end;
 
 function TLazSynapseSerialTransport.CanRead(

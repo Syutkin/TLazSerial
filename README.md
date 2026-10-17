@@ -47,6 +47,43 @@ Serial.Open;
 Use `OnRxData` with `ReadData` for incoming data and `WriteData` for outgoing
 data. `ShowSetupDialog` opens the bundled port-settings dialog.
 
+To request initial DTR/RTS states, set `DtrOnOpen` and `RtsOnOpen` while the
+port is closed and both `ClosePending` and `WritePending` are false:
+
+```pascal
+Serial.FlowControl := fcNone;
+Serial.DtrOnOpen := olsInactive;
+Serial.RtsOnOpen := olsInactive;
+Serial.Open;
+```
+
+Each property accepts `olsDefault`, `olsInactive` or `olsActive`. The default
+preserves the previous platform-specific behavior: Connect asserts RTS and DTR,
+then serial configuration applies the selected flow control. An explicit state
+replaces that initial assertion and is retained when configuring the port.
+Active/inactive describe the modem signal, not a guaranteed electrical voltage.
+These settings do not change how closing the port handles the lines.
+
+The native transport applies explicit states immediately after acquiring the
+handle, before configuring speed or starting reception. An OS or driver can
+still toggle the lines during the underlying open call; these properties reduce
+unnecessary transitions but cannot guarantee that a connected board will not
+reset. Unsupported line control or a driver error fails opening, releases the
+handle and leaves `Active = False`, regardless of `SynSer.RaiseExcept`.
+
+Conflicting combinations raise `EArgumentException` before opening: an explicit
+DTR state with DTR/DSR handshaking, inactive DTR with a flow-control mode requiring
+active DTR, or an explicit RTS state with driver-controlled RTS (handshake or
+toggle). Conflicting live `FlowControl` changes are also rejected and retain the
+current settings. Assigning either opening-line property while active, writing
+or cleaning up raises `EInvalidOperation`.
+
+Custom transports retain the existing `Connect` signature. To support explicit
+states, override `ConfigureOpenLines(ADtr, ARts, AFlowControl)` and apply them
+during opening. Its base implementation accepts defaults and rejects explicit
+states before connecting. Direct Synaser users can call the same method on
+`TBlockSerial` before `Connect`.
+
 With a legacy connection and no pending asynchronous write, changing `Device`
 sets the port for the next opening. Hotplug continues to track the port that
 is currently open.

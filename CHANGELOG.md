@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Add opt-in `DtrOnOpen` and `RtsOnOpen` states to avoid unnecessary control-line
+  transitions when opening a port, subject to OS and driver behavior. Defaults
+  preserve existing behavior; unsupported states and flow-control conflicts
+  are reported explicitly.
 - Add `TSerialWatcher.OnDevicesRefreshed` to deliver successful device snapshots
   on the main thread, including the initial baseline and metadata-only updates.
 

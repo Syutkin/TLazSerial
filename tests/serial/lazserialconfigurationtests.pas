@@ -42,6 +42,20 @@ type
     procedure ConfigurationCallbackCanReopenAfterRollbackFailure;
   end;
 
+type
+  TLazSerialOpenLineComponentTests = class(TTestCase)
+  private
+    procedure SetLine(ASerial: TLazSerial; const AName, AValue: string);
+  published
+    procedure DefaultsPreserveLegacyOpening;
+    procedure ConflictingFlowIsRejectedBeforeConnect;
+    procedure UnsupportedTransportRejectsExplicitLinesBeforeConnect;
+    procedure OpenLineSettingsRequireClosedPort;
+    procedure NativeTransportReceivesLinesAndCanResetOnReopen;
+    procedure LiveFlowConflictPreservesPreviousSettings;
+    procedure OpeningLineFailureLeavesComponentClosed;
+  end;
+
 implementation
 
 {$IFDEF UNIX}
@@ -917,7 +931,193 @@ begin
   end;
 end;
 
+procedure TLazSerialOpenLineComponentTests.SetLine(ASerial: TLazSerial;
+  const AName, AValue: string);
+var
+  Info: PPropInfo;
+begin
+  Info := GetPropInfo(ASerial, AName);
+  AssertNotNull('Missing opening-line property ' + AName, Info);
+  SetEnumProp(ASerial, Info, AValue);
+end;
+
+procedure TLazSerialOpenLineComponentTests.DefaultsPreserveLegacyOpening;
+var
+  Serial: TTestableLazSerial;
+  Transport: TFakeSerialTransport;
+begin
+  Serial := TTestableLazSerial.Create(nil);
+  try
+    Transport := TFakeSerialTransport.Create;
+    Serial.InstallTransport(Transport);
+    AssertNotNull(GetPropInfo(Serial, 'DtrOnOpen'));
+    AssertNotNull(GetPropInfo(Serial, 'RtsOnOpen'));
+    AssertEquals('olsDefault', GetEnumProp(Serial, 'DtrOnOpen'));
+    AssertEquals('olsDefault', GetEnumProp(Serial, 'RtsOnOpen'));
+    Serial.Open;
+    AssertTrue(Serial.Active);
+    AssertEquals(1, Transport.ConnectCount);
+    AssertEquals(1, Transport.ConfigCount);
+    Serial.Close;
+  finally
+    Serial.Free;
+  end;
+end;
+
+procedure TLazSerialOpenLineComponentTests.ConflictingFlowIsRejectedBeforeConnect;
+var
+  Serial: TTestableLazSerial;
+  Transport: TFakeSerialTransport;
+  Raised: Boolean;
+begin
+  Serial := TTestableLazSerial.Create(nil);
+  try
+    Transport := TFakeSerialTransport.Create;
+    Serial.InstallTransport(Transport);
+    Serial.FlowControl := fcRTS_CTS;
+    SetLine(Serial, 'RtsOnOpen', 'olsInactive');
+    Raised := False;
+    try Serial.Open;
+    except on E: EArgumentException do Raised := True; end;
+    AssertTrue('Reject conflicting settings before opening', Raised);
+    AssertFalse(Serial.Active);
+    AssertEquals(0, Transport.ConnectCount);
+  finally
+    Serial.Free;
+  end;
+end;
+
+procedure TLazSerialOpenLineComponentTests.UnsupportedTransportRejectsExplicitLinesBeforeConnect;
+var
+  Serial: TTestableLazSerial;
+  Transport: TFakeSerialTransport;
+  Raised: Boolean;
+begin
+  Serial := TTestableLazSerial.Create(nil);
+  try
+    Transport := TFakeSerialTransport.Create;
+    Serial.InstallTransport(Transport);
+    SetLine(Serial, 'DtrOnOpen', 'olsInactive');
+    Raised := False;
+    try Serial.Open;
+    except on E: EInvalidOperation do Raised := True; end;
+    AssertTrue('Unsupported transport must not silently ignore line settings', Raised);
+    AssertFalse(Serial.Active);
+    AssertEquals(0, Transport.ConnectCount);
+  finally
+    Serial.Free;
+  end;
+end;
+
+procedure TLazSerialOpenLineComponentTests.OpenLineSettingsRequireClosedPort;
+var
+  Serial: TTestableLazSerial;
+  Transport: TFakeSerialTransport;
+  Name: string;
+  Raised: Boolean;
+begin
+  Serial := TTestableLazSerial.Create(nil);
+  try
+    Transport := TFakeSerialTransport.Create;
+    Serial.InstallTransport(Transport);
+    Serial.Open;
+    for Name in ['DtrOnOpen', 'RtsOnOpen'] do
+    begin
+      Raised := False;
+      try SetLine(Serial, Name, 'olsInactive');
+      except on E: EInvalidOperation do Raised := True; end;
+      AssertTrue('Opening-line settings require a closed port: ' + Name, Raised);
+      AssertEquals('olsDefault', GetEnumProp(Serial, Name));
+    end;
+    Serial.Close;
+  finally
+    Serial.Free;
+  end;
+end;
+
+procedure TLazSerialOpenLineComponentTests.NativeTransportReceivesLinesAndCanResetOnReopen;
+var
+  Serial: TTestableLazSerial;
+  Transport: TConfigurationTestTransport;
+begin
+  Serial := TTestableLazSerial.Create(nil);
+  try
+    Transport := TConfigurationTestTransport.Create;
+    Serial.InstallTransport(Transport);
+    SetLine(Serial, 'DtrOnOpen', 'olsActive');
+    SetLine(Serial, 'RtsOnOpen', 'olsInactive');
+    Serial.Open;
+    AssertTrue(Serial.Active);
+    AssertEquals(Int64(dcb_DtrControlEnable),
+      Int64(Transport.NativeSerial.DCB.Flags and dcb_DtrControlMask));
+    AssertEquals(0, Transport.NativeSerial.DCB.Flags and dcb_RtsControlMask);
+    Serial.CustomBaudRate := 57600;
+    AssertEquals(Int64(dcb_DtrControlEnable),
+      Int64(Transport.NativeSerial.DCB.Flags and dcb_DtrControlMask));
+    Serial.Close;
+    SetLine(Serial, 'DtrOnOpen', 'olsDefault');
+    SetLine(Serial, 'RtsOnOpen', 'olsDefault');
+    Serial.Open;
+    AssertEquals(0, Transport.NativeSerial.DCB.Flags and
+      (dcb_DtrControlMask or dcb_RtsControlMask));
+    Serial.Close;
+  finally Serial.Free; end;
+end;
+
+procedure TLazSerialOpenLineComponentTests.LiveFlowConflictPreservesPreviousSettings;
+var
+  Serial: TTestableLazSerial;
+  Transport: TConfigurationTestTransport;
+  Count: Integer;
+  Raised: Boolean;
+begin
+  Serial := TTestableLazSerial.Create(nil);
+  try
+    Transport := TConfigurationTestTransport.Create;
+    Serial.InstallTransport(Transport);
+    SetLine(Serial, 'RtsOnOpen', 'olsInactive');
+    Serial.Open;
+    Count := Transport.TestSerial.ApplyCount;
+    Raised := False;
+    try Serial.FlowControl := fcRTS_CTS;
+    except on E: EArgumentException do Raised := True; end;
+    AssertTrue(Raised);
+    AssertTrue(Serial.Active);
+    AssertEquals(Ord(fcNone), Ord(Serial.FlowControl));
+    AssertEquals(Count, Transport.TestSerial.ApplyCount);
+    Serial.Close;
+  finally Serial.Free; end;
+end;
+
+procedure TLazSerialOpenLineComponentTests.OpeningLineFailureLeavesComponentClosed;
+var
+  Serial: TLazSerial;
+  Raised: Boolean;
+  RaiseNative: Boolean;
+begin
+  for RaiseNative := False to True do
+  begin
+    Serial := TLazSerial.Create(nil);
+    try
+      {$IFDEF UNIX}Serial.Device := '/dev/null';{$ELSE}Serial.Device := 'NUL';{$ENDIF}
+      Serial.SynSer.RaiseExcept := RaiseNative;
+      SetLine(Serial, 'DtrOnOpen', 'olsInactive');
+      SetLine(Serial, 'RtsOnOpen', 'olsInactive');
+      Raised := False;
+      try Serial.Open;
+      except on E: ESynaSerError do
+      begin Raised := True; AssertTrue(E.ErrorCode <> 0); end; end;
+      AssertTrue(Raised);
+      AssertFalse(Serial.Active);
+      AssertFalse(Serial.ClosePending);
+      AssertTrue(Serial.SynSer.Handle = THandle(-1));
+      AssertEquals(RaiseNative, Serial.SynSer.RaiseExcept);
+    finally Serial.Free; end;
+  end;
+end;
+
 initialization
+  RegisterTest(TLazSerialOpenLineComponentTests);
   RegisterTest(TLazSerialConfigurationTests);
 
 end.

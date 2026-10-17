@@ -306,6 +306,8 @@ type
     FMemoryReadMode: Boolean;
     FLastReadCount: Integer;
     FPacketReadLimit: Integer;
+    FDtrOnOpen: TSerialOpenLineState;
+    FRtsOnOpen: TSerialOpenLineState;
     FDiscardLine: Boolean;
     FDiscardPrefix: AnsiString;
     // Logical offsets survive appends and ring growth. Removing or replacing
@@ -317,6 +319,7 @@ type
       Offset, Start: SizeInt;
       Previous: AnsiChar;
     end;
+    procedure ApplyOpenLineFlags;
     function GetLineBuffer: AnsiString;
     procedure SetLineBuffer(const AValue: AnsiString);
     function SendBufferFully(Buffer: Pointer; Count: Integer): Boolean;
@@ -358,6 +361,10 @@ type
     FNonBlock: Boolean;
 {$IFDEF MSWINDOWS}
     FPortAddr: Word;
+{$ENDIF}
+    procedure ApplyOpenLineStates;
+{$IFDEF UNIX}
+    procedure SetOpeningModemLines(AValues: Integer); virtual;
 {$ENDIF}
     // Compatibility accessor; storage lives only in FReadBuffer.
     property FBuffer: AnsiString read GetLineBuffer write SetLineBuffer;
@@ -416,6 +423,9 @@ type
 
     {:Destroy handle in use. It close connection to serial port.}
     procedure CloseSocket; virtual;
+    // Call while closed, before Connect. Explicit states also survive Config.
+    procedure ConfigureOpenLines(ADtr, ARts: TSerialOpenLineState;
+      AFlowControl: TFlowControl); virtual;
 
     {:Reconfigure communication parameters on the fly. You must be connected to
      port before!
@@ -436,8 +446,9 @@ type
      you can specify any device name! (other device names then standart is not
      converted!)
 
-     After successfull connection the DTR signal is set (if you not set hardware
-     handshake, then the RTS signal is set, too!)
+     By default, Connect asserts DTR and RTS before Config applies flow control.
+     ConfigureOpenLines can request explicit initial states before connecting;
+     driver transitions during the underlying open call remain platform-dependent.
 
      Connection parameters is predefined by your system configuration. If you
      need use another parameters, then you can use Config method after.
@@ -844,6 +855,8 @@ begin
   FAtTimeout := 1000;
   FInterPacketTimeout := True;
   FNonBlock := False;
+  FDtrOnOpen := olsDefault;
+  FRtsOnOpen := olsDefault;
 end;
 
 destructor TBlockSerial.Destroy;
@@ -1130,8 +1143,90 @@ begin
   end;
 end;
 
+procedure TBlockSerial.ConfigureOpenLines(ADtr, ARts: TSerialOpenLineState;
+  AFlowControl: TFlowControl);
+begin
+  if (FHandle <> INVALID_HANDLE_VALUE) or InstanceActive then
+    raise EInvalidOperation.Create('Opening-line settings require a closed port');
+  ValidateSerialOpenLines(ADtr, ARts, AFlowControl);
+  if (ARts <> olsDefault) and FRTSToggle then
+    raise EArgumentException.Create('RtsOnOpen conflicts with RTS toggle mode');
+  FDtrOnOpen := ADtr;
+  FRtsOnOpen := ARts;
+end;
+
+procedure TBlockSerial.ApplyOpenLineFlags;
+begin
+  if FDtrOnOpen <> olsDefault then
+  begin
+    dcb.Flags := dcb.Flags and not dcb_DtrControlMask;
+    if FDtrOnOpen = olsActive then
+      dcb.Flags := dcb.Flags or dcb_DtrControlEnable;
+  end;
+  if FRtsOnOpen <> olsDefault then
+  begin
+    dcb.Flags := dcb.Flags and not dcb_RtsControlMask;
+    if FRtsOnOpen = olsActive then
+      dcb.Flags := dcb.Flags or dcb_RtsControlEnable;
+  end;
+end;
+
+{$IFDEF UNIX}
+procedure TBlockSerial.SetOpeningModemLines(AValues: Integer);
+var
+  Lines: Integer;
+  Settings: Termios;
+begin
+  if FRtsOnOpen <> olsDefault then
+  begin
+    SerialCheck(tcgetattr(FHandle, Settings));
+    ExceptCheck;
+    if FLastError <> sOK then Exit;
+    if (Settings.c_cflag and CRTSCTS) <> 0 then
+    begin
+      Settings.c_cflag := Settings.c_cflag and not CRTSCTS;
+      SerialCheck(tcsetattr(FHandle, TCSANOW, Settings));
+      ExceptCheck;
+      if FLastError <> sOK then Exit;
+    end;
+  end;
+  Lines := ModemStatus;
+  if FLastError <> sOK then Exit;
+  Lines := (Lines and not (TIOCM_DTR or TIOCM_RTS)) or AValues;
+  {$IFDEF FPC}
+  SerialCheck(fpIoctl(FHandle, TIOCMSET, @Lines));
+  {$ELSE}
+  SerialCheck(ioctl(FHandle, TIOCMSET, @Lines));
+  {$ENDIF}
+  ExceptCheck;
+end;
+{$ENDIF}
+
+procedure TBlockSerial.ApplyOpenLineStates;
+{$IFDEF UNIX}
+var
+  Lines: Integer;
+{$ENDIF}
+begin
+  {$IFDEF UNIX}
+  Lines := 0;
+  if FDtrOnOpen <> olsInactive then Lines := Lines or TIOCM_DTR;
+  if FRtsOnOpen <> olsInactive then Lines := Lines or TIOCM_RTS;
+  SetOpeningModemLines(Lines);
+  {$ELSE}
+  GetCommState;
+  if FLastError <> sOK then Exit;
+  // Defaults still assert the line during Connect, as in the legacy path.
+  dcb.Flags := dcb.Flags and not (dcb_DtrControlMask or dcb_RtsControlMask);
+  if FDtrOnOpen <> olsInactive then dcb.Flags := dcb.Flags or dcb_DtrControlEnable;
+  if FRtsOnOpen <> olsInactive then dcb.Flags := dcb.Flags or dcb_RtsControlEnable;
+  SetCommState;
+  {$ENDIF}
+end;
+
 procedure TBlockSerial.Config(baud, bits: integer; parity: char; stop: integer; FlowControl : TFlowControl);
 begin
+  ValidateSerialOpenLines(FDtrOnOpen, FRtsOnOpen, FlowControl);
   FillChar(dcb, SizeOf(dcb), 0);
   GetCommState;
   if FLastError <> sOK then
@@ -1165,6 +1260,8 @@ begin
     else                          dcb.Flags := dcb.Flags and not dcb_RtsControlEnable; //fcNone
   end; //case
 
+  ApplyOpenLineFlags;
+
   if (dcb.Parity > 0) then
     dcb.Flags := dcb.Flags or dcb_ParityCheck;
 
@@ -1180,6 +1277,40 @@ var
 var
   SerialFlags: cInt;
 {$ENDIF}
+
+  procedure InitializeOpenLines;
+  var
+    ErrorCode: Integer;
+    RaiseNative: Boolean;
+  begin
+    if (FDtrOnOpen = olsDefault) and (FRtsOnOpen = olsDefault) then Exit;
+    RaiseNative := FRaiseExcept;
+    FRaiseExcept := False;
+    try
+      ApplyOpenLineStates;
+      ErrorCode := FLastError;
+      if ErrorCode <> sOK then
+      begin
+        try
+          try
+            CloseSocket;
+          except
+            on E: ESynaSerError do ; // Preserve the opening error.
+          end;
+        finally
+          {$IFDEF UNIX}
+          // Opening owns the lock before InstanceActive becomes true.
+          if FLinuxLock then cpomReleaseComport;
+          {$ENDIF}
+          SetSynaError(ErrorCode);
+        end;
+      end;
+    finally
+      FRaiseExcept := RaiseNative;
+    end;
+    ExceptCheck;
+  end;
+
 begin
   // Is this TBlockSerial Instance already busy?
   if InstanceActive then           {HGJ}
@@ -1234,6 +1365,8 @@ begin
   ExceptCheck;
   if FLastError <> sOK then
     Exit;
+  InitializeOpenLines;
+  if FLastError <> sOK then Exit;
 {$ELSE}
   if FComNr <> PortIsClosed then
     FDevice := '\\.\COM' + IntToStr(FComNr + 1);
@@ -1246,6 +1379,8 @@ begin
   ExceptCheck;
   if FLastError <> sOK then
     Exit;
+  InitializeOpenLines;
+  if FLastError <> sOK then Exit;
   SetCommMask(FHandle, 0);
   SetupComm(Fhandle, FRecvBuffer, 0);
   CommTimeOuts.ReadIntervalTimeout := MAXDWORD;
@@ -1271,8 +1406,11 @@ begin
   else
   begin
     FInstanceActive:= True;
-    RTS := True;
-    DTR := True;
+    if (FDtrOnOpen = olsDefault) and (FRtsOnOpen = olsDefault) then
+    begin
+      RTS := True;
+      DTR := True;
+    end;
     Purge;
   end;
   ExceptCheck;

@@ -19,6 +19,7 @@ uses
   SerialWindowsChangeSourceTests,
   SerialSelectorComponentTests,
   SerialSelectorMouseEventTests,
+  LazSerialOpenLineTests,
   LazSerialIncrementalLineTests,
   LazSerialCleanupFailureTests,
   LazSerialCustomBaudSetupTests,

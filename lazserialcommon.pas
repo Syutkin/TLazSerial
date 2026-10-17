@@ -25,6 +25,8 @@ resourcestring
   lngSpace = 'Space';
 
 type
+  TSerialOpenLineState = (olsDefault, olsInactive, olsActive);
+
   TSerialWriteOutcome = (swoCompleted, swoFailed, swoCancelled, swoTimedOut);
 
   TSerialWriteResult = record
@@ -56,6 +58,26 @@ const
   CrLf = Cr + Lf;
   cSerialChunk = 8192;
 
+procedure ValidateSerialOpenLines(ADtr, ARts: TSerialOpenLineState;
+  AFlowControl: TFlowControl);
+
 implementation
+
+uses SysUtils;
+
+procedure ValidateSerialOpenLines(ADtr, ARts: TSerialOpenLineState;
+  AFlowControl: TFlowControl);
+begin
+  if (ADtr <> olsDefault) and
+    (AFlowControl in [fcDTR_DSR, fcXonXoff_and_DTR_DSR]) then
+    raise EArgumentException.Create('DtrOnOpen conflicts with DTR handshaking');
+  if (ADtr = olsInactive) and
+    (AFlowControl in [fcDTR, fcXonXoff_and_DTR, fcXonXoff_and_RTS_CTS]) then
+    raise EArgumentException.Create('Flow control requires an active DTR line');
+  if (ARts <> olsDefault) and
+    (AFlowControl in [fcRTS_CTS, fcXonXoff_and_RTS_CTS,
+      fcDTR_DSR, fcXonXoff_and_DTR_DSR]) then
+    raise EArgumentException.Create('RtsOnOpen conflicts with driver-controlled RTS');
+end;
 
 end.

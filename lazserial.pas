@@ -119,11 +119,15 @@ type
   ELazSerialThreadError = class(Exception);
 
   TSerialWriteOutcome = LazSerialCommon.TSerialWriteOutcome;
+  TSerialOpenLineState = LazSerialCommon.TSerialOpenLineState;
   TSerialWriteResult = LazSerialCommon.TSerialWriteResult;
   TSerialWriteCompletedEvent = procedure(Sender: TObject;
     const AResult: TSerialWriteResult) of object;
 
 const
+  olsDefault = LazSerialCommon.olsDefault;
+  olsInactive = LazSerialCommon.olsInactive;
+  olsActive = LazSerialCommon.olsActive;
   ErrReadBufferOverflow = LazSerialCommon.ErrReadBufferOverflow;
   swoCompleted = LazSerialCommon.swoCompleted;
   swoFailed = LazSerialCommon.swoFailed;
@@ -193,6 +197,8 @@ type
     FStopBits: TStopBits;
     
     FFlowControl: TFlowControl;
+    FDtrOnOpen: TSerialOpenLineState;
+    FRtsOnOpen: TSerialOpenLineState;
     FRcvLineCRLF : Boolean;
 
     FOnRxData: TNotifyEvent;
@@ -236,6 +242,8 @@ type
     function GetClosePending: Boolean;
     procedure SetBufferedRead(AValue: Boolean);
     procedure SetReadBufferLimit(AValue: Integer);
+    procedure SetDtrOnOpen(AValue: TSerialOpenLineState);
+    procedure SetRtsOnOpen(AValue: TSerialOpenLineState);
     function GetWritePending: Boolean;
     procedure CheckWriteIdle(const AOperation: string);
     procedure CheckPortConfiguration(const AOperation: string);
@@ -310,6 +318,9 @@ type
     property Parity: TParity read FParity write SetParity;
     //fcHardware (legacy name) = fcRTS_CTS; fcXonXoff (legacy name) = fcXonXoff_and_DTR. The real XonXoff is named fcXonXoff_no_DTR
     property FlowControl: TFlowControl read FFlowControl write SetFlowControl;
+    // Set while closed and idle; olsDefault preserves legacy line handling.
+    property DtrOnOpen: TSerialOpenLineState read FDtrOnOpen write SetDtrOnOpen default olsDefault;
+    property RtsOnOpen: TSerialOpenLineState read FRtsOnOpen write SetRtsOnOpen default olsDefault;
     property StopBits: TStopBits read FStopBits write SetStopBits;
     
     property SynSer: TBlockSerial read GetSynSer;
@@ -615,6 +626,8 @@ var
   Serial: TLazSerial;
 begin
   CheckPortConfiguration('TLazSerial.ConfigurePort');
+  if FActive then
+    ValidateSerialOpenLines(FDtrOnOpen, FRtsOnOpen, AFlowControl);
   Lifetime := FStatusSession;
   try
     BeginTransport;
@@ -774,6 +787,8 @@ begin
   FStatusSession := TSerialReaderSession.Create(Self);
   FTransport := TLazSynapseSerialTransport.Create;
   FFlowControl := fcNone;
+  FDtrOnOpen := olsDefault;
+  FRtsOnOpen := olsDefault;
   FSerialWatcher := TSerialWatcher.Create(Self);
   FSerialWatcher.OnComDisconnected := @ComDisconnected;
   FSerialWatcher.OnDevicesRefreshed := @DevicesRefreshed;
@@ -788,6 +803,24 @@ begin
   FDevice:='COM1'; //TODO: Set to the first available device, if a device is available
   {$ENDIF}
   FRcvLineCRLF := False;;
+end;
+
+procedure TLazSerial.SetDtrOnOpen(AValue: TSerialOpenLineState);
+begin
+  CheckMainThread('TLazSerial.DtrOnOpen');
+  CheckWriteIdle('TLazSerial.DtrOnOpen');
+  if FActive or GetClosePending then
+    raise EInvalidOperation.Create('DtrOnOpen requires a closed idle port');
+  FDtrOnOpen := AValue;
+end;
+
+procedure TLazSerial.SetRtsOnOpen(AValue: TSerialOpenLineState);
+begin
+  CheckMainThread('TLazSerial.RtsOnOpen');
+  CheckWriteIdle('TLazSerial.RtsOnOpen');
+  if FActive or GetClosePending then
+    raise EInvalidOperation.Create('RtsOnOpen requires a closed idle port');
+  FRtsOnOpen := AValue;
 end;
 
 procedure TLazSerial.SetBufferedRead(AValue: Boolean);
@@ -938,6 +971,8 @@ end;
 
 procedure TLazSerial.DeviceOpen;
 begin
+  ValidateSerialOpenLines(FDtrOnOpen, FRtsOnOpen, FFlowControl);
+  FTransport.ConfigureOpenLines(FDtrOnOpen, FRtsOnOpen, FFlowControl);
   FTransport.SetStatusHandler(@SynSerStatus);
   try
     FTransport.Connect(FDevice);

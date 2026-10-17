@@ -25,7 +25,7 @@
         <PackageName Value="IDEIntf"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="47">
+    <Units Count="48">
       <Unit0>
         <Filename Value="lazserialtests.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -260,6 +260,11 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="LazSerialStatisticsCoreTests"/>
       </Unit46>
+      <Unit47>
+        <Filename Value="watcher/serialwatcherdeviceeventtests.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="SerialWatcherDeviceEventTests"/>
+      </Unit47>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

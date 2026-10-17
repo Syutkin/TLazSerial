@@ -15,8 +15,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   transitions when opening a port, subject to OS and driver behavior. Defaults
   preserve existing behavior; unsupported states and flow-control conflicts
   are reported explicitly.
-- Add `TSerialWatcher.OnDevicesRefreshed` to deliver successful device snapshots
-  on the main thread, including the initial baseline and metadata-only updates.
+- Add watcher events `OnDevicesRefreshed`, `OnDeviceAdded`, `OnDeviceRemoved`
+  and `OnDeviceChanged` for full snapshots and individual device details on
+  the main thread, including previous/current metadata for changed ports.
 
 ### Fixed
 

@@ -21,6 +21,10 @@ uses
 type
   TSerialDevicesRefreshedEvent = procedure(Sender: TObject;
     const ADevices: TSerialDeviceInfoArray) of object;
+  TSerialDeviceEvent = procedure(Sender: TObject;
+    const ADevice: TSerialDeviceInfo) of object;
+  TSerialDeviceChangedEvent = procedure(Sender: TObject;
+    const APrevious, ACurrent: TSerialDeviceInfo) of object;
 
   TSerialWatcher = class(TComponent)
   private
@@ -31,6 +35,9 @@ type
     FDeviceRefreshThread: TSerialDeviceRefreshThread;
     FDevices: TSerialDeviceInfoArray;
     FOnDevicesRefreshed: TSerialDevicesRefreshedEvent;
+    FOnDeviceAdded: TSerialDeviceEvent;
+    FOnDeviceRemoved: TSerialDeviceEvent;
+    FOnDeviceChanged: TSerialDeviceChangedEvent;
     FInitialized: Boolean;
     FLastRefreshChanged: Boolean;
     FOwnInfrastructure: Boolean;
@@ -81,12 +88,33 @@ type
     property RefreshOnLoaded: Boolean
       read FRefreshOnLoaded write FRefreshOnLoaded;
   published
-    // Every successful refresh, including the baseline and metadata-only
-    // changes. Delivered on the main thread before connection-change events.
+    // All events run on the main thread. Enumeration failures retain the
+    // previous snapshot and emit no events. Deltas describe snapshot changes,
+    // so brief physical connections between refreshes may not be observed.
+
+    // Every successful refresh, including the initial baseline, unchanged
+    // snapshots and empty lists. Passes a copy of the full current list,
+    // before device-specific and aggregate events.
     property OnDevicesRefreshed: TSerialDevicesRefreshedEvent
       read FOnDevicesRefreshed write FOnDevicesRefreshed;
+    // Once per added port after the baseline; passes its current details.
+    // Ports match by Device using the platform's existing comparison rules.
+    property OnDeviceAdded: TSerialDeviceEvent
+      read FOnDeviceAdded write FOnDeviceAdded;
+    // Once per removed port after the baseline; passes its last known details.
+    property OnDeviceRemoved: TSerialDeviceEvent
+      read FOnDeviceRemoved write FOnDeviceRemoved;
+    // Once per retained port whose metadata changed; passes previous and
+    // current details. Reordering alone is ignored; a new Device path is
+    // removal/addition, even if PersistentId is unchanged.
+    property OnDeviceChanged: TSerialDeviceChangedEvent
+      read FOnDeviceChanged write FOnDeviceChanged;
+    // Once per refresh with any additions after the baseline, without device
+    // details. Signals appearance in the list, not a successful Serial.Open.
     property OnComConnected: TNotifyEvent
       read FComConnected write FComConnected;
+    // Once per refresh with any removals after the baseline, without device
+    // details. Signals disappearance from the list, not a Serial.Close call.
     property OnComDisconnected: TNotifyEvent
       read FComDisconnected write FComDisconnected;
   end;
@@ -156,6 +184,17 @@ begin
   Result := False;
 end;
 
+function SameDeviceMetadata(const APrevious, ACurrent: TSerialDeviceInfo): Boolean;
+begin
+  Result := (APrevious.Vendor = ACurrent.Vendor) and
+    (APrevious.Model = ACurrent.Model) and
+    (APrevious.SerialShort = ACurrent.SerialShort) and
+    (APrevious.VendorId = ACurrent.VendorId) and
+    (APrevious.ProductId = ACurrent.ProductId) and
+    (APrevious.PersistentId = ACurrent.PersistentId) and
+    (APrevious.ErrorCode = ACurrent.ErrorCode);
+end;
+
 function TSerialWatcher.LoadDevices: TSerialDeviceInfoArray;
 begin
   Result := GetSerialDevices;
@@ -180,8 +219,11 @@ procedure TSerialWatcher.ApplyDevices(
 var
   AddedDevices: Boolean;
   RemovedDevices: Boolean;
+  HadBaseline: Boolean;
   Guard: TSerialWatcherEventGuard;
-  Snapshot: TSerialDeviceInfoArray;
+  PreviousDevices, CurrentDevices, Snapshot: TSerialDeviceInfoArray;
+  PreviousDevice, CurrentDevice: TSerialDeviceInfo;
+  I, PreviousIndex: Integer;
 begin
   if (FDeviceRefreshThread <> nil) and
     FDeviceRefreshThread.Delivering and
@@ -189,13 +231,16 @@ begin
     Exit;
   AddedDevices := False;
   RemovedDevices := False;
-  if FInitialized then
+  HadBaseline := FInitialized;
+  PreviousDevices := FDevices;
+  CurrentDevices := Copy(ADevices, 0, Length(ADevices));
+  if HadBaseline then
   begin
-    AddedDevices := SnapshotHasAddedDevices(FDevices, ADevices);
-    RemovedDevices := SnapshotHasRemovedDevices(FDevices, ADevices);
+    AddedDevices := SnapshotHasAddedDevices(PreviousDevices, CurrentDevices);
+    RemovedDevices := SnapshotHasRemovedDevices(PreviousDevices, CurrentDevices);
   end;
   FLastRefreshChanged := AddedDevices or RemovedDevices;
-  FDevices := Copy(ADevices, 0, Length(ADevices));
+  FDevices := CurrentDevices;
   FInitialized := True;
 
   Guard := TSerialWatcherEventGuard.Create(Self);
@@ -210,6 +255,42 @@ begin
     // Any event may destroy this watcher or its owning component.
     if Guard.Watcher = nil then
       Exit;
+    // Keep the two source snapshots local: subscribers may change handlers
+    // or adopt another snapshot. Pass record copies, never our array storage.
+    if HadBaseline then
+    begin
+      if Assigned(FOnDeviceAdded) then
+        for I := Low(CurrentDevices) to High(CurrentDevices) do
+          if not ContainsSerialDevice(PreviousDevices, CurrentDevices[I].Device) and
+            Assigned(FOnDeviceAdded) then
+          begin
+            CurrentDevice := CurrentDevices[I];
+            FOnDeviceAdded(Self, CurrentDevice);
+            if Guard.Watcher = nil then Exit;
+          end;
+      if Assigned(FOnDeviceRemoved) then
+        for I := Low(PreviousDevices) to High(PreviousDevices) do
+          if not ContainsSerialDevice(CurrentDevices, PreviousDevices[I].Device) and
+            Assigned(FOnDeviceRemoved) then
+          begin
+            PreviousDevice := PreviousDevices[I];
+            FOnDeviceRemoved(Self, PreviousDevice);
+            if Guard.Watcher = nil then Exit;
+          end;
+      if Assigned(FOnDeviceChanged) then
+        for I := Low(CurrentDevices) to High(CurrentDevices) do
+        begin
+          PreviousIndex := IndexOfSerialDevice(PreviousDevices, CurrentDevices[I].Device);
+          if (PreviousIndex >= 0) and Assigned(FOnDeviceChanged) and
+            not SameDeviceMetadata(PreviousDevices[PreviousIndex], CurrentDevices[I]) then
+          begin
+            PreviousDevice := PreviousDevices[PreviousIndex];
+            CurrentDevice := CurrentDevices[I];
+            FOnDeviceChanged(Self, PreviousDevice, CurrentDevice);
+            if Guard.Watcher = nil then Exit;
+          end;
+        end;
+    end;
     if AddedDevices and Assigned(FComConnected) then
       FComConnected(Self);
     if Guard.Watcher = nil then

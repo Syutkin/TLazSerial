@@ -386,12 +386,22 @@ independently controls Vendor, Model, SerialShort and ErrorCode output. With
 from the current snapshot. `TryGetSelectedDevice` returns `False` for such a
 manual value because no structured metadata record exists for it.
 
-Standalone watchers expose `OnDevicesRefreshed(Sender, Devices)` on the main
-thread after every successful refresh, including the initial baseline, an
-unchanged snapshot and an empty list. It runs before `OnComConnected` and
-`OnComDisconnected`, which continue to report only additions and removals
-after the baseline. The delivered array is a copy of the watcher's snapshot;
-failed refreshes do not fire this event and keep the previous list.
+Watcher events run on the main thread after successful refreshes:
+
+| Event | Notification |
+| --- | --- |
+| `OnDevicesRefreshed(Sender, Devices)` | A copy of the complete list, including initial, unchanged and empty snapshots. |
+| `OnDeviceAdded(Sender, Device)` | Each added port, with its current details. |
+| `OnDeviceRemoved(Sender, Device)` | Each removed port, with its last known details. |
+| `OnDeviceChanged(Sender, Previous, Current)` | Changed metadata for a retained port, with both records. |
+| `OnComConnected(Sender)` | Once per refresh with any additions, without device details. |
+| `OnComDisconnected(Sender)` | Once per refresh with any removals, without device details. |
+
+The first snapshot fires only `OnDevicesRefreshed`. Subsequent notifications
+follow the table order; reordering alone produces no device-change events.
+Ports match by `Device`; a renamed port is removed and added. Failed refreshes
+keep the previous list and fire no events. These events describe device-list
+changes, not serial-port opening or closing.
 
 ## Platform notes
 

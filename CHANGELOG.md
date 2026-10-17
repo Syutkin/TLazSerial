@@ -21,7 +21,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Serial configuration errors are reported even with `SynSer.RaiseExcept`
   disabled; failed live changes restore settings or close the port.
 - Closing a port respects `SynSer.DeadlockTimeout`, releases resources and
-  clears `Active`, including after I/O errors.
+  clears `Active`; after a failed write it aborts queued output immediately
+  and preserves the original write error.
 - Windows reads and writes handle cancellation without accessing freed memory.
 - Serial timeouts and bandwidth limits no longer cause unexpectedly long waits.
 - `WriteData` reports partial writes and failures; packet reads return only

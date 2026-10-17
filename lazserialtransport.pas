@@ -41,6 +41,7 @@ type
   private
     FSerial: TBlockSerial;
     FConfigured: Boolean;
+    FWriteError: Integer;
     function RestoreConfiguration(const APrevious: TDCB): Boolean;
   protected
     function CreateSerial: TBlockSerial; virtual;
@@ -109,28 +110,33 @@ begin
     Exit;
   RaiseNative := FSerial.RaiseExcept;
   FSerial.RaiseExcept := False;
-  ErrorCode := 0;
+  // Other transport calls can clear LastError after a write has failed.
+  ErrorCode := FWriteError;
   try
     try
-      Timeout := FSerial.DeadlockTimeout;
-      Started := GetTickCount64;
-      repeat
-        PendingBytes := FSerial.SendingData;
-        ErrorCode := FSerial.LastError;
-        if (ErrorCode <> 0) or (PendingBytes = 0) then
-          Break;
-        if (Timeout <= 0) or (GetTickCount64 - Started >= QWord(Timeout)) then
-        begin
-          ErrorCode := ErrTimeout;
-          Break;
-        end;
-        Sleep(1);
-      until False;
+      if ErrorCode = 0 then
+      begin
+        Timeout := FSerial.DeadlockTimeout;
+        Started := GetTickCount64;
+        repeat
+          PendingBytes := FSerial.SendingData;
+          ErrorCode := FSerial.LastError;
+          if (ErrorCode <> 0) or (PendingBytes = 0) then
+            Break;
+          if (Timeout <= 0) or (GetTickCount64 - Started >= QWord(Timeout)) then
+          begin
+            ErrorCode := ErrTimeout;
+            Break;
+          end;
+          Sleep(1);
+        until False;
+      end;
     finally
-      // CloseSocket purges any output still queued after the deadline.
+      // Purge immediately after a failed write, or after the drain deadline.
       FSerial.CloseSocket;
     end;
   finally
+    FWriteError := 0;
     FSerial.RaiseExcept := RaiseNative;
     if ErrorCode <> 0 then
       FSerial.SetSynaError(ErrorCode);
@@ -199,6 +205,8 @@ end;
 procedure TLazSynapseSerialTransport.Connect(const ADevice: string);
 begin
   FConfigured := False;
+  if not IsOpen then
+    FWriteError := 0;
   FSerial.Connect(ADevice);
 end;
 
@@ -246,7 +254,18 @@ end;
 function TLazSynapseSerialTransport.SendBuffer(ABuffer: Pointer;
   ASize: Integer): Integer;
 begin
-  Result := FSerial.SendBuffer(ABuffer, ASize);
+  try
+    Result := FSerial.SendBuffer(ABuffer, ASize);
+  except
+    on E: ESynaSerError do
+    begin
+      if FWriteError = 0 then
+        FWriteError := E.ErrorCode;
+      raise;
+    end;
+  end;
+  if FWriteError = 0 then
+    FWriteError := FSerial.LastError;
 end;
 
 function TLazSynapseSerialTransport.SendString(

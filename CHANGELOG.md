@@ -4,15 +4,26 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [0.9.0] - 2026-10-17
+
+This release makes it easier to receive messages with custom delimiters and
+send data asynchronously through an optional queue. Devices can be found by
+stable identifiers and reconnected automatically when plugged back in, with
+notifications describing device changes. Connection statistics help monitor
+activity, while DTR/RTS settings control the signal states used when opening
+a port.
 
 ### Added
 
+- Add opt-in buffered reads with bounded storage, memory-only result access
+  and background cancellation and cleanup shared with asynchronous writes.
+- Add memory-only `TryReadUntil` for buffered raw input with exact arbitrary
+  delimiters, retained partial messages and an explicit length limit.
+- Add cancellable asynchronous serial writes with completion results on the
+  main thread and nonblocking cleanup when closing during a write.
 - Add opt-in `WriteQueueEnabled` for FIFO `WriteDataAsync` calls, bounded by
   bytes and item count, with per-operation results and cancellation of the
   remaining sequence on failure, timeout or cancellation. Closing clears it.
-- Add memory-only `TryReadUntil` for buffered raw input with exact arbitrary
-  delimiters, retained partial messages and an explicit length limit.
 - Add opt-in `AutoReconnect` for identifiable devices after USB removal,
   including renamed ports, bounded opening retries and main-thread completion
   events. Defaults are a 1000 ms interval and five attempts; manual closing
@@ -20,74 +31,57 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Add `TSerialDeviceFilter`, `MatchesSerialDevice` and `FilterSerialDevices`
   to find devices by VID/PID, serial number and PersistentId in existing
   snapshots, returning all matches independently of port names.
-- Add `Serial.Statistics` snapshots with native RX/TX byte counts, buffered
-  receive usage and peak, retained error diagnostics and the session's close
-  reason. Counters survive closing and reset on a successful new opening.
+- Add watcher events `OnDevicesRefreshed`, `OnDeviceAdded`, `OnDeviceRemoved`
+  and `OnDeviceChanged` for full snapshots and individual device details on
+  the main thread, including previous/current metadata for changed ports.
 - Add opt-in `DtrOnOpen` and `RtsOnOpen` states to avoid unnecessary control-line
   transitions when opening a port, subject to OS and driver behavior. Defaults
   preserve existing behavior; unsupported states and flow-control conflicts
   are reported explicitly.
-- Add watcher events `OnDevicesRefreshed`, `OnDeviceAdded`, `OnDeviceRemoved`
-  and `OnDeviceChanged` for full snapshots and individual device details on
-  the main thread, including previous/current metadata for changed ports.
+- Add `OnError` to report terminal reader failures after closing the port.
+- Add `Serial.Statistics` snapshots with native RX/TX byte counts, buffered
+  receive usage and peak, retained error diagnostics and the session's close
+  reason. Counters survive closing and reset on a successful new opening.
+- Add console examples for synchronous I/O and buffered reads with
+  asynchronous writes.
+- Expose the TLazSerial package version through `LazSerialGetVersion`.
 
 ### Fixed
 
+- Callbacks can safely close or destroy components; pending notifications are
+  released on shutdown.
+- Windows reads and writes handle cancellation without accessing freed memory.
+- Closing a port respects `SynSer.DeadlockTimeout`, releases resources and
+  clears `Active`; after a failed write it aborts queued output immediately
+  and preserves the original write error.
 - Cleanup-thread startup failures release the port synchronously and complete
   read/write state instead of leaving operations pending, while preserving
   the original operation error.
-- The setup dialog shows the active custom baud rate, preserves it on unchanged
-  confirmation, and disables the override when a preset is selected.
-- Hotplug tracks the actually opened port and supported aliases, without
-  closing unlisted paths when another device disappears. Close-status handlers
-  can destroy or reopen the component without a stale removal notification.
-- Serial-device discovery retains the complete command output after process
-  exit, while preserving cancellation and timeout checks.
+- Serial configuration errors are reported even with `SynSer.RaiseExcept`
+  disabled; failed live changes restore settings or close the port.
+- Serial timeouts and bandwidth limits no longer cause unexpectedly long waits.
+- `WriteData` reports partial writes and failures; packet reads return only
+  received bytes.
 - Stream sends complete partial writes, including length headers, and stop
   without losing the original error when output fails or makes no progress.
 - Unix buffered reads retry interrupted system calls without reporting a
   terminal error or losing received bytes.
+- CRLF reads preserve partial lines and enforce `MaxLineLength` without losing
+  following lines or repeatedly firing `OnRxData`.
 - Line-ending conversion resets on purge and when opening a new connection.
 - Unix software flow control preserves each direction independently; parity
   conversion handles Mark/Space and rejects them where unsupported.
-- The selector example starts at 9600 baud on macOS, matching Linux and Windows.
-
-## [0.9.0] - 2026-10-17
-
-### Added
-
-- Expose the TLazSerial package version through `LazSerialGetVersion`.
-- Add `OnError` to report terminal reader failures after closing the port.
-- Add cancellable asynchronous serial writes with completion results on the
-  main thread and nonblocking cleanup when closing during a write.
-- Add opt-in buffered reads with bounded storage, memory-only result access
-  and background cancellation and cleanup shared with asynchronous writes.
-- Add console examples for synchronous I/O and buffered reads with
-  asynchronous writes.
-
-### Changed
-
-- Synaser receive storage now uses a separate ring buffer, avoiding shifts of
-  unread bytes when consuming a prefix and preserving the string `LineBuffer` API.
-
-### Fixed
-
+- Hotplug tracks the actually opened port and supported aliases, without
+  closing unlisted paths when another device disappears. Close-status handlers
+  can destroy or reopen the component without a stale removal notification.
 - Failed device refreshes preserve device lists and no longer cause false
   disconnections.
-- Callbacks can safely close or destroy components; pending notifications are
-  released on shutdown.
+- Serial-device discovery retains the complete command output after process
+  exit, while preserving cancellation and timeout checks.
 - macOS device metadata is only assigned when the match is unambiguous.
-- Serial configuration errors are reported even with `SynSer.RaiseExcept`
-  disabled; failed live changes restore settings or close the port.
-- Closing a port respects `SynSer.DeadlockTimeout`, releases resources and
-  clears `Active`; after a failed write it aborts queued output immediately
-  and preserves the original write error.
-- Windows reads and writes handle cancellation without accessing freed memory.
-- Serial timeouts and bandwidth limits no longer cause unexpectedly long waits.
-- `WriteData` reports partial writes and failures; packet reads return only
-  received bytes.
-- CRLF reads preserve partial lines and enforce `MaxLineLength` without losing
-  following lines or repeatedly firing `OnRxData`.
+- The setup dialog shows the active custom baud rate, preserves it on unchanged
+  confirmation, and disables the override when a preset is selected.
+- The selector example starts at 9600 baud on macOS, matching Linux and Windows.
 
 ## [0.8.1] - 2026-09-29
 
@@ -103,19 +97,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - Structured serial-device enumeration and display formatting.
 - Linux, Windows and macOS metadata collectors with device-only fallback.
-- Deterministic device and selector test suites.
-- Manual GitHub Actions test workflow with cached Lazarus toolchains for Linux,
-  Windows and macOS.
 - Optional manual device entry in `TSerialSelector` through
   `AllowCustomDevice`.
-- Internal serial transport abstraction for deterministic testing.
 
 ### Changed
 
-- `TSerialSelector` now uses one structured device snapshot.
 - Serial-device refresh now runs outside the GUI thread on every platform.
-- `TSerialSelector` shares its snapshot with its watcher instead of enumerating
-  devices twice.
 - Serial watcher, setup dialog and examples now use the structured API.
 - `TLazSerial` transport operations now have an explicit main-thread-only
   contract, and its owned `SynSer` object can no longer be replaced.
@@ -125,7 +112,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   short debounce with bounded settling retries, and falls back to polling.
 - macOS serial-device watching now uses IOKit notifications for
   `IOSerialBSDClient`, with automatic polling fallback.
-- Serial-port setup now separates form state from applying settings.
 
 ### Fixed
 

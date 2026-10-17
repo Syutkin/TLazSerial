@@ -11,8 +11,21 @@ in place must use a local string and assign the result back to `FBuffer`.
 ## Migrating from TLazSerial 0.7.x to 0.8.0
 
 Version 0.8.0 replaces string-based serial-device enumeration with
-`TSerialDeviceInfoArray`. Opening, reading and writing through `TLazSerial`
-remain unchanged.
+`TSerialDeviceInfoArray`. Existing opening, reading and writing signatures
+remain unchanged, with the threading and ownership requirements below.
+
+### Main-thread access
+
+Create, configure, use and destroy `TLazSerial` on the main thread. Calls to
+the port API from a worker thread now raise `ELazSerialThreadError`. Move
+those calls to the main thread using `TThread.Queue` or `TThread.Synchronize`.
+
+### `SynSer` ownership
+
+`TLazSerial.SynSer` is now read-only. Remove assignments that replace it with
+another `TBlockSerial`; the component owns its serial object. Continue to
+configure the existing object through `Serial.SynSer` without replacing or
+freeing it.
 
 ### Enumerating devices
 

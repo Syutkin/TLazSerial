@@ -6,8 +6,8 @@ unit SerialSelector;
 interface
 
 uses
-  Classes, SysUtils, LResources, Forms, Controls, StdCtrls, Graphics, Types,
-  ExtCtrls, SerialWatcher, LazSerialDevices;
+  Classes, SysUtils, LResources, Controls, StdCtrls,
+  SerialWatcher, LazSerialDevices;
 
 type
   TSerialSelector = class(TCustomComboBox)
@@ -16,15 +16,11 @@ type
     FDevices: TSerialDeviceInfoArray;
     FRequestedDevice: string;
     FSerialWatcher: TSerialWatcher;
-    FHintWindow: THintWindow;
     FAddedPorts: string;
     FRemovedPorts: string;
-    FShowHint: Boolean;
     FHint: string;
-    FHintCaption: string;
     FShowFriendlyName: Boolean;
     FDisplayOptions: TSerialDeviceDisplayOptions;
-    FRefreshTimer: TTimer;
     function GetDevice: string;
     function GetDeviceCount: Integer;
     function GetDeviceInfo(const AIndex: Integer): TSerialDeviceInfo;
@@ -33,14 +29,9 @@ type
     procedure SetDevice(const AValue: string);
     procedure SetDisplayOptions(const AValue: TSerialDeviceDisplayOptions);
     procedure SetShowFriendlyName(const AValue: Boolean);
-    function MouseIn: Boolean;
-    procedure DoMouseEnter(Sender: TObject);
     procedure DevicesRefreshed(Sender: TObject;
       const ADevices: TSerialDeviceInfoArray);
-    procedure DoOnRefreshTimer(Sender: TObject);
-    procedure HideHint(Sender: TObject);
     procedure SetSelectorHint(const AValue: string);
-    procedure SetShowHint(const AValue: Boolean);
     procedure RebuildItems(const ASelectedDevice: string);
     procedure UpdatePortChanges(const AOldDevices: TSerialDeviceInfoArray);
     property Items;
@@ -52,6 +43,7 @@ type
     procedure StartBackgroundRefresh;
     function UseBackgroundRefresh: Boolean; virtual;
     procedure Loaded; override;
+    procedure DoOnShowHint(HintInfo: PHintInfo); override;
   public
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
@@ -104,7 +96,7 @@ type
     property ParentFont;
     property ParentShowHint;
     property PopupMenu;
-    property ShowHint: Boolean read FShowHint write SetShowHint default True;
+    property ShowHint default True;
     property Style;
     property TabOrder;
     property TabStop;
@@ -204,18 +196,6 @@ begin
   Result := True;
 end;
 
-function CopyDevices(
-  const ADevices: TSerialDeviceInfoArray
-): TSerialDeviceInfoArray;
-var
-  I: Integer;
-begin
-  Result := nil;
-  SetLength(Result, Length(ADevices));
-  for I := Low(ADevices) to High(ADevices) do
-    Result[I] := ADevices[I];
-end;
-
 function DeviceChanges(
   const ASource, AReference: TSerialDeviceInfoArray
 ): string;
@@ -304,6 +284,7 @@ begin
       Text := '';
   end;
   SelLength := 0;
+  UpdateHintCaption;
 end;
 
 procedure TSerialSelector.SetDisplayOptions(
@@ -373,6 +354,7 @@ begin
   else
     Text := '';
   SelLength := 0;
+  UpdateHintCaption;
 end;
 
 procedure TSerialSelector.UpdatePortChanges(
@@ -412,12 +394,10 @@ begin
   SelectedDevice := Device;
   if (SelectedDevice = '') and not FAllowCustomDevice then
     SelectedDevice := FRequestedDevice;
-  OldDevices := CopyDevices(FDevices);
-  FDevices := CopyDevices(ADevices);
+  OldDevices := FDevices;
+  FDevices := Copy(ADevices, 0, Length(ADevices));
   UpdatePortChanges(OldDevices);
   RebuildItems(SelectedDevice);
-  if FHintWindow <> nil then
-    UpdateHint;
 end;
 
 function TSerialSelector.UseBackgroundRefresh: Boolean;
@@ -441,20 +421,6 @@ begin
   ApplyDevices(ADevices);
 end;
 
-function TSerialSelector.MouseIn: Boolean;
-var
-  MousePoint: TPoint;
-begin
-  MousePoint := ScreenToClient(Mouse.CursorPos);
-  Result := PtInRect(ClientRect, MousePoint);
-end;
-
-procedure TSerialSelector.DoOnRefreshTimer(Sender: TObject);
-begin
-  if not MouseIn then
-    HideHint(Self);
-end;
-
 constructor TSerialSelector.Create(AOwner: TComponent);
 begin
   inherited Create(AOwner);
@@ -465,7 +431,7 @@ begin
   FRemovedPorts := '';
   FShowFriendlyName := True;
   FDisplayOptions := DefaultSerialDeviceDisplayOptions;
-  FShowHint := True;
+  ShowHint := True;
   FHint := '';
 
   Sorted := False;
@@ -474,15 +440,9 @@ begin
   Text := '';
   Width := 256;
 
-  FRefreshTimer := TTimer.Create(Self);
-  FRefreshTimer.Enabled := True;
-  FRefreshTimer.Interval := 1000;
-  FRefreshTimer.OnTimer := @DoOnRefreshTimer;
-
-  OnMouseEnter := @DoMouseEnter;
-  OnMouseLeave := @HideHint;
   FSerialWatcher := TSelectorSerialWatcher.Create(Self);
   FSerialWatcher.OnDevicesRefreshed := @DevicesRefreshed;
+  UpdateHintCaption;
 end;
 
 function TSerialSelector.TryGetSelectedDevice(
@@ -523,29 +483,18 @@ end;
 
 procedure TSerialSelector.UpdateHintCaption;
 begin
-  FHintCaption := BuildHintCaption;
+  inherited Hint := BuildHintCaption;
 end;
 
 procedure TSerialSelector.UpdateHint;
-var
-  HintRect: TRect;
 begin
-  if not ShowHint or not MouseIn then
-    Exit;
-  if FHintWindow = nil then
-  begin
-    FHintWindow := THintWindow.Create(Self);
-    FRefreshTimer.Enabled := True;
-  end;
   UpdateHintCaption;
-  HintRect := FHintWindow.CalcHintRect(0, FHintCaption, nil);
-  OffsetRect(HintRect, Mouse.CursorPos.X, Mouse.CursorPos.Y + 4);
-  FHintWindow.ActivateHint(HintRect, FHintCaption);
 end;
 
-procedure TSerialSelector.DoMouseEnter(Sender: TObject);
+procedure TSerialSelector.DoOnShowHint(HintInfo: PHintInfo);
 begin
-  UpdateHint;
+  HintInfo^.HintStr := BuildHintCaption;
+  inherited DoOnShowHint(HintInfo);
 end;
 
 procedure TSerialSelector.SetSelectorHint(const AValue: string);
@@ -554,30 +503,6 @@ begin
     Exit;
   FHint := AValue;
   UpdateHintCaption;
-  if FHintWindow <> nil then
-    UpdateHint;
-end;
-
-procedure TSerialSelector.SetShowHint(const AValue: Boolean);
-begin
-  if FShowHint = AValue then
-    Exit;
-  FShowHint := AValue;
-  if FShowHint then
-    UpdateHintCaption
-  else if FHintWindow <> nil then
-    HideHint(Self);
-end;
-
-procedure TSerialSelector.HideHint(Sender: TObject);
-begin
-  {$IFNDEF Linux}
-  FreeAndNil(FHintWindow);
-  {$ELSE}
-  // Linux Mint Cinnamon crashes when a visible THintWindow is freed here.
-  if FHintWindow <> nil then
-    FHintWindow.Hide;
-  {$ENDIF}
 end;
 
 procedure TSerialSelector.Loaded;
@@ -597,7 +522,6 @@ begin
     // destroying any selector state, including during snapshot delivery.
     FreeAndNil(FSerialWatcher);
   end;
-  FreeAndNil(FHintWindow);
   inherited Destroy;
 end;
 

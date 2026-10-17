@@ -18,6 +18,7 @@ uses
   SerialMacChangeSourceTests,
   SerialWindowsChangeSourceTests,
   SerialSelectorComponentTests,
+  SerialSelectorMouseEventTests,
   SerialWatcherComponentTests,
   LazSerialSetupTests,
   SerialInfrastructureTests,

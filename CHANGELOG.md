@@ -11,6 +11,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Add `TSerialWatcher.OnDevicesRefreshed` to deliver successful device snapshots
   on the main thread, including the initial baseline and metadata-only updates.
 
+### Fixed
+
+- The selector example starts at 9600 baud on macOS, matching Linux and Windows.
+
 ## [0.9.0] - 2026-10-17
 
 ### Added

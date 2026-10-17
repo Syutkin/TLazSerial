@@ -87,7 +87,6 @@ type
 {$ENDIF}
   TDataBits=(db8bits,db7bits,db6bits,db5bits);
   TParity=(pNone,pOdd,pEven,pMark,pSpace);
-  //TFlowControl moved to LazSerialCommon
   TStopBits=(sbOne,sbOneAndHalf,sbTwo);
 
   TModemSignal = (msRI,msCD,msCTS,msDSR);
@@ -190,7 +189,6 @@ type
     FParity: TParity;
     FStopBits: TStopBits;
     
-    //FSoftflow, FHardflow: boolean;
     FFlowControl: TFlowControl;
     FRcvLineCRLF : Boolean;
 
@@ -274,7 +272,6 @@ type
     // AData. An oversized line raises ESynaSerError/ErrMaxBuffer.
     function TryReadData(out AData: string): Boolean;
     property ClosePending: Boolean read GetClosePending;
-//    function ReadBuffer(var buf; size: integer): integer;
 
     // write data to port
     function WriteData(data: string): integer;
@@ -293,19 +290,17 @@ type
     function GetCarrier: boolean;
 
     // set pin states
-//    procedure SetRTSDTR(RtsState, DtrState: boolean);
     procedure SetDTR(OnOff: boolean);
     procedure SetRTS(OnOff: boolean);
-//  procedure SetBreak(OnOff: boolean);
 
   published
     property BufferedRead: Boolean read FBufferedRead write SetBufferedRead default False;
     property ReadBufferLimit: Integer read FReadBufferLimit write SetReadBufferLimit default 65536;
     property Active: boolean read FActive write SetActive;
     // Will be overridden by CustomBaudRate if its value is ≥ 0.
-    property BaudRate: TBaudRate read FBaudRate write SetBaudRate; // default br115200;
+    property BaudRate: TBaudRate read FBaudRate write SetBaudRate;
     // If < 0 the value of BaudRate is used instead.
-    property CustomBaudRate: integer read FCustomBaudRate write SetCustomBaudrate; //default -1
+    property CustomBaudRate: integer read FCustomBaudRate write SetCustomBaudrate;
     property DataBits: TDataBits read FDataBits write SetDataBits;
     property Parity: TParity read FParity write SetParity;
     //fcHardware (legacy name) = fcRTS_CTS; fcXonXoff (legacy name) = fcXonXoff_and_DTR. The real XonXoff is named fcXonXoff_no_DTR
@@ -754,13 +749,10 @@ end;
 constructor TLazSerial.Create(AOwner: TComponent);
 begin
   inherited;
-  //FHandle:=-1;
   ReadThread := nil;
   FTransportLock := TCriticalSection.Create;
   FStatusSession := TSerialReaderSession.Create(Self);
   FTransport := TLazSynapseSerialTransport.Create;
-  //FHardflow:=false;
-  //FSoftflow:=false;
   FFlowControl := fcNone;
   FSerialWatcher := TSerialWatcher.Create(Self);
   FSerialWatcher.OnComDisconnected := @ComDisconnected;
@@ -775,7 +767,6 @@ begin
   FDevice:='COM1'; //TODO: Set to the first available device, if a device is available
   {$ENDIF}
   FRcvLineCRLF := False;;
-//  FBaudRate:=br115200;
 end;
 
 procedure TLazSerial.SetBufferedRead(AValue: Boolean);
@@ -1075,29 +1066,6 @@ begin
   FDevice := ADevice;
 end;
 
-{procedure TLazSerial.SetFlowControl_obsolete(fc: TFlowControl);
-begin
-  case fc of
-    fcNone     : begin FSoftflow:=false; FHardflow:=false; end;
-    fcXonXoff  : begin FSoftflow:=true;  FHardflow:=false; end;
-    fcHardware : begin FSoftflow:=false; FHardflow:=true;  end;
-  end;
-
-  {if (fc = fcNone) then begin
-    FSoftflow:=false; FHardflow:=false;
-  end else if (fc = fcXonXoff) then begin
-    FSoftflow:=true; FHardflow:=false;
-  end else if fc=fcHardware then begin
-    FSoftflow:=false; FHardflow:=true;
-  end;}
-
-  if FSynSer.Handle<>INVALID_HANDLE_VALUE then begin
-    FSynSer.Config(AppliedBaudrate, ConstsBits[FDataBits], ConstsParity[FParity],
-                   ConstsStopBits[FStopBits], FSoftflow, FHardflow);
-  end;
-  FFlowControl:=fc;
-end;}
-
 procedure TLazSerial.SetFlowControl(aFlowControl: TFlowControl);
 begin
   CheckMainThread('TLazSerial.FlowControl');
@@ -1109,17 +1077,6 @@ begin
 end;
 
 
-{
-procedure TLazSerial.SetFlowControl(fc: TFlowControl);
-begin
-  if FHandle<>-1 then begin
-    if fc=fcNone then CurTermIO.c_cflag:=CurTermIO.c_cflag and (not CRTSCTS)
-    else CurTermIO.c_cflag:=CurTermIO.c_cflag or CRTSCTS;
-    tcsetattr(FHandle,TCSADRAIN,CurTermIO);
-  end;
-  FFlowControl:=fc;
-end;
-}
 procedure TLazSerial.SetParity(pr: TParity);
 begin
   CheckMainThread('TLazSerial.Parity');
@@ -1299,14 +1256,6 @@ begin
   CheckMainThread('TLazSerial.GetCarrier');
   result := ReadModemSignal(msCD);
 end;
-
-{procedure TLazSerial.SetBreak(OnOff: boolean);
-begin
-//  if FHandle=-1 then
-//    ComException('can not set break state on a closed port.');
-//  if OnOff=false then ioctl(FHandle,TIOCCBRK,1)
-//  else ioctl(FHandle,TIOCSBRK,0);
-end;  }
 
 
 procedure TLazSerial.SetDTR(OnOff: boolean);

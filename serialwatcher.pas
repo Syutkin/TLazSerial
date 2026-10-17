@@ -132,18 +132,6 @@ const
   WindowsSettleRetryCount = 3;
   {$ENDIF}
 
-function CopyDevices(
-  const ADevices: TSerialDeviceInfoArray
-): TSerialDeviceInfoArray;
-var
-  I: Integer;
-begin
-  Result := nil;
-  SetLength(Result, Length(ADevices));
-  for I := Low(ADevices) to High(ADevices) do
-    Result[I] := ADevices[I];
-end;
-
 function SnapshotHasAddedDevices(
   const APrevious, ACurrent: TSerialDeviceInfoArray
 ): Boolean;
@@ -207,7 +195,7 @@ begin
     RemovedDevices := SnapshotHasRemovedDevices(FDevices, ADevices);
   end;
   FLastRefreshChanged := AddedDevices or RemovedDevices;
-  FDevices := CopyDevices(ADevices);
+  FDevices := Copy(ADevices, 0, Length(ADevices));
   FInitialized := True;
 
   Guard := TSerialWatcherEventGuard.Create(Self);
@@ -216,7 +204,7 @@ begin
     begin
       // Dynamic arrays are shared even through const parameters. Do not expose
       // the watcher's own storage to an event handler.
-      Snapshot := CopyDevices(FDevices);
+      Snapshot := Copy(FDevices, 0, Length(FDevices));
       FOnDevicesRefreshed(Self, Snapshot);
     end;
     // Any event may destroy this watcher or its owning component.
@@ -248,7 +236,7 @@ procedure TSerialWatcher.AdoptSnapshot(
   const ADevices: TSerialDeviceInfoArray
 );
 begin
-  FDevices := CopyDevices(ADevices);
+  FDevices := Copy(ADevices, 0, Length(ADevices));
   FInitialized := True;
   StartWatching;
 end;

@@ -63,25 +63,6 @@ type
   end;
 
 
-const
-{$IFDEF UNIX}
-  BaudRateStrings: array[TBaudRate] of string =
-    ('0', '50', '75', '110', '134', '150', '200', '300', '600', '1200', '1800',
-    '2400', '4800', '9600', '19200', '38400', '57600', '115200', '230400'
-    {$IFNDEF DARWIN}  // LINUX
-       , '460800', '500000', '576000', '921600', '1000000', '1152000', '1500000',
-       '2000000', '2500000', '3000000', '3500000', '4000000'
-    {$ENDIF}  );
-{$ELSE}      // MSWINDOWS
-  BaudRateStrings: array[TBaudRate] of string = ('110', '300', '600',
-    '1200', '2400', '4800', '9600', '14400', '19200', '38400', '56000', '57600',
-    '115200', '128000', '230400', '250000', '256000','460800', '921600');
-{$ENDIF}
-{  StopBitsStrings: array[TStopBits] of string = ('1', '1.5', '2');
-  DataBitsStrings: array[TDataBits] of string = ('8', '7', '6', '5');
-  ParityBitsStrings: array[TParity] of string = ('None', 'Odd', 'Even','Mark', 'Space');
-  FlowControlStrings: array[TFlowControl] of string = ('None', 'Software', 'HardWare');}
-
 var
   Form1: TForm1;
   ConnectedDevice : string;
@@ -174,15 +155,9 @@ begin
   end;
 end;
 
-procedure StringArrayToList(AList: TStrings; const AStrings: array of string);
-var
- Cpt: Integer;
-begin
-  for Cpt := Low(AStrings) to High(AStrings) do
-   AList.Add(AStrings[Cpt]);
-end;
-
 procedure TForm1.FormCreate(Sender: TObject);
+var
+  Rate: TBaudRate;
 begin
   ComboLineEnding.Items.Add(lngLineEndingNone);
   ComboLineEnding.Items.Add(lngLineEndingLF);
@@ -194,11 +169,10 @@ begin
   chkSerialNumber.Checked := sddoSerialShort in
     SerialSelector1.DisplayOptions;
   chkErrorCode.Checked := sddoErrorCode in SerialSelector1.DisplayOptions;
-  StringArrayToList(ComboBox1.Items,BaudRateStrings) ;
-  //Set baudrate to 9 600
-  {$ifdef linux}ComboBox1.ItemIndex := 13;
-  {$else}ComboBox1.ItemIndex := 6;
-  {$endif}
+  ComboBox1.Items.Clear;
+  for Rate := Low(TBaudRate) to High(TBaudRate) do
+    ComboBox1.Items.Add(BaudRateToStr(Rate));
+  ComboBox1.ItemIndex := ComboBox1.Items.IndexOf(BaudRateToStr(br__9600));
 end;
 
 procedure TForm1.LazSerial1Removed(Sender: TObject);

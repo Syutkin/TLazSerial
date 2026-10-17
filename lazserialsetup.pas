@@ -80,19 +80,6 @@ uses lazsynaser;
 {$R *.lfm}
 
 const
-{$IFDEF UNIX}
-  BaudRateStrings: array[TBaudRate] of string =
-    ('0', '50', '75', '110', '134', '150', '200', '300', '600', '1200', '1800',
-    '2400', '4800', '9600', '19200', '38400', '57600', '115200', '230400'
-    {$IFNDEF DARWIN}  // LINUX
-       , '460800', '500000', '576000', '921600', '1000000', '1152000', '1500000',
-       '2000000', '2500000', '3000000', '3500000', '4000000'
-    {$ENDIF}  );
-{$ELSE}      // MSWINDOWS
-  BaudRateStrings: array[TBaudRate] of string = ('110', '300', '600',
-    '1200', '2400', '4800', '9600', '14400', '19200', '38400', '56000', '57600',
-    '115200', '128000', '230400', '250000', '256000','460800', '921600');
-{$ENDIF}
   StopBitsStrings: array[TStopBits] of string = ('1', '1.5', '2');
   DataBitsStrings: array[TDataBits] of string = ('8', '7', '6', '5');
   ParityBitsStrings: array[TParity] of string = (lngNone, lngOdd, lngEven, lngMark, lngSpace);
@@ -167,7 +154,7 @@ end;
 // baud rate to string
 function BaudRateToStr(BaudRate: TBaudRate): string;
 begin
-  Result := BaudRateStrings[BaudRate];
+  Result := IntToStr(ConstsBaud[BaudRate]);
 end;
 
 // stop bits to string
@@ -238,6 +225,8 @@ end;
 
 
 procedure TComSetupFrm.FormCreate(Sender: TObject);
+var
+  Rate: TBaudRate;
 begin
   SerialSelector1.ShowHint := true;
   ComComboBox2.Items.Clear;
@@ -245,7 +234,8 @@ begin
   ComComboBox4.Items.Clear;
   ComComboBox5.Items.Clear;
   ComComboBox6.Items.Clear;
-  StringArrayToList(ComComboBox2.Items,BaudRateStrings) ;
+  for Rate := Low(TBaudRate) to High(TBaudRate) do
+    ComComboBox2.Items.Add(BaudRateToStr(Rate));
   StringArrayToList(ComComboBox3.Items,DataBitsStrings) ;
   StringArrayToList(ComComboBox4.Items,StopBitsStrings) ;
   StringArrayToList(ComComboBox5.Items,ParityBitsStrings) ;

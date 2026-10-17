@@ -14,7 +14,8 @@ uses
   LazSynaSer, lazserialsetup, SerialWatcherSupport, SerialLinuxChangeSource,
   SerialWindowsChangeSource, SerialMacChangeSource, LazSerialTransport,
   LazSerialWrite, LazSerialNativeWrite, SerialRingBuffer, LazSerialRead,
-  LazSerialNativeRead, LazSerialStatistics, LazarusPackageIntf;
+  LazSerialNativeRead, LazSerialStatistics, LazSerialReconnect,
+  LazarusPackageIntf;
 
 implementation
 

@@ -56,6 +56,8 @@ uses
   SerialCommandRunnerTests,
   SerialDeviceFormatTests,
   SerialDeviceFilterTests,
+  LazSerialReconnectPolicyTests,
+  LazSerialReconnectTests,
   SerialDeviceParserTests,
   SerialDeviceCollectorTests,
   SerialPlatformCollectorSmokeTests,

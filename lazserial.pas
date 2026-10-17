@@ -61,6 +61,7 @@ uses
 {$ENDIF}
   SysUtils, SyncObjs, lazsynaser,  LResources, Forms, Controls, Graphics, Dialogs,
   PropEdits, SerialWatcher, LazSerialCommon, LazSerialStatistics, LazSerialDevices,
+  LazSerialReconnect,
   LazSerialTransport, LazSerialWrite, LazSerialRead;
 
 const
@@ -199,6 +200,9 @@ type
     FConnectionId: QWord;
 
     FSerialWatcher : TSerialWatcher;
+    FReconnect: TSerialReconnect;
+    FOnReconnected: TNotifyEvent;
+    FOnReconnectFailed: TSerialErrorEvent;
 
     FBaudRate: TBaudRate;
     FCustomBaudRate : Integer;
@@ -232,6 +236,16 @@ type
     function ReadModemSignal(ASignal: TModemSignal): Boolean;
     procedure DeviceOpen;
     procedure DeviceClose;
+    procedure OpenConnection(AReconnecting: Boolean);
+    procedure ReconnectReady(Sender: TObject);
+    procedure ReaderConnectionLost(AErrorCode: Integer);
+    function GetAutoReconnect: Boolean;
+    procedure SetAutoReconnect(AValue: Boolean);
+    function GetReconnectIntervalMs: Cardinal;
+    procedure SetReconnectIntervalMs(AValue: Cardinal);
+    function GetReconnectMaxAttempts: Cardinal;
+    procedure SetReconnectMaxAttempts(AValue: Cardinal);
+    function GetReconnectPending: Boolean;
 
     procedure CheckMainThread(const AOperation: string);
     procedure ComException(str: string);
@@ -296,6 +310,8 @@ type
     // AData. An oversized line raises ESynaSerError/ErrMaxBuffer.
     function TryReadData(out AData: string): Boolean;
     property ClosePending: Boolean read GetClosePending;
+    // Waiting for the saved device, native cleanup or a retry; Active is False.
+    property ReconnectPending: Boolean read GetReconnectPending;
     // Main-thread memory snapshot, available during I/O and after closing.
     property Statistics: TSerialStatistics read GetStatistics;
 
@@ -320,6 +336,16 @@ type
     procedure SetRTS(OnOff: boolean);
 
   published
+    // Restore a previously opened, identifiable device after confirmed removal.
+    // Manual Close/Active=False, Device changes and disabling cancel waiting.
+    property AutoReconnect: Boolean read GetAutoReconnect write SetAutoReconnect default False;
+    property ReconnectIntervalMs: Cardinal read GetReconnectIntervalMs write SetReconnectIntervalMs default DefaultReconnectIntervalMs;
+    property ReconnectMaxAttempts: Cardinal read GetReconnectMaxAttempts write SetReconnectMaxAttempts default DefaultReconnectMaxAttempts;
+    // Main-thread notification after automatic opening; starts a new session.
+    property OnReconnected: TNotifyEvent read FOnReconnected write FOnReconnected;
+    // Once after the retry budget is exhausted, with the last opening error.
+    // Distinct from OnError, which retains its terminal-reader-error contract.
+    property OnReconnectFailed: TSerialErrorEvent read FOnReconnectFailed write FOnReconnectFailed;
     property BufferedRead: Boolean read FBufferedRead write SetBufferedRead default False;
     property ReadBufferLimit: Integer read FReadBufferLimit write SetReadBufferLimit default 65536;
     property Active: boolean read FActive write SetActive;
@@ -496,9 +522,10 @@ begin
     Exit;
   Supports(FOwner.FStatusSession, ISerialReaderFailureSession, Lifetime);
   FOwner.FStatistics.MarkClosed(scrReadError);
+  FOwner.ReaderConnectionLost(AErrorCode);
   try
     try
-      FOwner.Close;
+      FOwner.DeviceClose;
     except
       // Close has released the port; the reader error is the original failure.
       on E: ESynaSerError do ;
@@ -825,6 +852,8 @@ begin
   FSerialWatcher := TSerialWatcher.Create(Self);
   FSerialWatcher.OnComDisconnected := @ComDisconnected;
   FSerialWatcher.OnDevicesRefreshed := @DevicesRefreshed;
+  FReconnect := TSerialReconnect.Create(Self);
+  FReconnect.OnReady := @ReconnectReady;
   FReadBufferLimit := 65536;
   FCustomBaudRate := -1;
   FClosing := False;
@@ -940,6 +969,7 @@ end;
 destructor TLazSerial.Destroy;
 begin
   FDestroying := True;
+  FreeAndNil(FReconnect);
   FStatusSession.Detach;
   FSerialWatcher.OnComDisconnected := nil;
   FSerialWatcher.OnDevicesRefreshed := nil;
@@ -979,6 +1009,139 @@ procedure TLazSerial.Open;
 begin
   CheckMainThread('TLazSerial.Open');
   Active:=true;
+end;
+
+function TLazSerial.GetAutoReconnect: Boolean;
+begin
+  CheckMainThread('TLazSerial.AutoReconnect');
+  Result := FReconnect.Enabled;
+end;
+
+procedure TLazSerial.SetAutoReconnect(AValue: Boolean);
+begin
+  CheckMainThread('TLazSerial.AutoReconnect');
+  if FReconnect.Enabled = AValue then Exit;
+  FReconnect.Enabled := AValue;
+  if AValue and FActive then FReconnect.Connected(FConnectedDevice);
+end;
+
+function TLazSerial.GetReconnectIntervalMs: Cardinal;
+begin
+  CheckMainThread('TLazSerial.ReconnectIntervalMs');
+  Result := FReconnect.IntervalMs;
+end;
+
+procedure TLazSerial.SetReconnectIntervalMs(AValue: Cardinal);
+begin
+  CheckMainThread('TLazSerial.ReconnectIntervalMs');
+  FReconnect.IntervalMs := AValue;
+end;
+
+function TLazSerial.GetReconnectMaxAttempts: Cardinal;
+begin
+  CheckMainThread('TLazSerial.ReconnectMaxAttempts');
+  Result := FReconnect.MaxAttempts;
+end;
+
+procedure TLazSerial.SetReconnectMaxAttempts(AValue: Cardinal);
+begin
+  CheckMainThread('TLazSerial.ReconnectMaxAttempts');
+  FReconnect.MaxAttempts := AValue;
+end;
+
+function TLazSerial.GetReconnectPending: Boolean;
+begin
+  CheckMainThread('TLazSerial.ReconnectPending');
+  Result := FReconnect.Pending;
+end;
+
+procedure TLazSerial.ReconnectReady(Sender: TObject);
+var DeviceName: string;
+begin
+  if FDestroying or FActive or not FReconnect.Pending then Exit;
+  if GetClosePending or GetWritePending or FClosing then
+  begin
+    FReconnect.DeferAttempt;
+    Exit;
+  end;
+  if not FReconnect.BeginAttempt(DeviceName) then Exit;
+  FDevice := DeviceName;
+  OpenConnection(True);
+  // Opening delivers callbacks which may have destroyed this component.
+end;
+
+procedure TLazSerial.ReaderConnectionLost(AErrorCode: Integer);
+begin
+  if AErrorCode = ErrReadBufferOverflow then FReconnect.Cancel
+  else FReconnect.ConnectionLost(False);
+end;
+
+procedure TLazSerial.OpenConnection(AReconnecting: Boolean);
+var
+  PreviousStatistics: ISerialStatisticsState;
+  Lifetime: ISerialReaderSession;
+  Serial: TLazSerial;
+  Generation, OpenedId: QWord;
+  Failed: Boolean;
+  ErrorCode: Integer;
+  ErrorMessage: string;
+begin
+  Lifetime := FStatusSession;
+  Generation := FReconnect.Generation;
+  OpenedId := 0;
+  Failed := False;
+  ErrorCode := 0;
+  ErrorMessage := '';
+  if ReadThread <> nil then DeviceClose;
+  Serial := (Lifetime as TSerialReaderSession).FOwner;
+  if Serial = nil then Exit;
+  if FReadOperation <> nil then
+  begin
+    FReadOperation.Detach;
+    FReadOperation := nil;
+  end;
+  BeginTransport;
+  try
+    FSerialWatcher.Refresh;
+    PreviousStatistics := FStatistics;
+    FStatistics := CreateSerialStatistics;
+    try
+      FTransport.SetStatistics(FStatistics);
+      DeviceOpen;
+      FActive := True;
+      FReconnect.Connected(FConnectedDevice);
+      Generation := FReconnect.Generation;
+      OpenedId := FConnectionId;
+    except
+      on E: Exception do
+      begin
+        FStatistics := PreviousStatistics;
+        if not AReconnecting then raise;
+        ErrorMessage := E.Message;
+        if E is ESynaSerError then
+        begin
+          ErrorCode := ESynaSerError(E).ErrorCode;
+          if ESynaSerError(E).ErrorMessage <> '' then
+            ErrorMessage := ESynaSerError(E).ErrorMessage;
+        end;
+        Failed := FReconnect.AttemptFailed;
+      end;
+    end;
+  finally
+    EndTransport;
+  end;
+  // Status callbacks run outside the transport lock and may close, reopen or
+  // destroy the component. Their exceptions must never become retry failures.
+  Serial := (Lifetime as TSerialReaderSession).FOwner;
+  if not AReconnecting or (Serial = nil) then Exit;
+  if Serial.FReconnect.Generation <> Generation then Exit;
+  if (OpenedId <> 0) and Serial.FActive and
+    (Serial.FConnectionId = OpenedId) then
+  begin
+    if Assigned(Serial.FOnReconnected) then Serial.FOnReconnected(Serial);
+  end
+  else if Failed and not Serial.FActive and Assigned(Serial.FOnReconnectFailed) then
+    Serial.FOnReconnectFailed(Serial, ErrorCode, ErrorMessage);
 end;
 
 procedure TLazSerial.ShowSetupDialog;
@@ -1106,9 +1269,10 @@ begin
 end;
 
 procedure TLazSerial.SetActive(state: boolean);
-var PreviousStatistics: ISerialStatisticsState;
 begin
   CheckMainThread('TLazSerial.Active');
+  // Explicit requests cancel waiting even when Active is already False.
+  if (FReconnect <> nil) and (not state or not FActive) then FReconnect.Cancel;
   if state and (FWriteCloseRequested or GetClosePending) then
     raise EInvalidOperation.Create('Serial port cleanup is pending');
   if (state = FActive) and (state or (ReadThread = nil)) then
@@ -1116,30 +1280,7 @@ begin
   if not state then
     DeviceClose
   else
-  begin
-    if ReadThread <> nil then DeviceClose;
-    if FReadOperation <> nil then
-    begin
-      FReadOperation.Detach;
-      FReadOperation := nil;
-    end;
-    BeginTransport;
-    try
-      FSerialWatcher.Refresh;
-      PreviousStatistics := FStatistics;
-      FStatistics := CreateSerialStatistics;
-      try
-        FTransport.SetStatistics(FStatistics);
-        DeviceOpen;
-        FActive := True;
-      except
-        FStatistics := PreviousStatistics;
-        raise;
-      end;
-    finally
-      EndTransport;
-    end;
-  end;
+    OpenConnection(False);
 end;
 
 procedure TLazSerial.SetBaudRate(br: TBaudRate);
@@ -1171,6 +1312,7 @@ procedure TLazSerial.SetDevice(const ADevice: string);
 begin
   CheckMainThread('TLazSerial.Device');
   CheckPortConfiguration('TLazSerial.Device');
+  if (FDevice <> ADevice) and (FReconnect <> nil) then FReconnect.Cancel;
   FDevice := ADevice;
 end;
 
@@ -1556,7 +1698,8 @@ begin
   if Operation.GetFailure(Code, Message) then
   begin
     FStatistics.MarkClosed(scrReadError);
-    Close;
+    ReaderConnectionLost(Code);
+    DeviceClose;
     Serial := (Lifetime as TSerialReaderSession).FOwner;
     if Serial <> nil then Serial.DeliverReaderError(Code, Message);
     Exit;
@@ -1595,6 +1738,7 @@ end;
 procedure TLazSerial.DevicesRefreshed(Sender: TObject;
   const ADevices: TSerialDeviceInfoArray);
 begin
+  FReconnect.Observe(ADevices);
   if FActive and FSerialWatcher.ContainsDevice(FConnectedDevice) then
     FConnectedDeviceTracked := True;
 end;
@@ -1616,7 +1760,8 @@ begin
   Lifetime := FStatusSession;
   ConnectionId := FConnectionId;
   FStatistics.MarkClosed(scrDeviceRemoved);
-  Active := False;
+  FReconnect.ConnectionLost(True);
+  DeviceClose;
   Serial := (Lifetime as TSerialReaderSession).FOwner;
   if (Serial <> nil) and (Serial.FConnectionId = ConnectionId) and
     not Serial.FActive and Assigned(Serial.FOnRemoved) then

@@ -25,7 +25,7 @@
         <PackageName Value="IDEIntf"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="49">
+    <Units Count="51">
       <Unit0>
         <Filename Value="lazserialtests.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -270,6 +270,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="SerialDeviceFilterTests"/>
       </Unit48>
+      <Unit49>
+        <Filename Value="serial/lazserialreconnectpolicytests.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="LazSerialReconnectPolicyTests"/>
+      </Unit49>
+      <Unit50>
+        <Filename Value="serial/lazserialreconnecttests.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="LazSerialReconnectTests"/>
+      </Unit50>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

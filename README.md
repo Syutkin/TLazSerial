@@ -111,6 +111,32 @@ closing or destroying it before delivery cancels the old notification.
 If a pending asynchronous write is being cancelled, reopening must wait for
 `WritePending = False` and `ClosePending = False`.
 
+## Automatic reconnection
+
+Enable recovery after unplugging a previously opened device:
+
+```pascal
+Serial.AutoReconnect := True;
+Serial.Open;
+```
+
+`ReconnectIntervalMs` defaults to 1000; `ReconnectMaxAttempts` defaults to 5.
+Recovery uses the saved `PersistentId`, or VID/PID plus serial number, and
+requires exactly one matching port. Missing identity or ambiguous matches never
+select another device. A successful snapshot must confirm removal or a changed
+port path; reader failure alone and receive-buffer overflow do not trigger opening.
+
+`ReconnectPending` covers waiting for the device, RX/TX cleanup and retries;
+`Active` stays false until opening succeeds. Only actual opening attempts count
+towards the limit, captured when recovery starts. `OnReconnected` runs on the
+main thread after success; `OnReconnectFailed(Sender, ErrorCode, ErrorMessage)`
+runs once on exhaustion with the last opening error. Further recovery requires
+a manual opening. Initial manual opening failures still raise normally.
+
+`Close`, `Active := False`, changing `Device` or disabling `AutoReconnect`
+cancels recovery. Reopening uses the configured serial settings, starts a new
+statistics session and never replays old data or unfinished writes.
+
 ## Buffered reads
 
 Set `BufferedRead := True` before opening to move native input and receive

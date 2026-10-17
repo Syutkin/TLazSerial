@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Add opt-in `AutoReconnect` for identifiable devices after USB removal,
+  including renamed ports, bounded opening retries and main-thread completion
+  events. Defaults are a 1000 ms interval and five attempts; manual closing
+  cancels recovery and reopening waits for pending RX/TX cleanup.
 - Add `TSerialDeviceFilter`, `MatchesSerialDevice` and `FilterSerialDevices`
   to find devices by VID/PID, serial number and PersistentId in existing
   snapshots, returning all matches independently of port names.

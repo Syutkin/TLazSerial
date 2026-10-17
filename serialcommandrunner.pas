@@ -36,7 +36,7 @@ begin
   end;
 end;
 
-procedure ReadAvailableOutput(AProcess: TProcess; var AOutput: string);
+function ReadAvailableOutput(AProcess: TProcess; var AOutput: string): Boolean;
 var
   Available: DWord;
   Buffer: TOutputBuffer;
@@ -44,17 +44,18 @@ var
   ChunkCount: Integer;
   OldLength: SizeInt;
 begin
+  Result := False;
   Buffer := Default(TOutputBuffer);
   ChunkCount := 0;
   repeat
     Available := AProcess.Output.NumBytesAvailable;
     if Available = 0 then
-      Exit;
+      Exit(True);
     if Available > SizeOf(Buffer) then
       Available := SizeOf(Buffer);
     BytesRead := AProcess.Output.Read(Buffer[0], Available);
     if BytesRead <= 0 then
-      Exit;
+      Exit(True);
     OldLength := Length(AOutput);
     SetLength(AOutput, OldLength + BytesRead);
     Move(Buffer[0], AOutput[OldLength + 1], BytesRead);
@@ -69,7 +70,7 @@ function RunSerialCommand(
   out AOutput: string
 ): Boolean;
 var
-  Cancelled: Boolean;
+  Cancelled, Drained: Boolean;
   I: Integer;
   ProcessInstance: TProcess;
   StartedAt: QWord;
@@ -110,7 +111,12 @@ begin
       end;
       Sleep(CommandPollIntervalMs);
     end;
-    ReadAvailableOutput(ProcessInstance, AOutput);
+    repeat
+      Drained := ReadAvailableOutput(ProcessInstance, AOutput);
+      if Drained then Break;
+      Cancelled := Cancelled or CurrentThreadTerminated;
+      TimedOut := TimedOut or (GetTickCount64 - StartedAt >= ATimeoutMs);
+    until Cancelled or TimedOut;
     Result := not Cancelled and not TimedOut and
       (ProcessInstance.ExitStatus = 0);
   finally

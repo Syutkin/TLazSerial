@@ -19,6 +19,7 @@ uses
   SerialWindowsChangeSourceTests,
   SerialSelectorComponentTests,
   SerialSelectorMouseEventTests,
+  SerialCommandAuditTests,
   LazSerialStreamAuditTests,
   LazSerialUnixAuditTests,
   SerialWatcherComponentTests,
@@ -103,6 +104,11 @@ begin
     (ParamStr(1) = '--command-runner-helper') then
   begin
     ExitCode := RunCommandRunnerHelper;
+    Exit;
+  end;
+  if (ParamCount = 2) and (ParamStr(1) = '--audit-output-helper') then
+  begin
+    ExitCode := RunAuditOutputHelper;
     Exit;
   end;
   Application.Initialize;

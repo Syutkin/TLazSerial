@@ -13,6 +13,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Serial-device discovery retains the complete command output after process
+  exit, while preserving cancellation and timeout checks.
 - Stream sends complete partial writes, including length headers, and stop
   without losing the original error when output fails or makes no progress.
 - Unix buffered reads retry interrupted system calls without reporting a

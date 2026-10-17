@@ -23,6 +23,7 @@ uses
   SerialInfrastructureTests,
   LazSerialTransportTests,
   LazSerialAsyncWriteTests,
+  LazSerialAsyncWindowsIoTests,
   LazSerialConfigurationTests,
   LazSerialIoLifecycleTests,
   LazSerialLineTests,

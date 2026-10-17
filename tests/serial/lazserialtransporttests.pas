@@ -146,6 +146,21 @@ type
     procedure SendingDataReportsInvalidHandle;
   end;
 
+  TLazSerialWriteFailureCloseTests = class(TTestCase)
+  private
+    procedure CheckFailedWrite(const AWriteResult, AWriteError: Integer;
+      const ARaiseNative, AFailCleanup, AWriteAgain: Boolean);
+  published
+    procedure FailedWriteSkipsDrainAfterErrorCleared;
+    procedure PartialWriteTimeoutSkipsDrain;
+    procedure WriteExceptionSkipsDrain;
+    procedure CleanupFailurePreservesWriteError;
+    procedure SubsequentWriteDoesNotEraseFailure;
+    procedure SuccessfulPartialWriteStillDrains;
+    procedure ReopenedTransportDrainsNormally;
+    procedure ComponentCloseAfterWriteFailureDeactivates;
+  end;
+
 type
   TLazSerialSynchronizationTests = class(TTestCase)
   private
@@ -188,6 +203,17 @@ type
       AStopBits: Integer; AFlowControl: TFlowControl); override;
     function CanRead(const ATimeout: Integer): Boolean; override;
     function IsOpen: Boolean; override;
+  end;
+
+  TWriteFailureSerial = class(TDrainTestSerial)
+  public
+    WriteResult, WriteError: Integer;
+    function SendBuffer(Buffer: Pointer; ALength: Integer): Integer; override;
+  end;
+
+  TWriteFailureTransport = class(TDrainTestTransport)
+  protected
+    function CreateSerial: TBlockSerial; override;
   end;
 
   TScriptedReadSerial = class(TBlockSerial)
@@ -290,6 +316,196 @@ end;
 function TDrainTestTransport.IsOpen: Boolean;
 begin
   Result := NativeSerial.InstanceActive;
+end;
+
+function TWriteFailureSerial.SendBuffer(Buffer: Pointer;
+  ALength: Integer): Integer;
+begin
+  Result := WriteResult;
+  RaiseSynaError(WriteError);
+end;
+
+function TWriteFailureTransport.CreateSerial: TBlockSerial;
+begin
+  Result := TWriteFailureSerial.Create;
+end;
+
+procedure TLazSerialWriteFailureCloseTests.CheckFailedWrite(
+  const AWriteResult, AWriteError: Integer;
+  const ARaiseNative, AFailCleanup, AWriteAgain: Boolean);
+var
+  Transport: TWriteFailureTransport;
+  Driver: TWriteFailureSerial;
+  Buffer: array[0..3] of Byte;
+  UseString: Boolean;
+  WriteException, CloseException: Integer;
+begin
+  for UseString := False to True do
+  begin
+    Transport := TWriteFailureTransport.Create;
+    try
+      Transport.Connect('test');
+      Driver := TWriteFailureSerial(Transport.NativeSerial);
+      Driver.WriteResult := AWriteResult;
+      Driver.WriteError := AWriteError;
+      Driver.RaiseExcept := ARaiseNative;
+      // Bound a regression without relying on elapsed-time assertions.
+      Driver.PendingBytes := 10;
+      Driver.DrainAfterChecks := 3;
+      Driver.DeadlockTimeout := 1000;
+      if AFailCleanup then
+        Driver.CleanupError := ErrWrongParameter;
+      WriteException := 0;
+      FillChar(Buffer, SizeOf(Buffer), 0);
+      try
+        if UseString then
+          AssertEquals(AWriteResult, Transport.SendString('data'))
+        else
+          AssertEquals(AWriteResult, Transport.SendBuffer(@Buffer[0], SizeOf(Buffer)));
+      except
+        on E: ESynaSerError do WriteException := E.ErrorCode;
+      end;
+      if ARaiseNative then
+        AssertEquals(AWriteError, WriteException)
+      else
+        AssertEquals(0, WriteException);
+      if AWriteAgain then
+      begin
+        Driver.WriteError := 0;
+        Driver.WriteResult := 4;
+        AssertEquals(4, Transport.SendString('next'));
+      end;
+      // Readiness checks and other successful calls may overwrite LastError.
+      Driver.SetSynaError(0);
+      CloseException := 0;
+      try
+        Transport.Close;
+      except
+        on E: ESynaSerError do CloseException := E.ErrorCode;
+      end;
+      AssertFalse(Transport.IsOpen);
+      AssertEquals(1, Driver.CloseCount);
+      AssertEquals('Do not wait for output after a failed write', 0, Driver.QueueChecks);
+      AssertEquals('Abort the pending output instead of draining it', 10,
+        Driver.PendingAtClose);
+      AssertEquals(0, Driver.PendingBytes);
+      AssertEquals(AWriteError, Driver.LastError);
+      AssertEquals(TBlockSerial.GetErrorDesc(AWriteError), Driver.LastErrorDesc);
+      AssertEquals(ARaiseNative, Driver.RaiseExcept);
+      if ARaiseNative then
+        AssertEquals(AWriteError, CloseException)
+      else
+        AssertEquals(0, CloseException);
+      Transport.Close;
+      AssertEquals('Repeated Close must be harmless', 1, Driver.CloseCount);
+    finally
+      Transport.Free;
+    end;
+  end;
+end;
+
+procedure TLazSerialWriteFailureCloseTests.FailedWriteSkipsDrainAfterErrorCleared;
+begin
+  CheckFailedWrite(-1, ErrNoDeviceAnswer, False, False, False);
+end;
+
+procedure TLazSerialWriteFailureCloseTests.PartialWriteTimeoutSkipsDrain;
+begin
+  CheckFailedWrite(2, ErrTimeout, False, False, False);
+end;
+
+procedure TLazSerialWriteFailureCloseTests.WriteExceptionSkipsDrain;
+begin
+  CheckFailedWrite(0, ErrNoDeviceAnswer, True, False, False);
+end;
+
+procedure TLazSerialWriteFailureCloseTests.CleanupFailurePreservesWriteError;
+begin
+  CheckFailedWrite(2, ErrTimeout, False, True, False);
+  CheckFailedWrite(0, ErrTimeout, True, True, False);
+end;
+
+procedure TLazSerialWriteFailureCloseTests.SubsequentWriteDoesNotEraseFailure;
+begin
+  CheckFailedWrite(0, ErrNoDeviceAnswer, False, False, True);
+end;
+
+procedure TLazSerialWriteFailureCloseTests.SuccessfulPartialWriteStillDrains;
+var
+  Transport: TWriteFailureTransport;
+  Driver: TWriteFailureSerial;
+begin
+  Transport := TWriteFailureTransport.Create;
+  try
+    Transport.Connect('test');
+    Driver := TWriteFailureSerial(Transport.NativeSerial);
+    Driver.WriteResult := 2;
+    AssertEquals(2, Transport.SendString('data'));
+    Driver.PendingBytes := 2;
+    Driver.DrainAfterChecks := 3;
+    Transport.Close;
+    AssertEquals('A short write without an error still drains accepted bytes',
+      3, Driver.QueueChecks);
+    AssertEquals(0, Driver.PendingAtClose);
+    AssertEquals(0, Driver.LastError);
+  finally
+    Transport.Free;
+  end;
+end;
+
+procedure TLazSerialWriteFailureCloseTests.ReopenedTransportDrainsNormally;
+var
+  Transport: TWriteFailureTransport;
+  Driver: TWriteFailureSerial;
+begin
+  Transport := TWriteFailureTransport.Create;
+  try
+    Transport.Connect('test');
+    Driver := TWriteFailureSerial(Transport.NativeSerial);
+    Driver.WriteError := ErrTimeout;
+    AssertEquals(0, Transport.SendString('data'));
+    Transport.Close;
+    Transport.Connect('test');
+    Driver.WriteError := 0;
+    Driver.WriteResult := 4;
+    Driver.QueueChecks := 0;
+    Driver.PendingBytes := 4;
+    Driver.DrainAfterChecks := 3;
+    AssertEquals(4, Transport.SendString('next'));
+    Transport.Close;
+    AssertEquals('A new connection must not inherit the old failure',
+      3, Driver.QueueChecks);
+    AssertEquals(0, Driver.PendingAtClose);
+    AssertEquals(0, Driver.LastError);
+  finally
+    Transport.Free;
+  end;
+end;
+
+procedure TLazSerialWriteFailureCloseTests.ComponentCloseAfterWriteFailureDeactivates;
+var
+  Serial: TTestableLazSerial;
+  Transport: TWriteFailureTransport;
+  Driver: TWriteFailureSerial;
+begin
+  Serial := TTestableLazSerial.Create(nil);
+  try
+    Transport := TWriteFailureTransport.Create;
+    Serial.InstallTransport(Transport);
+    Serial.Open;
+    Driver := TWriteFailureSerial(Transport.NativeSerial);
+    Driver.WriteResult := 2;
+    Driver.WriteError := ErrTimeout;
+    Driver.PendingBytes := 2;
+    Driver.DrainAfterChecks := 3;
+    AssertEquals(2, Serial.WriteData('data'));
+    Serial.Close;
+    AssertFalse(Serial.Active);
+    AssertEquals('Component Close must use the abort path', 0, Driver.QueueChecks);
+    AssertEquals(ErrTimeout, Driver.LastError);
+  finally
+    Serial.Free;
+  end;
 end;
 
 procedure TLazSerialCloseTests.CloseWaitsUntilQueueDrains;
@@ -1522,6 +1738,7 @@ begin
 end;
 
 initialization
+  RegisterTest(TLazSerialWriteFailureCloseTests);
   RegisterTest(TLazSerialCloseTests);
   RegisterTest(TLazSerialSynchronizationTests);
   RegisterTest(TLazSerialPacketTests);

@@ -47,6 +47,8 @@ a port.
   reason. Counters survive closing and reset on a successful new opening.
 - Add console examples for synchronous I/O and buffered reads with
   asynchronous writes.
+- Add a diagnostic terminal example with HEX/ASCII views, text and binary
+  sending, initial DTR/RTS settings, file logging and connection statistics.
 - Expose the TLazSerial package version through `LazSerialGetVersion`.
 
 ### Fixed

@@ -60,3 +60,6 @@ Temporary Items
 /examples/serial-selector/ppas.sh
 /examples/**/.example_build/
 /tests/**/.test_build/
+
+/examples/serial-terminal/*.res
+/examples/serial-terminal/backup/

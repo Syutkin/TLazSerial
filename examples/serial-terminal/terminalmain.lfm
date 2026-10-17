@@ -1,0 +1,769 @@
+object TerminalForm: TTerminalForm
+  Left = 200
+  Height = 620
+  Top = 150
+  Width = 1008
+  Caption = 'TLazSerial Terminal'
+  ClientHeight = 620
+  ClientWidth = 1008
+  Color = 921102
+  Font.Color = 15132390
+  Font.Height = -14
+  Font.Name = 'Sans'
+  DoubleBuffered = True
+  KeyPreview = True
+  Position = poScreenCenter
+  Constraints.MinHeight = 620
+  Constraints.MinWidth = 960
+  OnCreate = FormCreate
+  OnDestroy = FormDestroy
+  OnKeyDown = FormKeyDown
+  object ViewPanel: TPanel
+    Left = 16
+    Height = 348
+    Top = 8
+    Width = 976
+    Align = alClient
+    BorderSpacing.Left = 16
+    BorderSpacing.Top = 8
+    BorderSpacing.Right = 16
+    BorderSpacing.Bottom = 12
+    BevelOuter = bvNone
+    Caption = ''
+    Color = 986895
+    ParentColor = False
+    object ViewBackground: TPaintBox
+      Left = 0
+      Height = 348
+      Top = 0
+      Width = 976
+      Align = alClient
+      ShowHint = True
+    end
+    object TitleLabel: TLabel
+      Left = 16
+      Height = 20
+      Top = 20
+      Width = 100
+      Caption = 'TLazSerial Terminal'
+      Font.Color = 15132390
+      Font.Height = -20
+      Font.Name = 'Sans'
+      ParentFont = False
+      ShowAccelChar = False
+      Font.Style = [fsBold]
+    end
+    object SubtitleLabel: TLabel
+      Left = 820
+      Height = 16
+      Top = 26
+      Width = 140
+      Anchors = [akTop, akRight]
+      Caption = 'Diagnostic terminal'
+      Font.Color = 12567756
+      Font.Height = -12
+      Font.Name = 'Sans'
+      ParentFont = False
+      ShowAccelChar = False
+      AnchorSideRight.Control = ViewPanel
+      AnchorSideRight.Side = asrBottom
+      BorderSpacing.Right = 16
+    end
+    object ConnectionLabel: TLabel
+      Left = 56
+      Height = 20
+      Top = 82
+      Width = 700
+      Caption = 'No device selected'
+      Font.Color = 15132390
+      Font.Height = -13
+      Font.Name = 'Sans'
+      ParentFont = False
+      ShowAccelChar = False
+      AutoSize = False
+      Anchors = [akTop, akLeft, akRight]
+    end
+    object StateLabel: TLabel
+      Left = 840
+      Height = 20
+      Top = 82
+      Width = 110
+      Anchors = [akTop, akRight]
+      Caption = 'Disconnected'
+      Font.Color = 12567756
+      Font.Height = -13
+      Font.Name = 'Sans'
+      ParentFont = False
+      ShowAccelChar = False
+      AnchorSideRight.Control = ViewPanel
+      AnchorSideRight.Side = asrBottom
+      BorderSpacing.Right = 26
+    end
+    object ModeLabel: TLabel
+      Left = 42
+      Height = 16
+      Top = 157
+      Width = 180
+      Caption = 'RX / TX · HEX view'
+      Font.Color = 12567756
+      Font.Height = -12
+      Font.Name = 'Sans'
+      ParentFont = False
+      ShowAccelChar = False
+    end
+    object ExchangeMemo: TMemo
+      Left = 40
+      Height = 91
+      Top = 179
+      Width = 896
+      Anchors = [akTop, akLeft, akRight, akBottom]
+      BorderStyle = bsNone
+      Color = 3092271
+      Font.Color = 15132390
+      Font.Height = -13
+      Font.Name = 'DejaVu Sans Mono'
+      ParentFont = False
+      ReadOnly = True
+      ScrollBars = ssAutoVertical
+      WordWrap = False
+    end
+    object RatesLabel: TLabel
+      Left = 26
+      Height = 20
+      Top = 306
+      Width = 250
+      Anchors = [akLeft, akBottom]
+      Caption = 'RX 0.0 KB/s · TX 0.0 KB/s'
+      Font.Color = 12567756
+      Font.Height = -13
+      Font.Name = 'Sans'
+      ParentFont = False
+      ShowAccelChar = False
+    end
+    object BufferLabel: TLabel
+      Left = 850
+      Height = 20
+      Top = 306
+      Width = 100
+      Anchors = [akRight, akBottom]
+      Caption = 'Buffer 0%'
+      Font.Color = 12567756
+      Font.Height = -13
+      Font.Name = 'Sans'
+      ParentFont = False
+      ShowAccelChar = False
+      AnchorSideRight.Control = ViewPanel
+      AnchorSideRight.Side = asrBottom
+      BorderSpacing.Right = 26
+    end
+    object DetailLabel: TLabel
+      Left = 26
+      Height = 16
+      Top = 326
+      Width = 924
+      Anchors = [akLeft, akRight, akBottom]
+      Caption = ''
+      Font.Color = 9343642
+      Font.Height = -11
+      Font.Name = 'Sans'
+      ParentFont = False
+      ShowAccelChar = False
+      AutoSize = False
+      ShowHint = True
+    end
+  end
+  object BottomPanel: TPanel
+    Left = 16
+    Height = 248
+    Top = 368
+    Width = 976
+    Align = alBottom
+    AutoSize = True
+    BorderSpacing.Left = 16
+    BorderSpacing.Right = 16
+    BorderSpacing.Bottom = 4
+    BevelOuter = bvNone
+    Caption = ''
+    ParentColor = True
+    object FTools: TPanel
+      Left = 0
+      Height = 36
+      Top = 0
+      Width = 976
+      Align = alTop
+      BevelOuter = bvNone
+      Caption = ''
+      ParentColor = True
+      BorderSpacing.Bottom = 12
+      object FConnect: TPanel
+        Left = 0
+        Height = 34
+        Top = 0
+        Width = 112
+        BevelOuter = bvNone
+        Caption = 'Connect'
+        Cursor = crHandPoint
+        Font.Color = 15132390
+        Font.Height = -12
+        Font.Name = 'Sans'
+        ParentFont = False
+        ParentColor = True
+        TabStop = True
+        OnClick = ConnectClick
+        OnEnter = ButtonFocusChanged
+        OnExit = ButtonFocusChanged
+        OnMouseDown = ButtonMouseDown
+        OnPaint = ButtonPaint
+      end
+      object FSettings: TPanel
+        Left = 124
+        Height = 34
+        Top = 0
+        Width = 122
+        BevelOuter = bvNone
+        Caption = 'Hide settings'
+        Cursor = crHandPoint
+        Font.Color = 15132390
+        Font.Height = -12
+        Font.Name = 'Sans'
+        ParentFont = False
+        ParentColor = True
+        TabStop = True
+        OnClick = SettingsClick
+        OnEnter = ButtonFocusChanged
+        OnExit = ButtonFocusChanged
+        OnMouseDown = ButtonMouseDown
+        OnPaint = ButtonPaint
+      end
+      object FViewMode: TComboBox
+        Left = 264
+        Height = 30
+        Top = 1
+        Width = 124
+        Color = 2500134
+        Font.Color = 15132390
+        Font.Height = -12
+        Font.Name = 'Sans'
+        ParentFont = False
+        ItemHeight = 0
+        ItemIndex = 0
+        Style = csDropDownList
+        OnChange = ModeChanged
+        Items.Strings = (
+          'HEX view'
+          'ASCII view'
+        )
+        Text = 'HEX view'
+      end
+      object FPause: TPanel
+        Left = 400
+        Height = 34
+        Top = 0
+        Width = 112
+        BevelOuter = bvNone
+        Caption = 'Pause view'
+        Cursor = crHandPoint
+        Font.Color = 15132390
+        Font.Height = -12
+        Font.Name = 'Sans'
+        ParentFont = False
+        ParentColor = True
+        TabStop = True
+        OnClick = PauseClick
+        OnEnter = ButtonFocusChanged
+        OnExit = ButtonFocusChanged
+        OnMouseDown = ButtonMouseDown
+        OnPaint = ButtonPaint
+      end
+      object FClear: TPanel
+        Left = 524
+        Height = 34
+        Top = 0
+        Width = 76
+        BevelOuter = bvNone
+        Caption = 'Clear'
+        Cursor = crHandPoint
+        Font.Color = 15132390
+        Font.Height = -12
+        Font.Name = 'Sans'
+        ParentFont = False
+        ParentColor = True
+        TabStop = True
+        OnClick = ClearClick
+        OnEnter = ButtonFocusChanged
+        OnExit = ButtonFocusChanged
+        OnMouseDown = ButtonMouseDown
+        OnPaint = ButtonPaint
+      end
+      object FLogButton: TPanel
+        Left = 612
+        Height = 34
+        Top = 0
+        Width = 150
+        BevelOuter = bvNone
+        Caption = 'Log to file...'
+        Cursor = crHandPoint
+        Font.Color = 15132390
+        Font.Height = -12
+        Font.Name = 'Sans'
+        ParentFont = False
+        ParentColor = True
+        TabStop = True
+        OnClick = LogClick
+        OnEnter = ButtonFocusChanged
+        OnExit = ButtonFocusChanged
+        OnMouseDown = ButtonMouseDown
+        OnPaint = ButtonPaint
+      end
+      object FLogLabel: TLabel
+        Left = 778
+        Height = 20
+        Top = 8
+        Width = 198
+        Anchors = [akTop, akLeft, akRight]
+        Caption = 'No file log'
+        Font.Color = 12567756
+        Font.Height = -12
+        Font.Name = 'Sans'
+        ParentFont = False
+        ShowAccelChar = False
+        AutoSize = False
+        ShowHint = True
+      end
+    end
+    object FSendPanel: TPanel
+      Left = 0
+      Height = 64
+      Top = 48
+      Width = 976
+      Align = alTop
+      BevelOuter = bvNone
+      Caption = ''
+      ParentColor = True
+      object FSendMode: TComboBox
+        Left = 0
+        Height = 30
+        Top = 0
+        Width = 124
+        Color = 2500134
+        Font.Color = 15132390
+        Font.Height = -12
+        Font.Name = 'Sans'
+        ParentFont = False
+        ItemHeight = 0
+        ItemIndex = 0
+        Style = csDropDownList
+        OnChange = ModeChanged
+        Items.Strings = (
+          'Text (UTF-8)'
+          'HEX bytes'
+        )
+        Text = 'Text (UTF-8)'
+      end
+      object FSendText: TEdit
+        Left = 136
+        Height = 30
+        Top = 0
+        Width = 602
+        Anchors = [akTop, akLeft, akRight]
+        Color = 2500134
+        Font.Color = 15132390
+        Font.Height = -13
+        Font.Name = 'Sans'
+        ParentFont = False
+        Text = ''
+        MaxLength = 131072
+        OnKeyPress = SendKeyPress
+        TextHint = 'Text to send, or HEX bytes such as 55 AA 00 FF'
+      end
+      object FEnding: TComboBox
+        Left = 750
+        Height = 30
+        Top = 0
+        Width = 110
+        Anchors = [akTop, akRight]
+        Color = 2500134
+        Font.Color = 15132390
+        Font.Height = -12
+        Font.Name = 'Sans'
+        ParentFont = False
+        ItemHeight = 0
+        ItemIndex = 3
+        Style = csDropDownList
+        Items.Strings = (
+          'No ending'
+          'CR'
+          'LF'
+          'CRLF'
+        )
+        Text = 'CRLF'
+      end
+      object FSend: TPanel
+        Anchors = [akTop, akRight]
+        Left = 872
+        Height = 34
+        Top = 0
+        Width = 104
+        BevelOuter = bvNone
+        Caption = 'Send'
+        Cursor = crHandPoint
+        Font.Color = 15132390
+        Font.Height = -12
+        Font.Name = 'Sans'
+        ParentFont = False
+        ParentColor = True
+        TabStop = True
+        OnClick = SendClick
+        OnEnter = ButtonFocusChanged
+        OnExit = ButtonFocusChanged
+        OnMouseDown = ButtonMouseDown
+        OnPaint = ButtonPaint
+      end
+      object FFeedback: TLabel
+        Left = 0
+        Height = 20
+        Top = 44
+        Width = 976
+        Anchors = [akTop, akLeft, akRight]
+        Caption = 'Ready. Choose a device and connect.'
+        Font.Color = 12567756
+        Font.Height = -12
+        Font.Name = 'Sans'
+        ParentFont = False
+        ShowAccelChar = False
+        AutoSize = False
+        ShowHint = True
+      end
+    end
+    object FSettingsPanel: TPanel
+      Left = 0
+      Height = 136
+      Top = 112
+      Width = 976
+      Align = alTop
+      BevelOuter = bvNone
+      Caption = ''
+      ParentColor = True
+      object SettingsTitle: TLabel
+        Left = 0
+        Height = 20
+        Top = 0
+        Width = 100
+        Caption = 'CONNECTION SETTINGS'
+        Font.Color = 12567756
+        Font.Height = -12
+        Font.Name = 'Sans'
+        ParentFont = False
+        ShowAccelChar = False
+      end
+      object DeviceLabel: TLabel
+        Left = 0
+        Height = 20
+        Top = 26
+        Width = 100
+        Anchors = [akLeft, akTop]
+        Caption = 'Device'
+        Font.Color = 12567756
+        Font.Height = -12
+        Font.Name = 'Sans'
+        ParentFont = False
+        ShowAccelChar = False
+        AnchorSideLeft.Control = FDevice
+      end
+      object BaudLabel: TLabel
+        Left = 470
+        Height = 20
+        Top = 26
+        Width = 100
+        Anchors = [akLeft, akTop]
+        Caption = 'Baud rate'
+        Font.Color = 12567756
+        Font.Height = -12
+        Font.Name = 'Sans'
+        ParentFont = False
+        ShowAccelChar = False
+        AnchorSideLeft.Control = FBaud
+      end
+      object DataLabel: TLabel
+        Left = 610
+        Height = 20
+        Top = 26
+        Width = 100
+        Anchors = [akLeft, akTop]
+        Caption = 'Data'
+        Font.Color = 12567756
+        Font.Height = -12
+        Font.Name = 'Sans'
+        ParentFont = False
+        ShowAccelChar = False
+        AnchorSideLeft.Control = FDataBits
+      end
+      object ParityLabel: TLabel
+        Left = 680
+        Height = 20
+        Top = 26
+        Width = 100
+        Anchors = [akLeft, akTop]
+        Caption = 'Parity'
+        Font.Color = 12567756
+        Font.Height = -12
+        Font.Name = 'Sans'
+        ParentFont = False
+        ShowAccelChar = False
+        AnchorSideLeft.Control = FParity
+      end
+      object StopLabel: TLabel
+        Left = 770
+        Height = 20
+        Top = 26
+        Width = 100
+        Anchors = [akLeft, akTop]
+        Caption = 'Stop'
+        Font.Color = 12567756
+        Font.Height = -12
+        Font.Name = 'Sans'
+        ParentFont = False
+        ShowAccelChar = False
+        AnchorSideLeft.Control = FStopBits
+      end
+      object FlowLabel: TLabel
+        Left = 850
+        Height = 20
+        Top = 26
+        Width = 100
+        Anchors = [akLeft, akTop]
+        Caption = 'Flow control'
+        Font.Color = 12567756
+        Font.Height = -12
+        Font.Name = 'Sans'
+        ParentFont = False
+        ShowAccelChar = False
+        AnchorSideLeft.Control = FFlow
+      end
+      object FDevice: TSerialSelector
+        Left = 0
+        Height = 30
+        Top = 44
+        Width = 456
+        Anchors = [akTop, akLeft, akRight]
+        Constraints.MinWidth = 160
+        AllowCustomDevice = True
+        ShowFriendlyName = True
+        Color = 2500134
+        Font.Color = 15132390
+        Font.Height = -12
+        Font.Name = 'Sans'
+        ParentFont = False
+        TextHint = '/dev/ttyUSB0 or COM3'
+      end
+      object FBaud: TEdit
+        Left = 470
+        Height = 30
+        Top = 44
+        Width = 126
+        Anchors = [akTop, akRight]
+        Color = 2500134
+        Font.Color = 15132390
+        Font.Height = -13
+        Font.Name = 'Sans'
+        ParentFont = False
+        Text = '115200'
+      end
+      object FDataBits: TComboBox
+        Left = 610
+        Height = 30
+        Top = 44
+        Width = 56
+        Anchors = [akTop, akRight]
+        Color = 2500134
+        Font.Color = 15132390
+        Font.Height = -12
+        Font.Name = 'Sans'
+        ParentFont = False
+        ItemHeight = 0
+        ItemIndex = 0
+        Style = csDropDownList
+        Items.Strings = (
+          '8'
+          '7'
+          '6'
+          '5'
+        )
+        Text = '8'
+      end
+      object FParity: TComboBox
+        Left = 680
+        Height = 30
+        Top = 44
+        Width = 76
+        Anchors = [akTop, akRight]
+        Color = 2500134
+        Font.Color = 15132390
+        Font.Height = -12
+        Font.Name = 'Sans'
+        ParentFont = False
+        ItemHeight = 0
+        ItemIndex = 0
+        Style = csDropDownList
+        Items.Strings = (
+          'None'
+          'Odd'
+          'Even'
+          'Mark'
+          'Space'
+        )
+        Text = 'None'
+      end
+      object FStopBits: TComboBox
+        Left = 770
+        Height = 30
+        Top = 44
+        Width = 66
+        Anchors = [akTop, akRight]
+        Color = 2500134
+        Font.Color = 15132390
+        Font.Height = -12
+        Font.Name = 'Sans'
+        ParentFont = False
+        ItemHeight = 0
+        ItemIndex = 0
+        Style = csDropDownList
+        Items.Strings = (
+          '1'
+          '1.5'
+          '2'
+        )
+        Text = '1'
+      end
+      object FFlow: TComboBox
+        Left = 850
+        Height = 30
+        Top = 44
+        Width = 126
+        Anchors = [akTop, akRight]
+        Color = 2500134
+        Font.Color = 15132390
+        Font.Height = -12
+        Font.Name = 'Sans'
+        ParentFont = False
+        ItemHeight = 0
+        ItemIndex = 0
+        Style = csDropDownList
+        Items.Strings = (
+          'None'
+          'RTS/CTS'
+          'XON/XOFF'
+          'DTR/DSR'
+        )
+        Text = 'None'
+      end
+      object DtrLabel: TLabel
+        Left = 0
+        Height = 20
+        Top = 82
+        Width = 100
+        Caption = 'DTR on open'
+        Font.Color = 12567756
+        Font.Height = -12
+        Font.Name = 'Sans'
+        ParentFont = False
+        ShowAccelChar = False
+      end
+      object RtsLabel: TLabel
+        Left = 180
+        Height = 20
+        Top = 82
+        Width = 100
+        Caption = 'RTS on open'
+        Font.Color = 12567756
+        Font.Height = -12
+        Font.Name = 'Sans'
+        ParentFont = False
+        ShowAccelChar = False
+      end
+      object TimeoutLabel: TLabel
+        Left = 850
+        Height = 20
+        Top = 82
+        Width = 100
+        Anchors = [akLeft, akTop]
+        Caption = 'TX timeout (ms)'
+        Font.Color = 12567756
+        Font.Height = -12
+        Font.Name = 'Sans'
+        ParentFont = False
+        ShowAccelChar = False
+        AnchorSideLeft.Control = FTimeout
+      end
+      object FDtr: TComboBox
+        Left = 0
+        Height = 30
+        Top = 100
+        Width = 164
+        Color = 2500134
+        Font.Color = 15132390
+        Font.Height = -12
+        Font.Name = 'Sans'
+        ParentFont = False
+        ItemHeight = 0
+        ItemIndex = 0
+        Style = csDropDownList
+        Items.Strings = (
+          'Default'
+          'Inactive'
+          'Active'
+        )
+        Text = 'Default'
+      end
+      object FRts: TComboBox
+        Left = 180
+        Height = 30
+        Top = 100
+        Width = 164
+        Color = 2500134
+        Font.Color = 15132390
+        Font.Height = -12
+        Font.Name = 'Sans'
+        ParentFont = False
+        ItemHeight = 0
+        ItemIndex = 0
+        Style = csDropDownList
+        Items.Strings = (
+          'Default'
+          'Inactive'
+          'Active'
+        )
+        Text = 'Default'
+      end
+      object FAutoReconnect: TCheckBox
+        Left = 372
+        Height = 26
+        Top = 103
+        Width = 230
+        Caption = 'Auto reconnect'
+        Font.Color = 15132390
+        ParentFont = False
+      end
+      object FTimeout: TEdit
+        Left = 850
+        Height = 30
+        Top = 100
+        Width = 126
+        Anchors = [akTop, akRight]
+        Color = 2500134
+        Font.Color = 15132390
+        Font.Height = -13
+        Font.Name = 'Sans'
+        ParentFont = False
+        Text = '1000'
+      end
+    end
+  end
+  object FTimer: TTimer
+    Left = 936
+    Top = 24
+    Enabled = False
+    Interval = 250
+    OnTimer = Tick
+  end
+end

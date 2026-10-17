@@ -212,6 +212,7 @@ See [threading and ownership](docs/API.md#threading-and-ownership) and
 | [Console: legacy](examples/console/legacy.lpr) | Synchronous reads and writes |
 | [Console: buffered](examples/console/buffered.lpr) | Buffered reads and asynchronous writes |
 | [Serial selector](examples/serial-selector/) | Device selection, hotplug and data exchange; Arduino sketch included |
+| [Diagnostic terminal](examples/serial-terminal/) | HEX/ASCII, queued writes, file logging and statistics |
 | [GPS](examples/serial-gps/) | Serial receiver, setup dialog and NMEA simulator |
 
 See [development instructions](docs/DEVELOPMENT.md) for building examples,

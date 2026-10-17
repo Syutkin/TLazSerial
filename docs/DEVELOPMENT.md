@@ -10,10 +10,15 @@ Always use `lazbuild --ws=qt6` for Lazarus builds.
 lazbuild --ws=qt6 LazSerialPort.lpk
 lazbuild --ws=qt6 examples/serial-selector/serialselectorexample.lpi
 lazbuild --ws=qt6 examples/serial-gps/serialgpsexample.lpi
+lazbuild --ws=qt6 examples/serial-terminal/serialterminal.lpi
 ```
 
 ## Examples
 
+- [Diagnostic terminal](../examples/serial-terminal/README.md) shows HEX/ASCII,
+  text and binary sending, the write queue, initial DTR/RTS states, background
+  file logging and connection statistics. It accepts an optional device
+  argument; connection settings can be hidden while monitoring the exchange.
 - `examples/console/legacy.lpr` shows console I/O with `ReadData` and
   synchronous `WriteData`; `buffered.lpr` uses `BufferedRead`, `TryReadData`
   and `WriteDataAsync`. Both list ports for selection, accept a manually

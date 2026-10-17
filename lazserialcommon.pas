@@ -25,6 +25,17 @@ resourcestring
   lngSpace = 'Space';
 
 type
+  TSerialWriteOutcome = (swoCompleted, swoFailed, swoCancelled, swoTimedOut);
+
+  TSerialWriteResult = record
+    OperationId: QWord;
+    BytesRequested: Integer;
+    BytesWritten: Integer;
+    Outcome: TSerialWriteOutcome;
+    ErrorCode: Integer;
+    ErrorMessage: string;
+  end;
+
   TFlowControl = (
     fcNone = 0,
     fcXonXoff = 1,

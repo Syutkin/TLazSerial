@@ -119,6 +119,19 @@ const
 type
   ELazSerialThreadError = class(Exception);
 
+  TSerialWriteOutcome = LazSerialCommon.TSerialWriteOutcome;
+  TSerialWriteResult = LazSerialCommon.TSerialWriteResult;
+  TSerialWriteCompletedEvent = procedure(Sender: TObject;
+    const AResult: TSerialWriteResult) of object;
+
+const
+  swoCompleted = LazSerialCommon.swoCompleted;
+  swoFailed = LazSerialCommon.swoFailed;
+  swoCancelled = LazSerialCommon.swoCancelled;
+  swoTimedOut = LazSerialCommon.swoTimedOut;
+
+type
+
   TLazSerial = class;
 
   ISerialReaderSession = interface

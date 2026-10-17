@@ -303,6 +303,7 @@ type
   TBlockSerial = class(TPersistent)
   private
     FReadBuffer: TSerialRingBuffer;
+    FMemoryReadMode: Boolean;
     FLastReadCount: Integer;
     FPacketReadLimit: Integer;
     FDiscardLine: Boolean;
@@ -392,6 +393,10 @@ type
     TermiosStruc: termios;
 {$ENDIF}
     {:Object constructor.}
+    procedure ConfigureReadBuffer(ALimit: Integer);
+    procedure AppendReadBuffer(const AData: AnsiString);
+    function BufferedDataAvailable(ALineMode: Boolean): Boolean;
+    function TryReadBuffered(ALineMode: Boolean; out AData: AnsiString): Boolean;
     constructor Create;
     {:Object destructor.}
     destructor Destroy; override;
@@ -849,6 +854,111 @@ end;
 procedure TBlockSerial.SetLineBuffer(const AValue: AnsiString);
 begin
   FReadBuffer.Assign(AValue);
+end;
+
+procedure TBlockSerial.ConfigureReadBuffer(ALimit: Integer);
+var
+  Buffer: TSerialRingBuffer;
+  Initial: Integer;
+begin
+  if (ALimit < 0) or ((ALimit > 0) and
+    (FReadBuffer.Count + Length(FDiscardPrefix) > ALimit)) then
+    raise EArgumentException.Create('Invalid receive buffer limit');
+  Initial := 4096;
+  if (ALimit > 0) and (Initial > ALimit) then Initial := ALimit;
+  Buffer := TSerialRingBuffer.Create(Initial, ALimit);
+  try
+    Buffer.Assign(FReadBuffer.Snapshot);
+  except
+    Buffer.Free;
+    raise;
+  end;
+  FReadBuffer.Free;
+  FReadBuffer := Buffer;
+  FMemoryReadMode := ALimit > 0;
+end;
+
+procedure TBlockSerial.AppendReadBuffer(const AData: AnsiString);
+begin
+  if (FReadBuffer.MaxCapacity > 0) and
+    (Length(AData) > FReadBuffer.MaxCapacity - FReadBuffer.Count - Length(FDiscardPrefix)) then
+    raise ERangeError.Create('Receive buffer limit exceeded');
+  FReadBuffer.Append(AData);
+end;
+
+function TBlockSerial.BufferedDataAvailable(ALineMode: Boolean): Boolean;
+var
+  I, Start: SizeInt;
+  Discarding, SkipComplement: Boolean;
+  Previous, Current: AnsiChar;
+  Prefix: AnsiString;
+begin
+  if not ALineMode then Exit(FReadBuffer.Count > 0);
+  Result := False;
+  Discarding := FDiscardLine;
+  Prefix := '';
+  if Discarding then Prefix := FDiscardPrefix;
+  Start := -Length(Prefix);
+  Previous := #0;
+  SkipComplement := False;
+  if FConvertLineEnd then
+  begin
+    if FLastCR then Previous := CR else if FLastLF then Previous := LF;
+    SkipComplement := Previous <> #0;
+  end;
+  for I := Start to FReadBuffer.Count - 1 do
+  begin
+    if I < 0 then Current := Prefix[Length(Prefix) + I + 1]
+    else Current := AnsiChar(FReadBuffer.PeekByte(I));
+    if SkipComplement then
+    begin
+      SkipComplement := False;
+      if ((Previous = CR) and (Current = LF)) or
+        ((Previous = LF) and (Current = CR)) then
+      begin
+        Start := I + 1;
+        Previous := #0;
+        Continue;
+      end;
+    end;
+    if (FConvertLineEnd and (Current in [CR, LF])) or
+      (not FConvertLineEnd and (Previous = CR) and (Current = LF)) then
+    begin
+      if not Discarding then Exit(True);
+      Discarding := False;
+      Start := I + 1;
+      SkipComplement := FConvertLineEnd;
+    end;
+    if not Discarding and (FMaxLineLength > 0) and
+      (I - Start + 1 >= FMaxLineLength) then Exit(True);
+    Previous := Current;
+  end;
+end;
+
+function TBlockSerial.TryReadBuffered(ALineMode: Boolean;
+  out AData: AnsiString): Boolean;
+var
+  SavedMode, SavedRaise: Boolean;
+  Error: ESynaSerError;
+begin
+  SavedMode := FMemoryReadMode;
+  SavedRaise := FRaiseExcept;
+  FMemoryReadMode := True;
+  FRaiseExcept := False;
+  try
+    if ALineMode then AData := RecvString(0) else AData := RecvPacket(0);
+    Result := FLastError = sOK;
+    if FLastError = ErrMaxBuffer then
+    begin
+      Error := ESynaSerError.Create(FLastErrorDesc);
+      Error.ErrorCode := FLastError;
+      Error.ErrorMessage := FLastErrorDesc;
+      raise Error;
+    end;
+  finally
+    FMemoryReadMode := SavedMode;
+    FRaiseExcept := SavedRaise;
+  end;
 end;
 
 class function TBlockSerial.GetVersion: string;
@@ -1444,7 +1554,7 @@ var
 
 begin
   Result := '';
-  if PreTestFailing then   {HGJ}
+  if not FMemoryReadMode and PreTestFailing then   {HGJ}
     Exit;                  {HGJ}
   SetSynaError(sOK);
   if FReadBuffer.Count > 0 then
@@ -1454,6 +1564,8 @@ begin
     else
       Result := FReadBuffer.Read(FReadBuffer.Count);
   end
+  else if FMemoryReadMode then
+    SetSynaError(ErrTimeout)
   else
   begin
     //not drain CPU on large downloads...
@@ -1513,7 +1625,7 @@ var
   Overflow: Boolean;
 begin
   Result := '';
-  if PreTestFailing then   {HGJ}
+  if not FMemoryReadMode and PreTestFailing then   {HGJ}
     Exit;                  {HGJ}
   SetSynaError(sOK);
   l := system.Length(Terminator);
@@ -1608,7 +1720,7 @@ begin
     if (x > 0) or (Overflow and not FDiscardLine) then
       Break;
     // Report a known overflow without waiting for more of the damaged line.
-    if Overflow and (FReadBuffer.Count = 0) and (WaitingData = 0) then
+    if Overflow and (FReadBuffer.Count = 0) and (FMemoryReadMode or (WaitingData = 0)) then
       Break;
     // Zero means non-blocking: drain available packets, including new bytes
     // after an incomplete FBuffer, before reporting a timeout.
@@ -1750,8 +1862,8 @@ end;
 
 function TBlockSerial.WaitingDataEx: integer;
 begin
-  if FReadBuffer.Count > 0 then
-    Result := FReadBuffer.Count
+  if FMemoryReadMode or (FReadBuffer.Count > 0) then
+    Result := FReadBuffer.Count + Length(FDiscardPrefix)
   else
     Result := WaitingData;
 end;
@@ -2180,6 +2292,7 @@ end;
 
 function TBlockSerial.CanReadEx(Timeout: integer): boolean;
 begin
+  if FMemoryReadMode then Exit(BufferedDataAvailable(False));
 	if FReadBuffer.Count > 0 then
   	Result := True
   else
@@ -2190,6 +2303,7 @@ function TBlockSerial.CanReadLine(Timeout: integer): boolean;
 var
   Start, I: Integer;
 begin
+  if FMemoryReadMode then Exit(BufferedDataAvailable(True));
   if FConvertLineEnd then
   begin
     Start := 1;
@@ -2471,6 +2585,7 @@ begin
     ErrWrongParameter: Result := 'Wrong parameter at call';     {HGJ}
     ErrPortNotOpen:    Result := 'Instance not yet connected'; {HGJ}
     ErrNoDeviceAnswer: Result := 'No device answer detected';  {HGJ}
+    ErrReadBufferOverflow: Result := 'Receive buffer limit exceeded';
     ErrMaxBuffer:      Result := 'Maximal buffer length exceeded';
     ErrTimeout:        Result := 'Timeout during operation';
     ErrNotRead:        Result := 'Reading of data failed';

@@ -6,11 +6,15 @@ interface
 
 uses
   {$IFDEF MSWINDOWS}Windows,{$ENDIF}
-  LazSerialCommon, LazSynaSer;
+  LazSerialCommon, LazSynaSer, LazSerialWrite;
 
 type
   TLazSerialTransport = class
   public
+    function CreateWriteOperation(const AData: AnsiString; const AId: QWord;
+      const ATimeoutMs: Cardinal; const AOnFinished: TSerialWriteFinished):
+      ISerialWriteOperation; virtual;
+    procedure CompleteWrite(const AResult: TSerialWriteResult); virtual;
     procedure Close; virtual; abstract;
     procedure Configure(ABaudRate, ADataBits: Integer; AParity: Char;
       AStopBits: Integer; AFlowControl: TFlowControl); virtual; abstract;
@@ -40,6 +44,7 @@ type
   TLazSynapseSerialTransport = class(TLazSerialTransport)
   private
     FSerial: TBlockSerial;
+    FSerialOwner: ISerialWritePort;
     FConfigured: Boolean;
     FWriteError: Integer;
     function RestoreConfiguration(const APrevious: TDCB): Boolean;
@@ -73,17 +78,29 @@ type
 implementation
 
 uses
-  SysUtils;
+  Classes, SysUtils;
 
 function TLazSerialTransport.CanReadLine(const ATimeout: Integer): Boolean;
 begin
   Result := CanRead(ATimeout);
 end;
 
+function TLazSerialTransport.CreateWriteOperation(const AData: AnsiString;
+  const AId: QWord; const ATimeoutMs: Cardinal;
+  const AOnFinished: TSerialWriteFinished): ISerialWriteOperation;
+begin
+  raise EInvalidOperation.Create('Transport does not support asynchronous writes');
+end;
+
+procedure TLazSerialTransport.CompleteWrite(const AResult: TSerialWriteResult);
+begin
+end;
+
 constructor TLazSynapseSerialTransport.Create;
 begin
   inherited Create;
   FSerial := CreateSerial;
+  FSerialOwner := TSerialWritePort.Create(FSerial);
   FSerial.LinuxLock := False;
 end;
 
@@ -95,7 +112,7 @@ end;
 destructor TLazSynapseSerialTransport.Destroy;
 begin
   FSerial.OnStatus := nil;
-  FSerial.Free;
+  FSerialOwner := nil;
   inherited Destroy;
 end;
 

@@ -22,6 +22,7 @@ uses
   LazSerialSetupTests,
   SerialInfrastructureTests,
   LazSerialTransportTests,
+  LazSerialAsyncWriteTests,
   LazSerialConfigurationTests,
   LazSerialIoLifecycleTests,
   LazSerialLineTests,

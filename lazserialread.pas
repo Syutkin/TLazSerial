@@ -20,9 +20,17 @@ type
     function GetClosePending: Boolean;
   end;
 
+  // Optional capability: existing custom read operations remain compatible.
+  ISerialReadUntilOperation = interface
+    ['{F5E14AE8-748F-47E3-B30D-F9EFCD9BCF79}']
+    function TryReadUntil(const ATerminator: RawByteString;
+      out AData: RawByteString; AMaxLength: Integer): Boolean;
+  end;
+
   { Owns receive state and delivery independently of the component. Storage
     and the parser belong to the retained Synaser instance, not to a queue. }
-  TSerialReadOperation = class(TInterfacedObject, ISerialReadOperation)
+  TSerialReadOperation = class(TInterfacedObject, ISerialReadOperation,
+    ISerialReadUntilOperation)
   private
     FPort: ISerialWritePort;
     FLifecycle: ISerialPortLifecycle;
@@ -57,6 +65,8 @@ type
     procedure Detach;
     function DataAvailable(ALineMode: Boolean): Boolean;
     function TryReadData(ALineMode: Boolean; out AData: AnsiString): Boolean;
+    function TryReadUntil(const ATerminator: RawByteString;
+      out AData: RawByteString; AMaxLength: Integer): Boolean;
     function GetFailure(out AErrorCode: Integer; out AErrorMessage: string): Boolean;
     function GetClosePending: Boolean;
   end;
@@ -275,6 +285,29 @@ begin
       // Reading one result constitutes progress; notify for any remaining one.
       if FPort.GetSerial.BufferedDataAvailable(ALineMode) then QueueChanged;
     end;
+  finally FLock.Release; end;
+end;
+
+function TSerialReadOperation.TryReadUntil(const ATerminator: RawByteString;
+  out AData: RawByteString; AMaxLength: Integer): Boolean;
+begin
+  AData := '';
+  FLock.Acquire;
+  try
+    if FCloseRequested or (FError <> 0) or (FErrorMessage <> '') then Exit(False);
+    try
+      Result := FPort.GetSerial.TryReadBufferedUntil(ATerminator, AData, AMaxLength);
+    except
+      on E: ESynaSerError do
+      begin
+        if (FStatistics <> nil) and (E.ErrorCode = ErrMaxBuffer) then
+          FStatistics.RecordError(E.ErrorCode, E.ErrorMessage);
+        raise;
+      end;
+    end;
+    // Only consuming a result is progress. A partial or oversized message must
+    // wait for new input or an explicit retry, without a notification loop.
+    if Result and FPort.GetSerial.BufferedDataAvailable(False) then QueueChanged;
   finally FLock.Release; end;
 end;
 

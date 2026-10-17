@@ -309,6 +309,12 @@ type
     // Buffered mode only. True includes a completed empty line; False clears
     // AData. An oversized line raises ESynaSerError/ErrMaxBuffer.
     function TryReadData(out AData: string): Boolean;
+    // Requires BufferedRead=True and RcvLineCRLF=False. True also represents
+    // an empty result; the exact terminator is consumed but excluded from Data.
+    // Wrong modes raise EInvalidOperation naming the required setting.
+    // MaxLength includes the terminator. ErrMaxBuffer preserves unread bytes.
+    function TryReadUntil(const ATerminator: RawByteString;
+      out AData: RawByteString; AMaxLength: Integer = 4096): Boolean;
     property ClosePending: Boolean read GetClosePending;
     // Waiting for the saved device, native cleanup or a retry; Active is False.
     property ReconnectPending: Boolean read GetReconnectPending;
@@ -922,6 +928,24 @@ begin
   if not FActive or (FReadOperation = nil) then
     ComException('can not read from a closed port.');
   Result := FReadOperation.TryReadData(FRcvLineCRLF, AData);
+end;
+
+function TLazSerial.TryReadUntil(const ATerminator: RawByteString;
+  out AData: RawByteString; AMaxLength: Integer): Boolean;
+var Operation: ISerialReadUntilOperation;
+begin
+  CheckMainThread('TLazSerial.TryReadUntil');
+  AData := '';
+  if not FBufferedRead then
+    raise EInvalidOperation.Create(
+      'TryReadUntil requires BufferedRead=True; set it before opening the port');
+  if FRcvLineCRLF then
+    raise EInvalidOperation.Create('TryReadUntil requires RcvLineCRLF=False');
+  if not FActive or (FReadOperation = nil) then
+    ComException('can not read from a closed port.');
+  if not Supports(FReadOperation, ISerialReadUntilOperation, Operation) then
+    raise EInvalidOperation.Create('The active custom reader does not support TryReadUntil');
+  Result := Operation.TryReadUntil(ATerminator, AData, AMaxLength);
 end;
 
 function TLazSerial.DataAvailable: boolean;

@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Add memory-only `TryReadUntil` for buffered raw input with exact arbitrary
+  delimiters, retained partial messages and an explicit length limit.
 - Add opt-in `AutoReconnect` for identifiable devices after USB removal,
   including renamed ports, bounded opening retries and main-thread completion
   events. Defaults are a 1000 ms interval and five attempts; manual closing

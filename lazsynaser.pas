@@ -320,6 +320,12 @@ type
       Offset, Start: SizeInt;
       Previous: AnsiChar;
     end;
+    FUntilScan: record
+      Valid: Boolean;
+      Terminator: RawByteString;
+      NextOffset: SizeInt;
+    end;
+    procedure InvalidateReadScans;
     procedure ApplyOpenLineFlags;
     procedure UpdateStatisticsBuffer;
     function GetLineBuffer: AnsiString;
@@ -418,6 +424,10 @@ type
     procedure AppendReadBuffer(const AData: AnsiString);
     function BufferedDataAvailable(ALineMode: Boolean): Boolean;
     function TryReadBuffered(ALineMode: Boolean; out AData: AnsiString): Boolean;
+    // Exact memory-only delimiter read. The limit includes the terminator;
+    // incomplete and oversized results remain in the ring unchanged.
+    function TryReadBufferedUntil(const ATerminator: RawByteString;
+      out AData: RawByteString; AMaxLength: Integer = 4096): Boolean;
     constructor Create;
     {:Object destructor.}
     destructor Destroy; override;
@@ -873,6 +883,12 @@ begin
   end;
 end;
 
+procedure TBlockSerial.InvalidateReadScans;
+begin
+  FLineScan.Valid := False;
+  FUntilScan.Valid := False;
+end;
+
 function TBlockSerial.GetLineBuffer: AnsiString;
 begin
   Result := FReadBuffer.Snapshot;
@@ -880,7 +896,7 @@ end;
 
 procedure TBlockSerial.SetLineBuffer(const AValue: AnsiString);
 begin
-  FLineScan.Valid := False;
+  InvalidateReadScans;
   FReadBuffer.Assign(AValue);
   UpdateStatisticsBuffer;
 end;
@@ -913,7 +929,7 @@ begin
   end;
   FReadBuffer.Free;
   FReadBuffer := Buffer;
-  FLineScan.Valid := False;
+  InvalidateReadScans;
   FMemoryReadMode := ALimit > 0;
   UpdateStatisticsBuffer;
 end;
@@ -1020,6 +1036,68 @@ begin
     FRaiseExcept := SavedRaise;
     UpdateStatisticsBuffer;
   end;
+end;
+
+function TBlockSerial.TryReadBufferedUntil(const ATerminator: RawByteString;
+  out AData: RawByteString; AMaxLength: Integer): Boolean;
+var
+  I, Offset, TerminatorLength: SizeInt;
+  Found: Boolean;
+  Error: ESynaSerError;
+begin
+  AData := '';
+  Result := False;
+  TerminatorLength := Length(ATerminator);
+  if TerminatorLength = 0 then
+    raise EArgumentException.Create('TryReadUntil requires a nonempty terminator');
+  if (AMaxLength <= 0) or (AMaxLength < TerminatorLength) then
+    raise EArgumentException.Create(
+      'TryReadUntil MaxLength must be positive and include the complete terminator');
+  SetSynaError(sOK);
+  if not FUntilScan.Valid or
+    (Length(FUntilScan.Terminator) <> TerminatorLength) or
+    (CompareByte(FUntilScan.Terminator[1], ATerminator[1], TerminatorLength) <> 0) then
+  begin
+    FUntilScan.Valid := True;
+    FUntilScan.Terminator := ATerminator;
+    FUntilScan.NextOffset := 0;
+  end;
+  // Compare bytes directly: RawByteString tags must never cause recoding.
+  // Retain only the next untested start, including a split terminator suffix.
+  Offset := FUntilScan.NextOffset;
+  Found := False;
+  while Offset <= FReadBuffer.Count - TerminatorLength do
+  begin
+    Found := True;
+    for I := 0 to TerminatorLength - 1 do
+      if FReadBuffer.PeekByte(Offset + I) <> Ord(ATerminator[I + 1]) then
+      begin
+        Found := False;
+        Break;
+      end;
+    if Found then Break;
+    Inc(Offset);
+  end;
+  FUntilScan.NextOffset := Offset;
+  if (Found and (Offset > AMaxLength - TerminatorLength)) or
+    (not Found and (FReadBuffer.Count >= AMaxLength)) then
+  begin
+    SetSynaError(ErrMaxBuffer);
+    Error := ESynaSerError.Create('TryReadUntil result exceeds MaxLength (including terminator); unread bytes are preserved');
+    Error.ErrorCode := ErrMaxBuffer;
+    Error.ErrorMessage := Error.Message;
+    raise Error;
+  end;
+  if not Found then
+  begin
+    SetSynaError(ErrTimeout);
+    Exit;
+  end;
+  AData := FReadBuffer.Peek(Offset);
+  InvalidateReadScans;
+  FReadBuffer.Discard(Offset + TerminatorLength);
+  UpdateStatisticsBuffer;
+  Result := True;
 end;
 
 class function TBlockSerial.GetVersion: string;
@@ -1335,7 +1413,7 @@ begin
     RaiseSynaError(ErrAlreadyInUse);
     Exit;                          {HGJ}
   end;                             {HGJ}
-  FLineScan.Valid := False;
+  InvalidateReadScans;
   FReadBuffer.Clear;
   FDiscardLine := False;
   FDiscardPrefix := '';
@@ -1759,7 +1837,7 @@ begin
     end;
   until False;
   delete(s, 1, l);
-  FLineScan.Valid := False;
+  InvalidateReadScans;
   FReadBuffer.Assign(s);
   Result := rl;
 end;
@@ -1798,7 +1876,7 @@ var
     except
       // RecvBuffer may have received bytes before reporting an I/O error.
       SetLength(Result, FLastReadCount);
-      FLineScan.Valid := False;
+      InvalidateReadScans;
       FReadBuffer.Prepend(Result);
       raise;
     end;
@@ -1815,7 +1893,7 @@ begin
   SetSynaError(sOK);
   if FReadBuffer.Count > 0 then
   begin
-    FLineScan.Valid := False;
+    InvalidateReadScans;
     if FPacketReadLimit > 0 then
       Result := FReadBuffer.Read(FPacketReadLimit)
     else
@@ -1847,7 +1925,7 @@ begin
   try
     ExceptCheck;
   except
-    FLineScan.Valid := False;
+    InvalidateReadScans;
     FReadBuffer.Prepend(Result);
     raise;
   end;
@@ -1860,7 +1938,7 @@ begin
   if PreTestFailing then   {HGJ}
     Exit;                  {HGJ}
   SetSynaError(sOK);
-  FLineScan.Valid := False;
+  InvalidateReadScans;
   if FReadBuffer.Count = 0 then
     FReadBuffer.Prepend(RecvPacket(Timeout));
   if (FLastError = sOK) and (FReadBuffer.Count > 0) then
@@ -1899,7 +1977,7 @@ begin
     // belongs to the already returned line and must still be consumed.
     if CorCRLF and (FReadBuffer.Count > 0) and (FLastCR or FLastLF) then
     begin
-      FLineScan.Valid := False;
+      InvalidateReadScans;
       if (FLastCR and (FReadBuffer.PeekByte(0) = Ord(LF))) or
         (FLastLF and (FReadBuffer.PeekByte(0) = Ord(CR))) then
         FReadBuffer.Discard(1);
@@ -1910,7 +1988,7 @@ begin
     ExceptCheck;
     Exit;
   end;
-  FLineScan.Valid := False;
+  InvalidateReadScans;
   s := '';
   x := 0;
   Overflow := False;
@@ -1927,7 +2005,7 @@ begin
         FPacketReadLimit := SavedLimit;
       end;
     except
-      FLineScan.Valid := False;
+      InvalidateReadScans;
       FReadBuffer.Prepend(s);
       raise;
     end;
@@ -2020,7 +2098,7 @@ begin
     Result := Copy(s, 1, x - 1);
     System.Delete(s, 1, x + tl - 1);
   end;
-  FLineScan.Valid := False;
+  InvalidateReadScans;
   FReadBuffer.Prepend(s);
   ExceptCheck;
 end;
@@ -2678,7 +2756,7 @@ begin
     SerialCheck(fpioctl(FHandle, TCFLSH, Pointer(PtrInt(TCIOFLUSH))));
     {$ENDIF}
   {$ENDIF}
-  FLineScan.Valid := False;
+  InvalidateReadScans;
   FReadBuffer.Clear;
   FDiscardLine := False;
   FDiscardPrefix := '';
@@ -2696,7 +2774,7 @@ begin
   x := PURGE_TXABORT or PURGE_TXCLEAR or PURGE_RXABORT or PURGE_RXCLEAR;
   if not PurgeComm(FHandle, x) then
     SerialCheck(sErr);
-  FLineScan.Valid := False;
+  InvalidateReadScans;
   FReadBuffer.Clear;
   FDiscardLine := False;
   FDiscardPrefix := '';

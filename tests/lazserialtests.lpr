@@ -45,6 +45,8 @@ uses
   LazSerialBufferedReadTests,
   LazSerialPortSessionTests,
   LazSerialMemoryReadTests,
+  LazSerialUntilParserTests,
+  LazSerialUntilTests,
   LazSerialReadOperationTests,
   LazSerialBufferedPtyTests,
   LazSerialPairedPtyTests,

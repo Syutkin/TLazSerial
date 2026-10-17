@@ -171,6 +171,29 @@ portions preserve order and embedded zeroes but do not define protocol
 message boundaries. `TryReadData` outside buffered mode raises
 `EInvalidOperation`; reading a closed port reports a closed-port error.
 
+For another delimiter, use `TryReadUntil` with **`BufferedRead = True` and
+`RcvLineCRLF = False`**. Set these explicitly before opening; the method never
+changes them and reports the required setting through `EInvalidOperation`.
+In `OnRxData`:
+
+```pascal
+var
+  Data: RawByteString;
+begin
+  while Serial.TryReadUntil(';', Data) do
+    ProcessMessage(Data);
+end;
+```
+
+Matching is byte-exact, including multibyte and binary delimiters. `True`
+consumes the delimiter and returns the preceding bytes, possibly empty;
+`False` clears `Data` and preserves the incomplete message. `AMaxLength`
+defaults to 4096 bytes including the delimiter. It must be positive and fit
+the nonempty delimiter. Exceeding it raises `ESynaSerError/ErrMaxBuffer`
+regardless of `RaiseExcept`, preserving all bytes; retry with a larger limit
+or retrieve them through `TryReadData`. `DataAvailable` and `OnRxData` still
+describe available bytes, so they do not guarantee a complete delimited result.
+
 `DataAvailable` checks for a ready result without consuming it. An incomplete
 line does not repeatedly trigger `OnRxData`. Reading one of several ready
 lines schedules notification for the remainder; a handler that does not

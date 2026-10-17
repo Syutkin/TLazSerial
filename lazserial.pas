@@ -61,7 +61,7 @@ uses
 {$ENDIF}
   SysUtils, SyncObjs, lazsynaser,  LResources, Forms, Controls, Graphics, Dialogs,
   PropEdits, SerialWatcher, LazSerialCommon, LazSerialDevices,
-  LazSerialTransport, LazSerialWrite;
+  LazSerialTransport, LazSerialWrite, LazSerialRead;
 
 const
   { Version of this TLazSerial package, matching LazSerialPort.lpk. It is
@@ -125,6 +125,7 @@ type
     const AResult: TSerialWriteResult) of object;
 
 const
+  ErrReadBufferOverflow = LazSerialCommon.ErrReadBufferOverflow;
   swoCompleted = LazSerialCommon.swoCompleted;
   swoFailed = LazSerialCommon.swoFailed;
   swoCancelled = LazSerialCommon.swoCancelled;
@@ -170,6 +171,9 @@ type
 
   TLazSerial = class(TComponent)
   private
+    FBufferedRead: Boolean;
+    FReadBufferLimit: Integer;
+    FReadOperation: ISerialReadOperation;
     FActive: boolean;
     FTransport: TLazSerialTransport;
     FTransportLock: TCriticalSection;
@@ -226,6 +230,9 @@ type
     function CanReadData(const ATimeout: Integer;
       const ACheckError: Boolean = False): Boolean;
     function GetSynSer: TBlockSerial;
+    function GetClosePending: Boolean;
+    procedure SetBufferedRead(AValue: Boolean);
+    procedure SetReadBufferLimit(AValue: Integer);
     function GetWritePending: Boolean;
     procedure CheckWriteIdle(const AOperation: string);
     procedure WriteFinished(const AResult: TSerialWriteResult);
@@ -260,6 +267,8 @@ type
     // read data from port
     function DataAvailable: boolean;
     function ReadData: string;
+    function TryReadData(out AData: string): Boolean;
+    property ClosePending: Boolean read GetClosePending;
 //    function ReadBuffer(var buf; size: integer): integer;
 
     // write data to port
@@ -285,6 +294,8 @@ type
 //  procedure SetBreak(OnOff: boolean);
 
   published
+    property BufferedRead: Boolean read FBufferedRead write SetBufferedRead default False;
+    property ReadBufferLimit: Integer read FReadBufferLimit write SetReadBufferLimit default 65536;
     property Active: boolean read FActive write SetActive;
     // Will be overridden by CustomBaudRate if its value is ≥ 0.
     property BaudRate: TBaudRate read FBaudRate write SetBaudRate; // default br115200;
@@ -728,6 +739,7 @@ begin
   FFlowControl := fcNone;
   FSerialWatcher := TSerialWatcher.Create(Self);
   FSerialWatcher.OnComDisconnected := @ComDisconnected;
+  FReadBufferLimit := 65536;
   FCustomBaudRate := -1;
   FClosing := False;
   FDestroying := False;
@@ -739,6 +751,43 @@ begin
   {$ENDIF}
   FRcvLineCRLF := False;;
 //  FBaudRate:=br115200;
+end;
+
+procedure TLazSerial.SetBufferedRead(AValue: Boolean);
+begin
+  CheckMainThread('TLazSerial.BufferedRead');
+  CheckWriteIdle('TLazSerial.BufferedRead');
+  if FActive or GetClosePending then
+    raise EInvalidOperation.Create('Receive mode requires a closed idle port');
+  FBufferedRead := AValue;
+end;
+
+procedure TLazSerial.SetReadBufferLimit(AValue: Integer);
+begin
+  CheckMainThread('TLazSerial.ReadBufferLimit');
+  CheckWriteIdle('TLazSerial.ReadBufferLimit');
+  if FActive or GetClosePending then
+    raise EInvalidOperation.Create('Receive limit requires a closed idle port');
+  if AValue <= 0 then
+    raise EArgumentException.Create('Receive limit must be positive');
+  FReadBufferLimit := AValue;
+end;
+
+function TLazSerial.GetClosePending: Boolean;
+begin
+  CheckMainThread('TLazSerial.ClosePending');
+  Result := FWriteCloseRequested and (FWriteOperation <> nil);
+end;
+
+function TLazSerial.TryReadData(out AData: string): Boolean;
+begin
+  CheckMainThread('TLazSerial.TryReadData');
+  AData := '';
+  if not FBufferedRead then
+    raise EInvalidOperation.Create('Buffered reads are not enabled');
+  if not FActive or (FReadOperation = nil) then
+    ComException('can not read from a closed port.');
+  Result := FReadOperation.TryReadData(FRcvLineCRLF, AData);
 end;
 
 function TLazSerial.DataAvailable: boolean;
@@ -853,6 +902,8 @@ begin
                          ConstsStopBits[FStopBits],
                          FFlowControl);
 
+    if FBufferedRead then
+      raise EInvalidOperation.Create('Buffered read worker is not installed');
     FReaderSession := TSerialReaderSession.Create(Self);
     ReadThread := TComPortReadThread.Create(Self, FReaderSession);
     ReadThread.Start;

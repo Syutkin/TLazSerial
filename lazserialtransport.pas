@@ -6,11 +6,13 @@ interface
 
 uses
   {$IFDEF MSWINDOWS}Windows,{$ENDIF}
-  LazSerialCommon, LazSynaSer, LazSerialWrite;
+  LazSerialCommon, LazSynaSer, LazSerialWrite, LazSerialRead;
 
 type
   TLazSerialTransport = class
   public
+    function CreateReadOperation(const ABufferLimit: Integer;
+      const AOnChanged: TSerialReadChanged): ISerialReadOperation; virtual;
     function CreateWriteOperation(const AData: AnsiString; const AId: QWord;
       const ATimeoutMs: Cardinal; const AOnFinished: TSerialWriteFinished):
       ISerialWriteOperation; virtual;
@@ -88,6 +90,13 @@ uses
 function TLazSerialTransport.CanReadLine(const ATimeout: Integer): Boolean;
 begin
   Result := CanRead(ATimeout);
+end;
+
+function TLazSerialTransport.CreateReadOperation(const ABufferLimit: Integer;
+  const AOnChanged: TSerialReadChanged): ISerialReadOperation;
+begin
+  Result := nil;
+  raise EInvalidOperation.Create('Transport does not support buffered reads');
 end;
 
 function TLazSerialTransport.CreateWriteOperation(const AData: AnsiString;

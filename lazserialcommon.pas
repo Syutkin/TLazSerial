@@ -50,6 +50,7 @@ type
   );
 
 const
+  ErrReadBufferOverflow = 9990;
   Cr = #$0D;
   Lf = #$0A;
   CrLf = Cr + Lf;

@@ -8,6 +8,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Add `Serial.Statistics` snapshots with native RX/TX byte counts, buffered
+  receive usage and peak, retained error diagnostics and the session's close
+  reason. Counters survive closing and reset on a successful new opening.
 - Add opt-in `DtrOnOpen` and `RtsOnOpen` states to avoid unnecessary control-line
   transitions when opening a port, subject to OS and driver behavior. Defaults
   preserve existing behavior; unsupported states and flow-control conflicts

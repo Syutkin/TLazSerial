@@ -5,7 +5,7 @@ unit LazSerialWrite;
 interface
 
 uses
-  Classes, SysUtils, SyncObjs, LazSerialCommon, LazSynaSer
+  Classes, SysUtils, SyncObjs, LazSerialCommon, LazSerialStatistics, LazSynaSer
   {$IFDEF MSWINDOWS}, Windows{$ELSE}, BaseUnix{$ENDIF};
 
 type
@@ -68,6 +68,7 @@ type
     FLifecycle: ISerialPortLifecycle;
     FReserved: Boolean;
     FData: AnsiString;
+    FStatistics: ISerialStatisticsState;
     FTimeoutMs: Cardinal;
     FStartedAt: QWord;
     FStarted, FCompleted, FCloseRequested, FClosing, FClosed: Boolean;
@@ -90,6 +91,7 @@ type
     function WaitDelay(const ADelayMs: Cardinal): Boolean;
     property Data: AnsiString read FData;
     property Port: ISerialWritePort read FPort;
+    property Statistics: ISerialStatisticsState read FStatistics;
     property CancelEvent: TEvent read FCancelEvent;
   public
     constructor Create(const APort: ISerialWritePort; const AData: AnsiString;
@@ -406,6 +408,7 @@ begin
   FLock := SyncObjs.TCriticalSection.Create;
   FCancelEvent := TEvent.Create(nil, True, False, '');
   FPort := APort;
+  if APort <> nil then FStatistics := APort.GetSerial.StatisticsState;
   Supports(FPort, ISerialPortLifecycle, FLifecycle);
   FData := Copy(AData, 1, Length(AData));
   FTimeoutMs := ATimeoutMs;
@@ -632,6 +635,9 @@ begin
           SetWriteFailure(WriteResult, E);
     end;
   end;
+  if (FStatistics <> nil) and
+    (WriteResult.Outcome in [swoFailed, swoTimedOut]) then
+    FStatistics.RecordError(WriteResult.ErrorCode, WriteResult.ErrorMessage);
   FLock.Acquire;
   try
     FResult := WriteResult;

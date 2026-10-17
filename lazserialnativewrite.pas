@@ -421,6 +421,7 @@ begin
         Break;
       end;
       Inc(AResult.BytesWritten, Count);
+      if Statistics <> nil then Statistics.AddSent(Count);
       if Error <> 0 then
       begin
         if StopRequested then

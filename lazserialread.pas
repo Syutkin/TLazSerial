@@ -4,7 +4,7 @@ unit LazSerialRead;
 
 interface
 
-uses Classes, SysUtils, SyncObjs, LazSerialCommon, LazSynaSer, LazSerialWrite;
+uses Classes, SysUtils, SyncObjs, LazSerialCommon, LazSerialStatistics, LazSynaSer, LazSerialWrite;
 
 type
   TSerialReadChanged = procedure of object;
@@ -33,6 +33,7 @@ type
     FLimit, FMaxBandwidth, FError: Integer;
     FErrorMessage: string;
     FReceivedForStatus: QWord;
+    FStatistics: ISerialStatisticsState;
     FOnChanged: TSerialReadChanged;
     FQueuedReference: ISerialReadOperation;
     procedure Run;
@@ -101,6 +102,7 @@ begin
   FLock := TCriticalSection.Create;
   FCancel := TEvent.Create(nil, True, False, '');
   FPort := APort;
+  FStatistics := APort.GetSerial.StatisticsState;
   if not Supports(FPort, ISerialPortLifecycle, FLifecycle) then
     raise EInvalidOperation.Create('Port does not support shared receive lifetime');
   FLimit := ALimit;
@@ -259,7 +261,16 @@ begin
   try
     if FCloseRequested or (FError <> 0) or (FErrorMessage <> '') then Exit(False);
     try
-      Result := FPort.GetSerial.TryReadBuffered(ALineMode, AData);
+      try
+        Result := FPort.GetSerial.TryReadBuffered(ALineMode, AData);
+      except
+        on E: ESynaSerError do
+        begin
+          if (FStatistics <> nil) and (E.ErrorCode = ErrMaxBuffer) then
+            FStatistics.RecordError(E.ErrorCode, E.ErrorMessage);
+          raise;
+        end;
+      end;
     finally
       // Reading one result constitutes progress; notify for any remaining one.
       if FPort.GetSerial.BufferedDataAvailable(ALineMode) then QueueChanged;
@@ -286,6 +297,7 @@ begin
     begin
       FError := AError;
       FErrorMessage := AMessage;
+      if FStatistics <> nil then FStatistics.RecordError(AError, AMessage);
     end;
     QueueChanged;
   finally FLock.Release; end;
@@ -331,6 +343,7 @@ begin
         Error := ReadChunk(Pointer(Chunk), Available, Received);
         if (Received < 0) or (Received > Available) then
           raise EInvalidOperation.Create('Invalid native receive count');
+        if FStatistics <> nil then FStatistics.AddReceived(Received);
         if StopRequested then Break;
         if Error <> 0 then
         begin

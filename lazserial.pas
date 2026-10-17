@@ -60,7 +60,7 @@ uses
   Windows, Classes,
 {$ENDIF}
   SysUtils, SyncObjs, lazsynaser,  LResources, Forms, Controls, Graphics, Dialogs,
-  PropEdits, SerialWatcher, LazSerialCommon, LazSerialDevices,
+  PropEdits, SerialWatcher, LazSerialCommon, LazSerialStatistics, LazSerialDevices,
   LazSerialTransport, LazSerialWrite, LazSerialRead;
 
 const
@@ -119,12 +119,20 @@ type
   ELazSerialThreadError = class(Exception);
 
   TSerialWriteOutcome = LazSerialCommon.TSerialWriteOutcome;
+  TSerialStatistics = LazSerialStatistics.TSerialStatistics;
+  TSerialCloseReason = LazSerialStatistics.TSerialCloseReason;
   TSerialOpenLineState = LazSerialCommon.TSerialOpenLineState;
   TSerialWriteResult = LazSerialCommon.TSerialWriteResult;
   TSerialWriteCompletedEvent = procedure(Sender: TObject;
     const AResult: TSerialWriteResult) of object;
 
 const
+  scrNone = LazSerialStatistics.scrNone;
+  scrUserRequest = LazSerialStatistics.scrUserRequest;
+  scrDeviceRemoved = LazSerialStatistics.scrDeviceRemoved;
+  scrReadError = LazSerialStatistics.scrReadError;
+  scrConfigurationError = LazSerialStatistics.scrConfigurationError;
+  scrDestroyed = LazSerialStatistics.scrDestroyed;
   olsDefault = LazSerialCommon.olsDefault;
   olsInactive = LazSerialCommon.olsInactive;
   olsActive = LazSerialCommon.olsActive;
@@ -150,6 +158,7 @@ type
 
   TComPortReadThread=class(TThread)
   private
+    FStatistics: ISerialStatisticsState;
     FSession: ISerialReaderSession;
     FQueuedDelivery: TObject;
     procedure QueueDelivery(ADelivery: TObject);
@@ -174,6 +183,7 @@ type
 
   TLazSerial = class(TComponent)
   private
+    FStatistics: ISerialStatisticsState;
     FBufferedRead: Boolean;
     FReadBufferLimit: Integer;
     FReadOperation: ISerialReadOperation;
@@ -239,6 +249,7 @@ type
     function CanReadData(const ATimeout: Integer;
       const ACheckError: Boolean = False): Boolean;
     function GetSynSer: TBlockSerial;
+    function GetStatistics: TSerialStatistics;
     function GetClosePending: Boolean;
     procedure SetBufferedRead(AValue: Boolean);
     procedure SetReadBufferLimit(AValue: Integer);
@@ -285,6 +296,8 @@ type
     // AData. An oversized line raises ESynaSerError/ErrMaxBuffer.
     function TryReadData(out AData: string): Boolean;
     property ClosePending: Boolean read GetClosePending;
+    // Main-thread memory snapshot, available during I/O and after closing.
+    property Statistics: TSerialStatistics read GetStatistics;
 
     // write data to port
     function WriteData(data: string): integer;
@@ -344,6 +357,7 @@ function LazSerialGetVersion: string;
 procedure Register;
 
 implementation
+
 uses LazSerialSetup, LazFileUtils;
 
 function NormalizeConnectedDevice(const ADevice: string): string;
@@ -415,6 +429,15 @@ type
       const AErrorCode: Integer; const AErrorMessage: string);
   end;
 
+procedure RecordStatisticsException(const AStatistics: ISerialStatisticsState;
+  E: Exception);
+begin
+  if E is ESynaSerError then
+    AStatistics.RecordError(ESynaSerError(E).ErrorCode, ESynaSerError(E).ErrorMessage)
+  else
+    AStatistics.RecordError(0, E.Message);
+end;
+
 constructor TSerialReaderSession.Create(AOwner: TLazSerial);
 begin
   inherited Create;
@@ -472,6 +495,7 @@ begin
   if not FActive or (FOwner = nil) then
     Exit;
   Supports(FOwner.FStatusSession, ISerialReaderFailureSession, Lifetime);
+  FOwner.FStatistics.MarkClosed(scrReadError);
   try
     try
       FOwner.Close;
@@ -641,15 +665,20 @@ begin
           FTransport.Configure(Speed, ConstsBits[ADataBits],
             ConstsParity[AParity], ConstsStopBits[AStopBits], AFlowControl);
       except
-        if not FTransport.IsOpen then
+        on E: Exception do
         begin
-          FActive := False;
-          if FReaderSession <> nil then
-            FReaderSession.Cancel;
-          if ReadThread <> nil then
-            ReadThread.Terminate;
+          RecordStatisticsException(FStatistics, E);
+          if not FTransport.IsOpen then
+          begin
+            FStatistics.MarkClosed(scrConfigurationError);
+            FActive := False;
+            if FReaderSession <> nil then
+              FReaderSession.Cancel;
+            if ReadThread <> nil then
+              ReadThread.Terminate;
+          end;
+          raise;
         end;
-        raise;
       end;
       FBaudRate := ABaudRate;
       FCustomBaudRate := ACustomBaudRate;
@@ -703,6 +732,9 @@ var
   TransportLocked: Boolean;
 begin
   TransportLocked := False;
+  if FActive then
+    if FDestroying then FStatistics.MarkClosed(scrDestroyed)
+    else FStatistics.MarkClosed(scrUserRequest);
   FClosing := True;
   try
     if FReadOperation <> nil then
@@ -786,6 +818,7 @@ begin
   FTransportLock := TCriticalSection.Create;
   FStatusSession := TSerialReaderSession.Create(Self);
   FTransport := TLazSynapseSerialTransport.Create;
+  FStatistics := CreateSerialStatistics;
   FFlowControl := fcNone;
   FDtrOnOpen := olsDefault;
   FRtsOnOpen := olsDefault;
@@ -969,6 +1002,12 @@ begin
   Result := FTransport.NativeSerial;
 end;
 
+function TLazSerial.GetStatistics: TSerialStatistics;
+begin
+  CheckMainThread('TLazSerial.Statistics');
+  Result := FStatistics.Snapshot;
+end;
+
 procedure TLazSerial.DeviceOpen;
 begin
   ValidateSerialOpenLines(FDtrOnOpen, FRtsOnOpen, FFlowControl);
@@ -1067,6 +1106,7 @@ begin
 end;
 
 procedure TLazSerial.SetActive(state: boolean);
+var PreviousStatistics: ISerialStatisticsState;
 begin
   CheckMainThread('TLazSerial.Active');
   if state and (FWriteCloseRequested or GetClosePending) then
@@ -1086,8 +1126,16 @@ begin
     BeginTransport;
     try
       FSerialWatcher.Refresh;
-      DeviceOpen;
-      FActive := True;
+      PreviousStatistics := FStatistics;
+      FStatistics := CreateSerialStatistics;
+      try
+        FTransport.SetStatistics(FStatistics);
+        DeviceOpen;
+        FActive := True;
+      except
+        FStatistics := PreviousStatistics;
+        raise;
+      end;
     finally
       EndTransport;
     end;
@@ -1398,6 +1446,7 @@ begin
   FreeOnTerminate := False;
   Owner := AOwner;
   FSession := ASession;
+  FStatistics := AOwner.FStatistics;
 end;
 
 procedure TComPortReadThread.WaitForDelivery;
@@ -1458,6 +1507,7 @@ procedure TComPortReadThread.QueueFailure(const AErrorCode: Integer;
 begin
   if Terminated then
     Exit;
+  FStatistics.RecordError(AErrorCode, AErrorMessage);
   QueueDelivery(TSerialReaderEventDelivery.CreateFailure(FSession,
     AErrorCode, AErrorMessage));
   // Exit without waiting: the main thread must be able to join this reader.
@@ -1505,6 +1555,7 @@ begin
   Lifetime := FStatusSession;
   if Operation.GetFailure(Code, Message) then
   begin
+    FStatistics.MarkClosed(scrReadError);
     Close;
     Serial := (Lifetime as TSerialReaderSession).FOwner;
     if Serial <> nil then Serial.DeliverReaderError(Code, Message);
@@ -1564,6 +1615,7 @@ begin
   if not FConnectedDeviceTracked then Exit;
   Lifetime := FStatusSession;
   ConnectionId := FConnectionId;
+  FStatistics.MarkClosed(scrDeviceRemoved);
   Active := False;
   Serial := (Lifetime as TSerialReaderSession).FOwner;
   if (Serial <> nil) and (Serial.FConnectionId = ConnectionId) and

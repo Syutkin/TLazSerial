@@ -117,7 +117,7 @@ uses
   Windows,
 {$ENDIF}
   LazSynaFpc,
-  Classes, SysUtils, LazSynaUtil, LazSerialCommon, SerialRingBuffer;
+  Classes, SysUtils, LazSynaUtil, LazSerialCommon, LazSerialStatistics, SerialRingBuffer;
 
 const
   LockfileDirectory = '/var/lock'; {HGJ}
@@ -306,6 +306,7 @@ type
     FMemoryReadMode: Boolean;
     FLastReadCount: Integer;
     FPacketReadLimit: Integer;
+    FStatisticsState: ISerialStatisticsState;
     FDtrOnOpen: TSerialOpenLineState;
     FRtsOnOpen: TSerialOpenLineState;
     FDiscardLine: Boolean;
@@ -320,6 +321,7 @@ type
       Previous: AnsiChar;
     end;
     procedure ApplyOpenLineFlags;
+    procedure UpdateStatisticsBuffer;
     function GetLineBuffer: AnsiString;
     procedure SetLineBuffer(const AValue: AnsiString);
     function SendBufferFully(Buffer: Pointer; Count: Integer): Boolean;
@@ -411,6 +413,8 @@ type
 {$ENDIF}
     {:Object constructor.}
     procedure ConfigureReadBuffer(ALimit: Integer);
+    property StatisticsState: ISerialStatisticsState
+      read FStatisticsState write FStatisticsState;
     procedure AppendReadBuffer(const AData: AnsiString);
     function BufferedDataAvailable(ALineMode: Boolean): Boolean;
     function TryReadBuffered(ALineMode: Boolean; out AData: AnsiString): Boolean;
@@ -878,6 +882,16 @@ procedure TBlockSerial.SetLineBuffer(const AValue: AnsiString);
 begin
   FLineScan.Valid := False;
   FReadBuffer.Assign(AValue);
+  UpdateStatisticsBuffer;
+end;
+
+procedure TBlockSerial.UpdateStatisticsBuffer;
+begin
+  if FStatisticsState = nil then Exit;
+  if FMemoryReadMode then
+    FStatisticsState.UpdateReadBuffer(FReadBuffer.Count + Length(FDiscardPrefix))
+  else
+    FStatisticsState.UpdateReadBuffer(0);
 end;
 
 procedure TBlockSerial.ConfigureReadBuffer(ALimit: Integer);
@@ -901,6 +915,7 @@ begin
   FReadBuffer := Buffer;
   FLineScan.Valid := False;
   FMemoryReadMode := ALimit > 0;
+  UpdateStatisticsBuffer;
 end;
 
 procedure TBlockSerial.AppendReadBuffer(const AData: AnsiString);
@@ -909,6 +924,7 @@ begin
     (Length(AData) > FReadBuffer.MaxCapacity - FReadBuffer.Count - Length(FDiscardPrefix)) then
     raise ERangeError.Create('Receive buffer limit exceeded');
   FReadBuffer.Append(AData);
+  UpdateStatisticsBuffer;
 end;
 
 function TBlockSerial.BufferedDataAvailable(ALineMode: Boolean): Boolean;
@@ -1002,6 +1018,7 @@ begin
   finally
     FMemoryReadMode := SavedMode;
     FRaiseExcept := SavedRaise;
+    UpdateStatisticsBuffer;
   end;
 end;
 
@@ -1593,6 +1610,7 @@ begin
 {$ELSE}
   Result := TransferBuffer(False, Buffer, Length);
 {$ENDIF}
+  if FStatisticsState <> nil then FStatisticsState.AddSent(Result);
   if FRTSToggle then
   begin
     Flush;
@@ -1702,6 +1720,7 @@ begin
   FLastReadCount := Result;
   if FLastReadCount < 0 then
     FLastReadCount := 0;
+  if FStatisticsState <> nil then FStatisticsState.AddReceived(FLastReadCount);
   ExceptCheck;
   DoStatus(HR_ReadCount, IntToStr(Result));
 end;
@@ -2665,6 +2684,7 @@ begin
   FDiscardPrefix := '';
   FLastCR := False;
   FLastLF := False;
+  UpdateStatisticsBuffer;
   ExceptCheck;
 end;
 {$ELSE}
@@ -2682,6 +2702,7 @@ begin
   FDiscardPrefix := '';
   FLastCR := False;
   FLastLF := False;
+  UpdateStatisticsBuffer;
   ExceptCheck;
 end;
 {$ENDIF}

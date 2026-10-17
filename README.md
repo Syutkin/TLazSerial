@@ -198,6 +198,30 @@ The built-in native transport supports buffered input. Existing custom
 transport classes continue to compile; enabling buffered input on a transport
 without `CreateReadOperation` support fails and rolls back opening.
 
+## Connection statistics
+
+Read `Serial.Statistics` on the main thread to obtain a `TSerialStatistics`
+snapshot, including during I/O or cleanup:
+
+```pascal
+Stats := Serial.Statistics;
+```
+
+- `BytesReceived`, `BytesSent` — native byte counters; sent bytes are accepted
+  by the OS, without confirmation of delivery to the device.
+- `ReadBufferUsed`, `ReadBufferPeak` — current and peak buffered receive usage
+  in bytes. Both are zero in legacy mode; compare usage with `ReadBufferLimit`.
+- `ErrorCount`, `LastErrorCode`, `LastErrorMessage` — recorded operation
+  failures and the last error. Ordinary read timeouts and cancellation do not
+  count as errors.
+- `CloseReason` — why the session closed, such as a user request, device
+  removal or a terminal read error.
+
+Statistics survive closing and reset on a successful new `Open`; failed
+opening preserves the previous session. Counts may still advance during
+cleanup. Calculate RX/TX rates from counter differences and elapsed monotonic
+time, resetting the sampling baseline after opening.
+
 ## Asynchronous writes
 
 Use `WriteDataAsync` to send data without waiting for serial transmission in

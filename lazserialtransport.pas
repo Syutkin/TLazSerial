@@ -6,11 +6,14 @@ interface
 
 uses
   {$IFDEF MSWINDOWS}Windows,{$ENDIF}
-  LazSerialCommon, LazSynaSer, LazSerialWrite, LazSerialRead;
+  LazSerialCommon, LazSerialStatistics, LazSynaSer, LazSerialWrite, LazSerialRead;
 
 type
   TLazSerialTransport = class
+  protected
+    FStatisticsState: ISerialStatisticsState;
   public
+    procedure SetStatistics(const AStatistics: ISerialStatisticsState); virtual;
     function CreateReadOperation(const ABufferLimit: Integer;
       const AOnChanged: TSerialReadChanged): ISerialReadOperation; virtual;
     function CreateWriteOperation(const AData: AnsiString; const AId: QWord;
@@ -59,6 +62,7 @@ type
   public
     constructor Create;
     destructor Destroy; override;
+    procedure SetStatistics(const AStatistics: ISerialStatisticsState); override;
     function CreateReadOperation(const ABufferLimit: Integer;
       const AOnChanged: TSerialReadChanged): ISerialReadOperation; override;
     function CreateWriteOperation(const AData: AnsiString; const AId: QWord;
@@ -93,6 +97,25 @@ implementation
 
 uses
   Classes, SysUtils, LazSerialNativeWrite, LazSerialNativeRead;
+
+procedure TLazSerialTransport.SetStatistics(const AStatistics: ISerialStatisticsState);
+begin
+  FStatisticsState := AStatistics;
+end;
+
+procedure TLazSynapseSerialTransport.SetStatistics(const AStatistics: ISerialStatisticsState);
+begin
+  inherited SetStatistics(AStatistics);
+  FSerial.StatisticsState := AStatistics;
+end;
+
+procedure RecordReadError(const AStatistics: ISerialStatisticsState;
+  ACode: Integer; const AMessage: string);
+begin
+  // Nonblocking reads and incomplete lines use ErrTimeout as a normal result.
+  if (AStatistics <> nil) and (ACode <> 0) and (ACode <> ErrTimeout) then
+    AStatistics.RecordError(ACode, AMessage);
+end;
 
 function TLazSerialTransport.CanReadLine(const ATimeout: Integer): Boolean;
 begin
@@ -190,7 +213,7 @@ end;
 
 procedure TLazSynapseSerialTransport.Close;
 var
-  ErrorCode, PendingBytes, Timeout: Integer;
+  ErrorCode, PreviousWriteError, PendingBytes, Timeout: Integer;
   RaiseNative: Boolean;
   Started: QWord;
 begin
@@ -201,6 +224,7 @@ begin
   FSerial.RaiseExcept := False;
   // Other transport calls can clear LastError after a write has failed.
   ErrorCode := FWriteError;
+  PreviousWriteError := FWriteError;
   try
     try
       if (ErrorCode = 0) and not FSkipDrain then
@@ -228,6 +252,9 @@ begin
     FWriteError := 0;
     FSkipDrain := False;
     FSerial.RaiseExcept := RaiseNative;
+    if (FStatisticsState <> nil) and (PreviousWriteError = 0) and
+      (ErrorCode <> 0) then
+      FStatisticsState.RecordError(ErrorCode, TBlockSerial.GetErrorDesc(ErrorCode));
     if ErrorCode <> 0 then
       FSerial.SetSynaError(ErrorCode);
   end;
@@ -337,13 +364,31 @@ end;
 function TLazSynapseSerialTransport.ReadPacket(
   const ATimeout: Integer): AnsiString;
 begin
-  Result := FSerial.RecvPacket(ATimeout);
+  try
+    Result := FSerial.RecvPacket(ATimeout);
+  except
+    on E: ESynaSerError do
+    begin
+      RecordReadError(FStatisticsState, E.ErrorCode, E.ErrorMessage);
+      raise;
+    end;
+  end;
+  RecordReadError(FStatisticsState, FSerial.LastError, FSerial.LastErrorDesc);
 end;
 
 function TLazSynapseSerialTransport.ReadString(
   const ATimeout: Integer): AnsiString;
 begin
-  Result := FSerial.RecvString(ATimeout);
+  try
+    Result := FSerial.RecvString(ATimeout);
+  except
+    on E: ESynaSerError do
+    begin
+      RecordReadError(FStatisticsState, E.ErrorCode, E.ErrorMessage);
+      raise;
+    end;
+  end;
+  RecordReadError(FStatisticsState, FSerial.LastError, FSerial.LastErrorDesc);
 end;
 
 function TLazSynapseSerialTransport.SendBuffer(ABuffer: Pointer;
@@ -356,11 +401,15 @@ begin
     begin
       if FWriteError = 0 then
         FWriteError := E.ErrorCode;
+      if FStatisticsState <> nil then
+        FStatisticsState.RecordError(E.ErrorCode, E.ErrorMessage);
       raise;
     end;
   end;
   if FWriteError = 0 then
     FWriteError := FSerial.LastError;
+  if (FStatisticsState <> nil) and (FSerial.LastError <> 0) then
+    FStatisticsState.RecordError(FSerial.LastError, FSerial.LastErrorDesc);
 end;
 
 function TLazSynapseSerialTransport.SendString(

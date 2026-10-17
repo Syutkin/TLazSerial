@@ -555,6 +555,7 @@ object TerminalForm: TTerminalForm
         Font.Name = 'Sans'
         ParentFont = False
         TextHint = '/dev/ttyUSB0 or COM3'
+        OnChange = DeviceChanged
       end
       object FBaud: TEdit
         Left = 470

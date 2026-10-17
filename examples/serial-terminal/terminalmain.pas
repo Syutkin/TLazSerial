@@ -46,6 +46,7 @@ type
     procedure ModeChanged(Sender: TObject);
     procedure SendKeyPress(Sender: TObject; var Key: Char);
     procedure Tick(Sender: TObject);
+    procedure DeviceChanged(Sender: TObject);
   private
     FSerial: TLazSerial;
     FView: TTerminalView;
@@ -68,6 +69,7 @@ type
     procedure WriteCompleted(Sender: TObject; const AResult: TSerialWriteResult);
     procedure ReadError(Sender: TObject; ErrorCode: Integer; const ErrorMessage: string);
     procedure Removed(Sender: TObject);
+    procedure CloseCompleted(Sender: TObject);
     procedure Reconnected(Sender: TObject);
     procedure ReconnectFailed(Sender: TObject; ErrorCode: Integer; const ErrorMessage: string);
   end;
@@ -100,6 +102,7 @@ begin
   FSerial.OnWriteCompleted := @WriteCompleted;
   FSerial.OnError := @ReadError;
   FSerial.OnRemoved := @Removed;
+  FSerial.OnCloseCompleted := @CloseCompleted;
   FSerial.OnReconnected := @Reconnected;
   FSerial.OnReconnectFailed := @ReconnectFailed;
   if ParamCount > 0 then FDevice.Device := ParamStr(1);
@@ -119,6 +122,7 @@ begin
     FSerial.OnWriteCompleted := nil;
     FSerial.OnError := nil;
     FSerial.OnRemoved := nil;
+    FSerial.OnCloseCompleted := nil;
     FSerial.OnReconnected := nil;
     FSerial.OnReconnectFailed := nil;
     AbandonPending;
@@ -276,15 +280,17 @@ begin
 end;
 
 procedure TTerminalForm.ConnectClick(Sender: TObject);
-var Settings: TSerialSettings; Baud: Integer;
+var Settings: TSerialSettings; Baud: Integer; WasActive: Boolean;
 begin
   try
     FProblem := '';
     if FSerial.Active or FSerial.ReconnectPending then
     begin
+      WasActive := FSerial.Active;
       FSerial.Close;
       AbandonPending;
-      Info('Connection closed.');
+      if WasActive then Info('Closing connection...')
+      else Info('Automatic reconnection cancelled.');
     end
     else
     begin
@@ -502,6 +508,18 @@ begin
   Problem(Format('Read error %d: %s', [ErrorCode, ErrorMessage]));
 end;
 
+procedure TTerminalForm.DeviceChanged(Sender: TObject);
+begin
+  if FSerial <> nil then UpdateControls;
+end;
+
+procedure TTerminalForm.CloseCompleted(Sender: TObject);
+begin
+  Info('Connection closed.');
+  UpdateControls;
+  SampleStatistics;
+end;
+
 procedure TTerminalForm.Removed(Sender: TObject);
 begin
   AbandonPending;
@@ -534,6 +552,7 @@ begin
       FLogStopping := True;
       FProblem := Error;
       FView.AddMessage(Error);
+      UpdateControls;
     end;
     if FFileLog.Finished then
     begin
@@ -546,7 +565,6 @@ begin
       if FLogError <> '' then FLogLabel.Caption := 'Log stopped';
     end;
   end;
-  UpdateControls;
   SampleStatistics;
   FView.RefreshDisplay;
 end;

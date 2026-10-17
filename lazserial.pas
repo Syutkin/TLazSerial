@@ -276,6 +276,10 @@ type
     FOnError: TSerialErrorEvent;
     FOnRemoved: TNotifyEvent;
     FOnWriteCompleted: TSerialWriteCompletedEvent;
+    FOnCloseCompleted: TNotifyEvent;
+    FClosingConnectionId: QWord;
+    FCloseCallDepth: Integer;
+    FCloseNotificationQueued: Boolean;
     FWriteOperation: ISerialWriteOperation;
     FWriteId: QWord;
     FLastWriteId: QWord;
@@ -325,6 +329,8 @@ type
     function GetSynSer: TBlockSerial;
     function GetStatistics: TSerialStatistics;
     function GetClosePending: Boolean;
+    procedure ScheduleCloseCompleted;
+    procedure DeliverCloseCompleted;
     procedure SetBufferedRead(AValue: Boolean);
     procedure SetReadBufferLimit(AValue: Integer);
     procedure SetDtrOnOpen(AValue: TSerialOpenLineState);
@@ -377,7 +383,7 @@ type
     // A nonpositive timeout skips waiting; unfinished output reports ErrTimeout.
     // A pending asynchronous write is cancelled and closed in the background;
     // buffered receive also closes in the background. Wait for ClosePending
-    // and WritePending to clear before opening the port again.
+    // and WritePending to clear, or handle OnCloseCompleted before reopening.
     procedure Close;
     // show a port settings dialog form
     procedure ShowSetupDialog;
@@ -465,6 +471,10 @@ type
     property OnError: TSerialErrorEvent read FOnError write FOnError;
     // Triggers if the device is removed during an active connection.
     property OnRemoved : TNotifyEvent read FOnRemoved write FOnRemoved;
+    // Queued once per closed connection after RX/TX and native cleanup finish.
+    // Active, ClosePending and WritePending are False before the handler.
+    // Also covers synchronous close; suppressed on destruction or early reopen.
+    property OnCloseCompleted: TNotifyEvent read FOnCloseCompleted write FOnCloseCompleted;
     property OnWriteCompleted: TSerialWriteCompletedEvent
       read FOnWriteCompleted write FOnWriteCompleted;
   end;
@@ -886,7 +896,12 @@ procedure TLazSerial.DeviceClose;
 var
   Delivery: TSerialReaderEventDelivery;
   TransportLocked: Boolean;
+  Lifetime: ISerialReaderSession;
+  Serial: TLazSerial;
 begin
+  Lifetime := FStatusSession;
+  Inc(FCloseCallDepth);
+  if FActive and not FDestroying then FClosingConnectionId := FConnectionId;
   TThread.RemoveQueuedEvents(nil, @ProcessWriteQueue);
   FWriteQueueScheduled := False;
   if FWriteQueue <> nil then FWriteQueue.Clear;
@@ -900,7 +915,8 @@ begin
     begin
       FActive := False;
       FTransport.SetStatusHandler(nil);
-      FReadOperation.Detach;
+      // Keep the progress callback until shared native cleanup is complete.
+      // Inactive receive notifications only schedule close completion.
     end;
     if FWriteOperation <> nil then
     begin
@@ -966,7 +982,16 @@ begin
   finally
     FClosing := False;
     // EndTransport can deliver a callback that destroys this component.
-    if TransportLocked then EndTransport;
+    try
+      if TransportLocked then EndTransport;
+    finally
+      Serial := (Lifetime as TSerialReaderSession).FOwner;
+      if Serial <> nil then
+      begin
+        Dec(Serial.FCloseCallDepth);
+        Serial.ScheduleCloseCompleted;
+      end;
+    end;
   end;
 end;
 
@@ -1046,6 +1071,31 @@ begin
     Result := Result or FReadOperation.GetClosePending;
 end;
 
+procedure TLazSerial.ScheduleCloseCompleted;
+begin
+  if FDestroying or (FClosingConnectionId = 0) or FCloseNotificationQueued or
+    (FCloseCallDepth <> 0) or FActive or GetClosePending or GetWritePending then Exit;
+  FCloseNotificationQueued := True;
+  try
+    TThread.ForceQueue(nil, @DeliverCloseCompleted);
+  except
+    FCloseNotificationQueued := False;
+    raise;
+  end;
+end;
+
+procedure TLazSerial.DeliverCloseCompleted;
+var Handler: TNotifyEvent;
+begin
+  FCloseNotificationQueued := False;
+  if FDestroying or (FClosingConnectionId = 0) or (FCloseCallDepth <> 0) or
+    FActive or GetClosePending or GetWritePending then Exit;
+  FClosingConnectionId := 0;
+  Handler := FOnCloseCompleted;
+  // No component access after user code: the handler may reopen or destroy it.
+  if Assigned(Handler) then Handler(Self);
+end;
+
 function TLazSerial.TryReadData(out AData: string): Boolean;
 begin
   CheckMainThread('TLazSerial.TryReadData');
@@ -1120,6 +1170,7 @@ end;
 destructor TLazSerial.Destroy;
 begin
   FDestroying := True;
+  TThread.RemoveQueuedEvents(nil, @DeliverCloseCompleted);
   TThread.RemoveQueuedEvents(nil, @ProcessWriteQueue);
   FreeAndNil(FReconnect);
   FStatusSession.Detach;
@@ -1217,6 +1268,13 @@ begin
     FReconnect.DeferAttempt;
     Exit;
   end;
+  // Preserve the closed-state guarantee for a subscribed completion handler.
+  if (FClosingConnectionId <> 0) and Assigned(FOnCloseCompleted) then
+  begin
+    ScheduleCloseCompleted;
+    FReconnect.DeferAttempt;
+    Exit;
+  end;
   if not FReconnect.BeginAttempt(DeviceName) then Exit;
   FDevice := DeviceName;
   OpenConnection(True);
@@ -1248,6 +1306,9 @@ begin
   if ReadThread <> nil then DeviceClose;
   Serial := (Lifetime as TSerialReaderSession).FOwner;
   if Serial = nil then Exit;
+  TThread.RemoveQueuedEvents(nil, @DeliverCloseCompleted);
+  FCloseNotificationQueued := False;
+  FClosingConnectionId := 0;
   if FReadOperation <> nil then
   begin
     FReadOperation.Detach;
@@ -1751,6 +1812,7 @@ begin
   if FWriteCloseRequested then
   begin
     FWriteCloseRequested := False;
+    ScheduleCloseCompleted;
     Exit;
   end;
   FTransport.CompleteWrite(AResult);
@@ -1994,7 +2056,12 @@ var
   Message, Partial: string;
 begin
   Operation := FReadOperation;
-  if (Operation = nil) or FDestroying or not FActive then Exit;
+  if (Operation = nil) or FDestroying then Exit;
+  if not FActive then
+  begin
+    ScheduleCloseCompleted;
+    Exit;
+  end;
   Lifetime := FStatusSession;
   if Operation.GetFailure(Code, Message) then
   begin

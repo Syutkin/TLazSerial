@@ -13,6 +13,7 @@ uses
   Forms,
   ConsoleTestRunner,
   LazSerialLifecycleTests,
+  LazSerialCloseCompletedTests,
   LazSerialThreadContractTests,
   SerialLinuxChangeSourceTests,
   SerialMacChangeSourceTests,

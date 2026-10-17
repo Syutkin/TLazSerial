@@ -25,7 +25,15 @@ type
     function GetClosePending: Boolean;
   end;
 
-  TSerialWritePort = class(TInterfacedObject, ISerialWritePort, ISerialPortLifecycle)
+  // Optional shared-port capability. The handler is queued on the main thread;
+  // setting nil cancels delivery before the observer is detached.
+  ISerialPortCloseNotification = interface
+    ['{C4B90E1D-552A-46E5-B59A-0F077D5BC195}']
+    procedure SetCloseHandler(AHandler: TThreadMethod);
+  end;
+
+  TSerialWritePort = class(TInterfacedObject, ISerialWritePort,
+    ISerialPortLifecycle, ISerialPortCloseNotification)
   private
     FSerial: TBlockSerial;
     FLock: SyncObjs.TCriticalSection;
@@ -37,6 +45,10 @@ type
     FPreviousFlags: Integer;
     {$ENDIF}
     FCloseRequested, FClosing, FClosed: Boolean;
+    FOnClosed: TThreadMethod;
+    FQueuedCloseReference: ISerialPortLifecycle;
+    procedure ClosedOnMain;
+    procedure DeliverClosed;
     procedure ConfigureReader;
     procedure RestoreReader;
     procedure StartClose;
@@ -49,6 +61,7 @@ type
     procedure ReleaseIO(ARead: Boolean);
     procedure RequestClose;
     function GetClosePending: Boolean;
+    procedure SetCloseHandler(AHandler: TThreadMethod);
   end;
 
   ISerialWriteOperation = interface
@@ -112,6 +125,7 @@ type
   private
     FOwner: TSerialWritePort;
     FReference: ISerialPortLifecycle;
+    procedure FinishedOnMain(Sender: TObject);
   protected
     procedure Execute; override;
   public
@@ -170,6 +184,12 @@ begin
   FreeOnTerminate := True;
   FOwner := AOwner;
   FReference := AOwner;
+  OnTerminate := @FinishedOnMain;
+end;
+
+procedure TSerialPortCloseWorker.FinishedOnMain(Sender: TObject);
+begin
+  FOwner.ClosedOnMain;
 end;
 
 procedure TSerialPortCloseWorker.Execute;
@@ -289,9 +309,16 @@ begin
     try
       try
         try
-          if Worker <> nil then Worker.FreeOnTerminate := False;
+          if Worker <> nil then
+          begin
+            Worker.OnTerminate := nil;
+            Worker.FreeOnTerminate := False;
+          end;
           Worker.Free;
-        finally RunClose; end;
+        finally
+          try RunClose;
+          finally ClosedOnMain; end;
+        end;
       except
         // RunClose finalizes the state; report the original startup error.
       end;
@@ -353,6 +380,42 @@ begin
   finally
     FLock.Release;
   end;
+end;
+
+procedure TSerialWritePort.SetCloseHandler(AHandler: TThreadMethod);
+begin
+  FLock.Acquire;
+  try
+    TThread.RemoveQueuedEvents(nil, @DeliverClosed);
+    FQueuedCloseReference := nil;
+    FOnClosed := AHandler;
+  finally FLock.Release; end;
+  ClosedOnMain;
+end;
+
+procedure TSerialWritePort.ClosedOnMain;
+begin
+  FLock.Acquire;
+  try
+    if FClosed and Assigned(FOnClosed) and (FQueuedCloseReference = nil) then
+    begin
+      FQueuedCloseReference := Self;
+      TThread.ForceQueue(nil, @DeliverClosed);
+    end;
+  finally FLock.Release; end;
+end;
+
+procedure TSerialWritePort.DeliverClosed;
+var KeepAlive: ISerialPortLifecycle; Handler: TThreadMethod;
+begin
+  KeepAlive := Self;
+  FLock.Acquire;
+  try
+    FQueuedCloseReference := nil;
+    Handler := FOnClosed;
+    FOnClosed := nil;
+  finally FLock.Release; end;
+  if Assigned(Handler) then Handler;
 end;
 
 procedure TSerialWritePort.RunClose;

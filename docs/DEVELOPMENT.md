@@ -51,6 +51,7 @@ create no windows but depend on LCL; on a headless Linux host, set
 `--opt=-k-lQt6DBus` to the build commands. Incoming bytes may arrive in several
 chunks or combine several writes. The main loop pumps `CheckSynchronize`
 while polling the keyboard so callbacks also run while a line is being typed.
+The buffered example also pumps it until `OnCloseCompleted` confirms cleanup.
 
 ## Tests
 
@@ -97,15 +98,22 @@ sudo rfcomm bind 0 xx:xx:xx:xx:xx:xx 1
 
 ## Custom transports
 
-Custom transports retain the existing `Connect` signature. To support explicit
-states, override `ConfigureOpenLines(ADtr, ARts, AFlowControl)` and apply them
+To support initial DTR/RTS states in a custom transport, override
+`ConfigureOpenLines(ADtr, ARts, AFlowControl)` and apply them
 during opening. Its base implementation accepts defaults and rejects explicit
 states before connecting. Direct Synaser users can call the same method on
 `TBlockSerial` before `Connect`.
 
-The built-in native transport supports buffered input. Existing custom
-transport classes continue to compile; enabling buffered input on a transport
-without `CreateReadOperation` support fails and rolls back opening.
+A custom buffered reader should use its supplied `AOnChanged` callback to
+report completion of closing, after `GetClosePending` becomes false. Keep that
+callback attached until `Detach`; `TLazSerial` suppresses receive delivery while
+inactive and uses the final notification for `OnCloseCompleted`. The built-in
+shared port implements optional `ISerialPortCloseNotification` so the reader
+also observes handle cleanup that outlasts its own worker. Custom shared port
+owners used with `TSerialReadOperation` can implement the same capability.
+
+Buffered input requires `CreateReadOperation` support; enabling it on a
+transport without that support fails and rolls back opening.
 
 Asynchronous writes require `CreateWriteOperation` support; its base
 implementation rejects the request. Override `CompleteWrite` when the

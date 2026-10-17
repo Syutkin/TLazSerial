@@ -41,6 +41,8 @@ a port.
   transitions when opening a port, subject to OS and driver behavior. Defaults
   preserve existing behavior; unsupported states and flow-control conflicts
   are reported explicitly.
+- Add `OnCloseCompleted` on the main thread after complete RX/TX and native
+  port cleanup, so applications can reopen without polling pending flags.
 - Add `OnError` to report terminal reader failures after closing the port.
 - Add `Serial.Statistics` snapshots with native RX/TX byte counts, buffered
   receive usage and peak, retained error diagnostics and the session's close

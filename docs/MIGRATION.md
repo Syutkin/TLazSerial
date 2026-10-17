@@ -11,8 +11,7 @@ in place must use a local string and assign the result back to `FBuffer`.
 ## Migrating from TLazSerial 0.7.x to 0.8.0
 
 Version 0.8.0 replaces string-based serial-device enumeration with
-`TSerialDeviceInfoArray`. Existing opening, reading and writing signatures
-remain unchanged, with the threading and ownership requirements below.
+`TSerialDeviceInfoArray`.
 
 ### Main-thread access
 

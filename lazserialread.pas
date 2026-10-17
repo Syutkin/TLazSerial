@@ -7,6 +7,8 @@ interface
 uses Classes, SysUtils, SyncObjs, LazSerialCommon, LazSerialStatistics, LazSynaSer, LazSerialWrite;
 
 type
+  // Main-thread progress, including completed shared-port cleanup. ClosePort
+  // keeps this callback attached; Detach cancels all pending notifications.
   TSerialReadChanged = procedure of object;
 
   ISerialReadOperation = interface
@@ -34,6 +36,7 @@ type
   private
     FPort: ISerialWritePort;
     FLifecycle: ISerialPortLifecycle;
+    FCloseNotification: ISerialPortCloseNotification;
     FLock: TCriticalSection;
     FCancel: TEvent;
     FStopping: LongInt;
@@ -48,6 +51,7 @@ type
     procedure Deliver;
     procedure QueueChanged;
     procedure WorkerFinished;
+    procedure PortClosed;
     procedure Fail(AError: Integer; const AMessage: string);
   protected
     function ReadChunk(ABuffer: Pointer; ACount: Integer;
@@ -115,6 +119,7 @@ begin
   FStatistics := APort.GetSerial.StatisticsState;
   if not Supports(FPort, ISerialPortLifecycle, FLifecycle) then
     raise EInvalidOperation.Create('Port does not support shared receive lifetime');
+  Supports(FPort, ISerialPortCloseNotification, FCloseNotification);
   FLimit := ALimit;
   FMaxBandwidth := FPort.GetSerial.MaxRecvBandwidth;
   FPort.GetSerial.ConfigureReadBuffer(ALimit);
@@ -123,6 +128,7 @@ end;
 
 destructor TSerialReadOperation.Destroy;
 begin
+  if FCloseNotification <> nil then FCloseNotification.SetCloseHandler(nil);
   FCancel.Free;
   FLock.Free;
   inherited Destroy;
@@ -220,8 +226,16 @@ begin
   if Assigned(Callback) then Callback;
 end;
 
+procedure TSerialReadOperation.PortClosed;
+begin
+  FLock.Acquire;
+  try QueueChanged;
+  finally FLock.Release; end;
+end;
+
 procedure TSerialReadOperation.Detach;
 begin
+  if FCloseNotification <> nil then FCloseNotification.SetCloseHandler(nil);
   FLock.Acquire;
   try
     FOnChanged := nil;
@@ -238,6 +252,7 @@ begin
     FCloseRequested := True;
     if not FStarted then FCompleted := True;
   finally FLock.Release; end;
+  if FCloseNotification <> nil then FCloseNotification.SetCloseHandler(@PortClosed);
   FLifecycle.RequestClose;
 end;
 

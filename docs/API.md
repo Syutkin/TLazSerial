@@ -89,13 +89,12 @@ configuration error is raised regardless of `SynSer.RaiseExcept`.
 `ApplySettings` requires the main thread and rejects an active buffered reader,
 pending writes (including queued entries/results), or cleanup with
 `EInvalidOperation`. These restrictions also apply to an unchanged record.
-`Device`, initial DTR/RTS states, read modes, queue settings and AutoReconnect
-remain separate; applying a record does not open or switch ports. Individual
-property setters continue to work through the same configuration path.
+`TSerialSettings` excludes `Device`, initial DTR/RTS states, read modes, queue
+settings and AutoReconnect. Applying a record does not open or switch ports.
 
 `TSerialSettings` is defined in `LazSerialSettings`, which has no LCL
 dependency, and is also accessible through `LazSerial`.
-This does not remove the component's existing LCL requirement.
+`TLazSerial` requires LCL.
 
 ### Initial DTR/RTS states
 
@@ -237,7 +236,7 @@ read. The worker fails explicitly when no space remains for reception:
 `OnError` reports `ErrReadBufferOverflow` (9990), available from `LazSerial`
 and `LazSerialCommon`. Data is not silently evicted to continue reception.
 
-`MaxLineLength` retains its existing interpretation, including the terminator.
+`MaxLineLength` limits line length, including the terminator.
 An oversized line raises `ESynaSerError` with `ErrMaxBuffer` from
 `ReadData`/`TryReadData`, regardless of `SynSer.RaiseExcept`, and is skipped
 through its terminator. The port remains open and following valid lines can
@@ -253,8 +252,8 @@ active, accessing `SynSer`, changing port settings/device, opening the setup
 dialog or setting RTS/DTR raises `EInvalidOperation`. Previously saved
 `SynSer` references must remain unused too. Changing `RcvLineCRLF` through
 the component preserves unread bytes and recalculates readiness. Synchronous
-and asynchronous writes remain available under the
-[write restrictions](#asynchronous-writes); synchronous writes still block.
+and asynchronous writes follow the
+[write restrictions](#asynchronous-writes); synchronous writes block.
 
 ## Asynchronous writes
 
@@ -290,8 +289,7 @@ end;
 reports `ErrTimeout`; a requested cancellation reports error code zero.
 Other failures preserve their original code and message; an exception without
 a native code reports zero with its exception message. Results are independent
-of `SynSer.LastError` and `RaiseExcept`. `OnError` continues to report reader
-failures. Write completion does not acknowledge receipt by the remote device.
+of `SynSer.LastError` and `RaiseExcept`. `OnError` reports reader failures. Write completion does not acknowledge receipt by the remote device.
 
 By default (`WriteQueueEnabled = False`), only one asynchronous write may be
 pending. `WritePending` stays true through native completion and cancellation
@@ -357,10 +355,30 @@ a guarantee of transmission before closing.
 
 `ClosePending` tracks background port cleanup; `WritePending` also remains
 true until the component processes a pending write's completion. Shared receive
-cleanup may outlast the write. Before reopening, wait for both flags to become
-false, using a later UI event or timer callback so the LCL event loop can run.
-`Open` raises `EInvalidOperation` while cleanup is pending. A terminal `OnError`
-may arrive before cleanup finishes.
+cleanup may outlast the write. `Open` raises `EInvalidOperation` while cleanup
+is pending. A terminal `OnError` or `OnRemoved` may arrive before cleanup finishes.
+
+`OnCloseCompleted(Sender)` reports complete closure of a successfully opened
+connection. At entry, `Active`, `ClosePending` and `WritePending` are all false:
+the native port is released and settings can be changed or the port reopened.
+Subscribe before closing and let the LCL event loop (or `CheckSynchronize` in a
+console program) deliver the notification instead of polling both pending flags.
+
+- Delivery is queued on the main thread, including synchronous closing; the
+  handler is never called inline from `Close`.
+- A connection produces one notification, whether closed explicitly, after
+  removal or after a terminal read error. Repeated `Close` calls do not add
+  notifications. Closing an idle component or a failed opening does not fire it.
+- Destruction cancels the notification. A manual opening attempt before
+  delivery also discards it, so an old close event cannot describe a new active
+  connection.
+- With AutoReconnect, completion describes cleanup of the old connection;
+  `ReconnectPending` can still be true. Automatic opening waits for a subscribed
+  close handler to run; calling `Close` there cancels recovery as usual.
+- The handler may reopen or destroy the component. Its exceptions propagate on
+  the main thread; the notification is considered delivered and is not retried.
+
+The close reason and retained diagnostics are available in `Statistics`.
 
 Closing or a terminal read error discards unread input; old data and
 notifications never enter the next session. Destruction detaches callbacks

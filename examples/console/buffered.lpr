@@ -12,6 +12,8 @@ type
   private
     FSerial: TLazSerial;
     FInput: string;
+    FClosed: Boolean;
+    procedure CloseCompleted(Sender: TObject);
     procedure Received(Sender: TObject);
     procedure WriteCompleted(Sender: TObject; const AResult: TSerialWriteResult);
     procedure Failed(Sender: TObject; Code: Integer; const Message: string);
@@ -40,6 +42,11 @@ begin
     ConsoleMessage('Write error: ' + AResult.ErrorMessage, FInput);
 end;
 
+procedure TSerialConsole.CloseCompleted(Sender: TObject);
+begin
+  FClosed := True;
+end;
+
 procedure TSerialConsole.Failed(Sender: TObject; Code: Integer;
   const Message: string);
 begin
@@ -65,7 +72,9 @@ begin
     FSerial.OnRxData := @Received;
     FSerial.OnWriteCompleted := @WriteCompleted;
     FSerial.OnError := @Failed;
+    FSerial.OnCloseCompleted := @CloseCompleted;
     FSerial.Open;
+    FClosed := False;
     WriteLn('Connected to ', ADevice, ' (115200 8N1, no flow control).');
     WriteLn('Enter sends a line with CRLF. /quit, Escape or Ctrl+C exits.');
     Write('> ');
@@ -85,7 +94,7 @@ begin
     finally
       FSerial.Close; // Cancels pending input/output without a native I/O wait.
       // Keep event delivery running until shared native cleanup has finished.
-      while FSerial.ClosePending or FSerial.WritePending do CheckSynchronize(10);
+      while not FClosed do CheckSynchronize(10);
     end;
   finally
     FSerial.Free;

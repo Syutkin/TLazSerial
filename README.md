@@ -62,8 +62,7 @@ Declare `Receive(Sender: TObject)` in the form class. With `RcvLineCRLF = True`,
 
 ## Settings snapshots
 
-Use `TSerialSettings` to save or apply the port's data format as one operation.
-Existing individual properties remain available:
+Use `TSerialSettings` to save or apply the port's data format as one operation:
 
 ```pascal
 Settings := Serial.GetSettings;
@@ -199,8 +198,7 @@ flow control are rejected. See [initial line states](docs/API.md#initial-dtrrts-
 - `OnError` reports terminal reader failures after logical closing. Write errors
   arrive through `OnWriteCompleted`.
 - With buffered input or a pending asynchronous write, closing normally cancels
-  I/O in the background. Before reopening, let the event loop run and wait for
-  both `ClosePending = False` and `WritePending = False`.
+  I/O in the background. `OnCloseCompleted` signals when the port is ready to reopen.
 
 See [threading and ownership](docs/API.md#threading-and-ownership) and
 [closing and reopening](docs/API.md#closing-and-reopening) for the full contracts.

@@ -13,6 +13,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Hotplug tracks the actually opened port and supported aliases, without
+  closing unlisted paths when another device disappears. Close-status handlers
+  can destroy or reopen the component without a stale removal notification.
 - Serial-device discovery retains the complete command output after process
   exit, while preserving cancellation and timeout checks.
 - Stream sends complete partial writes, including length headers, and stop

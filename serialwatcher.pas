@@ -494,8 +494,19 @@ begin
 end;
 
 function TSerialWatcher.ContainsDevice(const ADevice: string): Boolean;
+var
+  I: Integer;
 begin
-  Result := FInitialized and ContainsSerialDevice(FDevices, ADevice);
+  Result := False;
+  if not FInitialized or (ADevice = '') then Exit;
+  if ContainsSerialDevice(FDevices, ADevice) then Exit(True);
+  for I := Low(FDevices) to High(FDevices) do
+    {$IFDEF MSWINDOWS}
+    if CompareText(FDevices[I].PersistentId, ADevice) = 0 then
+    {$ELSE}
+    if FDevices[I].PersistentId = ADevice then
+    {$ENDIF}
+      Exit(True);
 end;
 
 destructor TSerialWatcher.Destroy;

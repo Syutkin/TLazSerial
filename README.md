@@ -47,6 +47,10 @@ Serial.Open;
 Use `OnRxData` with `ReadData` for incoming data and `WriteData` for outgoing
 data. `ShowSetupDialog` opens the bundled port-settings dialog.
 
+With a legacy connection and no pending asynchronous write, changing `Device`
+sets the port for the next opening. Hotplug continues to track the port that
+is currently open.
+
 In the default receive mode, with `RcvLineCRLF = True`, `ReadData` returns
 one line without its CRLF.
 An incomplete line stays buffered and `ReadData` returns an empty string with

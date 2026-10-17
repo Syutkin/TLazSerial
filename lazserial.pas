@@ -180,6 +180,9 @@ type
     FPendingStatuses: TList;
     FStatusSession: ISerialReaderSession;
     FDevice: string;
+    FConnectedDevice: string;
+    FConnectedDeviceTracked: Boolean;
+    FConnectionId: QWord;
 
     FSerialWatcher : TSerialWatcher;
 
@@ -217,6 +220,8 @@ type
     procedure CheckMainThread(const AOperation: string);
     procedure ComException(str: string);
     procedure ComDisconnected(Sender: TObject);
+    procedure DevicesRefreshed(Sender: TObject;
+      const ADevices: TSerialDeviceInfoArray);
     procedure DeliverReaderReceive;
     procedure DeliverReaderError(const AErrorCode: Integer;
       const AErrorMessage: string);
@@ -328,7 +333,20 @@ function LazSerialGetVersion: string;
 procedure Register;
 
 implementation
-uses LazSerialSetup;
+uses LazSerialSetup, LazFileUtils;
+
+function NormalizeConnectedDevice(const ADevice: string): string;
+begin
+  Result := ADevice;
+  {$IFDEF MSWINDOWS}
+  if (Copy(Result, 1, 4) = '\\.\') or
+    (Copy(Result, 1, 4) = '\\?\') then Delete(Result, 1, 4);
+  Result := UpperCase(Result);
+  {$ELSE}
+  if (Pos('/', Result) > 0) or FileExists(Result) then
+    Result := TryReadAllLinks(ExpandFileNameUTF8(Result));
+  {$ENDIF}
+end;
 
 function LazSerialGetVersion: string;
 begin
@@ -756,6 +774,7 @@ begin
   FFlowControl := fcNone;
   FSerialWatcher := TSerialWatcher.Create(Self);
   FSerialWatcher.OnComDisconnected := @ComDisconnected;
+  FSerialWatcher.OnDevicesRefreshed := @DevicesRefreshed;
   FReadBufferLimit := 65536;
   FCustomBaudRate := -1;
   FClosing := False;
@@ -855,6 +874,7 @@ begin
   FDestroying := True;
   FStatusSession.Detach;
   FSerialWatcher.OnComDisconnected := nil;
+  FSerialWatcher.OnDevicesRefreshed := nil;
   if FReaderSession <> nil then
     FReaderSession.Detach;
   try
@@ -927,6 +947,9 @@ begin
                          ConstsParity[FParity],
                          ConstsStopBits[FStopBits],
                          FFlowControl);
+    Inc(FConnectionId);
+    FConnectedDevice := NormalizeConnectedDevice(FTransport.DeviceName);
+    FConnectedDeviceTracked := FSerialWatcher.ContainsDevice(FConnectedDevice);
 
     if FBufferedRead then
     begin
@@ -1481,22 +1504,40 @@ begin
     FOnStatus(Sender, Reason, Value);
 end;
 
-//Begin: Handle disconnect detection
-procedure TLazSerial.TriggerDisconnected;
+procedure TLazSerial.DevicesRefreshed(Sender: TObject;
+  const ADevices: TSerialDeviceInfoArray);
 begin
-  if Active and not FSerialWatcher.ContainsDevice(FDevice) then
+  if FActive and FSerialWatcher.ContainsDevice(FConnectedDevice) then
+    FConnectedDeviceTracked := True;
+end;
+
+procedure TLazSerial.TriggerDisconnected;
+var
+  Lifetime: ISerialReaderSession;
+  Serial: TLazSerial;
+  ConnectionId: QWord;
+begin
+  if not FActive then Exit;
+  if FSerialWatcher.ContainsDevice(FConnectedDevice) then
   begin
-    Active := False;
-    if Assigned(FOnRemoved) then
-      FOnRemoved(Self);
+    FConnectedDeviceTracked := True;
+    Exit;
   end;
+  // Absence from enumeration cannot prove removal of an unlisted path.
+  if not FConnectedDeviceTracked then Exit;
+  Lifetime := FStatusSession;
+  ConnectionId := FConnectionId;
+  Active := False;
+  Serial := (Lifetime as TSerialReaderSession).FOwner;
+  if (Serial <> nil) and (Serial.FConnectionId = ConnectionId) and
+    not Serial.FActive and Assigned(Serial.FOnRemoved) then
+    Serial.FOnRemoved(Serial);
 end;
 
 procedure TLazSerial.ComDisconnected(Sender: TObject);
 begin
   TriggerDisconnected;
 end;
-//End: Handle disconnect detection
 
 procedure Register;
 begin

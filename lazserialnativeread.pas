@@ -5,12 +5,17 @@ unit LazSerialNativeRead;
 interface
 
 uses Classes, SysUtils, LazSerialRead, LazSerialWrite, LazSynaSer
-  {$IFDEF MSWINDOWS}, Windows{$ELSE}, BaseUnix{$ENDIF};
+  {$IFDEF MSWINDOWS}, Windows{$ELSE}, BaseUnix, Termio{$ENDIF};
 
 type
   TNativeSerialReadOperation = class(TSerialReadOperation)
   private
     FHandle: THandle;
+    FTestDSR, FTestCTS: Boolean;
+    function CheckSignals: Integer;
+    {$IFDEF MSWINDOWS}
+    function CheckReceiveErrors: Integer;
+    {$ENDIF}
   protected
     function ReadChunk(ABuffer: Pointer; ACount: Integer;
       out AReceived: Integer): Integer; override;
@@ -34,13 +39,49 @@ constructor TNativeSerialReadOperation.Create(const APort: ISerialWritePort;
 begin
   inherited Create(APort, ALimit, AOnChanged);
   FHandle := APort.GetSerial.Handle;
+  FTestDSR := APort.GetSerial.TestDSR;
+  FTestCTS := APort.GetSerial.TestCTS;
+end;
+
+function TNativeSerialReadOperation.CheckSignals: Integer;
+var Signals: {$IFDEF MSWINDOWS}DWORD{$ELSE}cint{$ENDIF};
+begin
+  Result := 0;
+  if not FTestDSR and not FTestCTS then Exit;
+  {$IFDEF MSWINDOWS}
+  if not Windows.GetCommModemStatus(FHandle, Signals) then Exit(Windows.GetLastError);
+  if (FTestDSR and ((Signals and MS_DSR_ON) = 0)) or
+    (FTestCTS and ((Signals and MS_CTS_ON) = 0)) then Result := ErrNoDeviceAnswer;
+  {$ELSE}
+  if fpIoctl(FHandle, TIOCMGET, @Signals) < 0 then Exit(fpGetErrno);
+  if (FTestDSR and ((Signals and TIOCM_DSR) = 0)) or
+    (FTestCTS and ((Signals and TIOCM_CTS) = 0)) then Result := ErrNoDeviceAnswer;
+  {$ENDIF}
 end;
 
 {$IFDEF MSWINDOWS}
+function TNativeSerialReadOperation.CheckReceiveErrors: Integer;
+var Errors: DWORD; Status: TComStat;
+begin
+  Result := 0;
+  if not Windows.ClearCommError(FHandle, Errors, @Status) then Exit(Windows.GetLastError);
+  if (Errors and CE_FRAME) <> 0 then Result := ErrFrame;
+  if (Errors and CE_OVERRUN) <> 0 then Result := ErrOverrun;
+  if (Errors and CE_RXOVER) <> 0 then Result := ErrRxOver;
+  if (Errors and CE_RXPARITY) <> 0 then Result := ErrRxParity;
+  if (Errors and CE_TXFULL) <> 0 then Result := ErrTxFull;
+end;
+
 function TNativeSerialReadOperation.StartIO(ABuffer: Pointer; ACount: DWORD;
   out AReceived: DWORD; var AOverlapped: TOverlapped): Boolean;
+var Error: Integer;
 begin
   Result := Windows.ReadFile(FHandle, ABuffer^, ACount, AReceived, @AOverlapped);
+  if Result then
+  begin
+    Error := CheckReceiveErrors;
+    if Error <> 0 then begin Windows.SetLastError(Error); Result := False; end;
+  end;
 end;
 
 function TNativeSerialReadOperation.WaitIO(AEvent: THandle; ATimeout: DWORD): DWORD;
@@ -50,8 +91,14 @@ end;
 
 function TNativeSerialReadOperation.FinishIO(var AOverlapped: TOverlapped;
   out AReceived: DWORD; AWait: Boolean): Boolean;
+var Error: Integer;
 begin
   Result := Windows.GetOverlappedResult(FHandle, AOverlapped, AReceived, AWait);
+  if Result then
+  begin
+    Error := CheckReceiveErrors;
+    if Error <> 0 then begin Windows.SetLastError(Error); Result := False; end;
+  end;
 end;
 
 function TNativeSerialReadOperation.AbortIO: Boolean;
@@ -66,8 +113,9 @@ var
   Count, CompletionError, WaitResult: DWORD;
   WaitCompletion: Boolean;
 begin
-  Result := 0;
+  Result := CheckSignals;
   AReceived := 0;
+  if Result <> 0 then Exit;
   FillChar(Overlapped, SizeOf(Overlapped), 0);
   Overlapped.hEvent := Windows.CreateEvent(nil, True, False, nil);
   if Overlapped.hEvent = 0 then Exit(Windows.GetLastError);
@@ -121,8 +169,9 @@ function TNativeSerialReadOperation.ReadChunk(ABuffer: Pointer; ACount: Integer;
   out AReceived: Integer): Integer;
 var Descriptor: TPollFD; Ready: Integer;
 begin
-  Result := 0;
+  Result := CheckSignals;
   AReceived := 0;
+  if Result <> 0 then Exit;
   FillChar(Descriptor, SizeOf(Descriptor), 0);
   Descriptor.fd := FHandle;
   Descriptor.events := POLLIN;

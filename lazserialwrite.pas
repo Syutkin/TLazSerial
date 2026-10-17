@@ -11,7 +11,7 @@ uses
 type
   TSerialWriteFinished = procedure(const AResult: TSerialWriteResult) of object;
 
-  { The transport and an outstanding write share ownership of the native port.
+  { The transport and outstanding operations share ownership of the native port.
     A detached worker never needs to access the component or its transport. }
   ISerialWritePort = interface
     function GetSerial: TBlockSerial;
@@ -30,7 +30,7 @@ type
     FSerial: TBlockSerial;
     FLock: SyncObjs.TCriticalSection;
     FReaders, FWriters: Integer;
-    FReadSettings: Boolean;
+    FReadSettings, FConfiguring, FRestoring: Boolean;
     {$IFDEF MSWINDOWS}
     FPreviousTimeouts: TCommTimeouts;
     {$ELSE}
@@ -213,23 +213,43 @@ procedure TSerialWritePort.AcquireIO(ARead: Boolean);
 begin
   FLock.Acquire;
   try
-    // A completed close may be followed by opening this transport again.
     if FClosed and FSerial.InstanceActive then
     begin
       FClosed := False;
       FCloseRequested := False;
     end;
-    if FCloseRequested then
-      raise EInvalidOperation.Create('Serial port is closing');
+    if FCloseRequested or FConfiguring or FRestoring then
+      raise EInvalidOperation.Create('Serial port is closing or configuring');
     if ARead then
     begin
       if FReaders <> 0 then raise EInvalidOperation.Create('A reader already owns the port');
-      ConfigureReader;
+      FConfiguring := True;
       Inc(FReaders);
     end
     else Inc(FWriters);
   finally
     FLock.Release;
+  end;
+  if ARead then
+  begin
+    // Opening already configures the driver synchronously. Do not hold the
+    // lifecycle lock across its IOCTLs: cleanup observers only need memory.
+    try
+      try
+        ConfigureReader;
+      except
+        FLock.Acquire;
+        try Dec(FReaders);
+        finally FLock.Release; end;
+        raise;
+      end;
+    finally
+      FLock.Acquire;
+      try
+        FConfiguring := False;
+        StartClose;
+      finally FLock.Release; end;
+    end;
   end;
 end;
 
@@ -238,7 +258,7 @@ var
   Worker: TSerialPortCloseWorker;
 begin
   // Called under FLock. The worker owns the port even after transport teardown.
-  if not FCloseRequested or FClosing or FClosed or
+  if not FCloseRequested or FClosing or FClosed or FConfiguring or FRestoring or
     (FReaders <> 0) or (FWriters <> 0) then Exit;
   Worker := TSerialPortCloseWorker.Create(Self);
   FClosing := True;
@@ -252,6 +272,7 @@ begin
 end;
 
 procedure TSerialWritePort.ReleaseIO(ARead: Boolean);
+var NeedsRestore: Boolean;
 begin
   FLock.Acquire;
   try
@@ -265,11 +286,23 @@ begin
       if FWriters = 0 then raise EInvalidOperation.Create('Unbalanced write lease');
       Dec(FWriters);
     end;
-    if (FReaders = 0) and (FWriters = 0) then RestoreReader;
-    StartClose;
+    NeedsRestore := (FReaders = 0) and (FWriters = 0) and FReadSettings;
+    if NeedsRestore then FRestoring := True else StartClose;
   finally
     FLock.Release;
   end;
+  if NeedsRestore then
+    try
+      // Restoring driver settings can itself wait in the driver. Close and
+      // ClosePending must not contend on a lock held across those calls.
+      RestoreReader;
+    finally
+      FLock.Acquire;
+      try
+        FRestoring := False;
+        StartClose;
+      finally FLock.Release; end;
+    end;
 end;
 
 procedure TSerialWritePort.RequestClose;
@@ -375,14 +408,14 @@ begin
   end;
   try
     Worker := TSerialWriteWorker.Create(Self, False);
-  try
-    FStarted := True;
-    Worker.Start;
-  except
-    Worker.Free;
-    FStarted := False;
-    raise;
-  end;
+    try
+      FStarted := True;
+      Worker.Start;
+    except
+      Worker.Free;
+      FStarted := False;
+      raise;
+    end;
   except
     if FReserved then
     begin

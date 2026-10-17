@@ -262,13 +262,16 @@ type
     // Wait up to SynSer.DeadlockTimeout for queued output, then purge and close.
     // A nonpositive timeout skips waiting; unfinished output reports ErrTimeout.
     // A pending asynchronous write is cancelled and closed in the background;
-    // wait for WritePending = False before opening the port again.
+    // buffered receive also closes in the background. Wait for ClosePending
+    // and WritePending to clear before opening the port again.
     procedure Close;
     // show a port settings dialog form
     procedure ShowSetupDialog;
     // read data from port
     function DataAvailable: boolean;
     function ReadData: string;
+    // Buffered mode only. True includes a completed empty line; False clears
+    // AData. An oversized line raises ESynaSerError/ErrMaxBuffer.
     function TryReadData(out AData: string): Boolean;
     property ClosePending: Boolean read GetClosePending;
 //    function ReadBuffer(var buf; size: integer): integer;
@@ -315,7 +318,8 @@ type
 
     property OnRxData: TNotifyEvent read FOnRxData write FOnRxData;
     property OnStatus: TStatusEvent read FOnStatus write FOnStatus;
-    // Reports a terminal reader error on the main thread after closing the port.
+    // Reports a terminal reader error after logical close on the main thread;
+    // buffered native cleanup may still be pending.
     property OnError: TSerialErrorEvent read FOnError write FOnError;
     // Triggers if the device is removed during an active connection.
     property OnRemoved : TNotifyEvent read FOnRemoved write FOnRemoved;

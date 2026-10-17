@@ -6,7 +6,8 @@ structured API for enumerating serial devices.
 
 The current public API version is 0.8.1. Version 0.8.0 removed the legacy
 string-based device enumeration API; see [MIGRATION.md](MIGRATION.md).
-The asynchronous-write API described below is currently unreleased.
+The asynchronous-write and buffered-read APIs described below are currently
+unreleased.
 
 ## Features
 
@@ -17,6 +18,8 @@ The asynchronous-write API described below is currently unreleased.
 - `OnRxData`, `OnStatus`, `OnError` and `OnRemoved` events;
 - asynchronous writes with an operation deadline, cancellation and
   `OnWriteCompleted` results delivered on the main thread;
+- opt-in buffered reads with bounded receive storage and cancellable native
+  I/O outside the GUI thread;
 - `RcvLineCRLF`, which makes `ReadData` use line-oriented `RecvString` instead
   of `RecvPacket`;
 - a bundled setup dialog opened with `ShowSetupDialog`;
@@ -45,7 +48,8 @@ Serial.Open;
 Use `OnRxData` with `ReadData` for incoming data and `WriteData` for outgoing
 data. `ShowSetupDialog` opens the bundled port-settings dialog.
 
-With `RcvLineCRLF = True`, `ReadData` returns one line without its CRLF.
+In the default receive mode, with `RcvLineCRLF = True`, `ReadData` returns
+one line without its CRLF.
 An incomplete line stays buffered and `ReadData` returns an empty string with
 `SynSer.LastError = ErrTimeout`. `DataAvailable` and the reader wait for new
 bytes or a complete buffered line, so an incomplete line alone does not cause
@@ -65,7 +69,90 @@ without a native serial error code. Readiness timeouts keep the reader running
 and do not trigger `OnError`. The handler may reopen or destroy the component;
 closing or destroying it before delivery cancels the old notification.
 If a pending asynchronous write is being cancelled, reopening must wait for
-`WritePending = False`.
+`WritePending = False` and `ClosePending = False`.
+
+## Buffered reads
+
+Set `BufferedRead := True` before opening to move native input and receive
+bandwidth waits out of the LCL thread. `ReadData`, `TryReadData` and
+`DataAvailable` then use memory only. The default is `False`, which retains
+the existing synchronous receive path.
+
+```pascal
+Serial.BufferedRead := True;
+Serial.ReadBufferLimit := 65536;
+Serial.SynSer.MaxLineLength := 4096;
+Serial.RcvLineCRLF := True;
+Serial.Open;
+```
+
+Read available results from `OnRxData` on the main thread:
+
+```pascal
+procedure TMainForm.Receive(Sender: TObject);
+var
+  Data: string;
+begin
+  while Serial.TryReadData(Data) do
+    Memo.Lines.Add(Data);
+end;
+```
+
+`TryReadData` returns `True` for a completed empty line and `False` with an
+empty output string when nothing is ready. `ReadData` remains available,
+returning an empty string in either case. In packet mode, returned byte
+portions preserve order and embedded zeroes but do not define protocol
+message boundaries. `TryReadData` outside buffered mode raises
+`EInvalidOperation`; reading a closed port reports a closed-port error.
+
+`DataAvailable` checks for a ready result without consuming it. An incomplete
+line does not repeatedly trigger `OnRxData`. Reading one of several ready
+lines schedules notification for the remainder; a handler that does not
+consume data does not cause an endless notification loop. `OnStatus`
+receive counts are also delivered on the main thread and may combine
+multiple native reads into one count.
+
+`ReadBufferLimit` is a positive byte limit, defaulting to 65536. It covers
+unread data, retained parser bytes and capacity reserved for the in-flight
+read. The worker fails explicitly when no space remains for reception:
+`OnError` reports `ErrReadBufferOverflow` (9990), available from `LazSerial`
+and `LazSerialCommon`. Data is not silently evicted to continue reception.
+
+`MaxLineLength` retains its existing interpretation, including the terminator.
+An oversized line raises `ESynaSerError` with `ErrMaxBuffer` from
+`ReadData`/`TryReadData`, regardless of `SynSer.RaiseExcept`, and is skipped
+through its terminator. The port remains open and following valid lines can
+be read. `DataAvailable` and `OnRxData` also signal this recoverable result;
+it does not call `OnError`. Catch the exception in the receive handler when
+line-length recovery is needed. With `MaxLineLength = 0`, the general receive
+limit still applies. Choose a line limit below the receive-buffer limit to
+leave room for continued reception and recovery.
+
+Set `BufferedRead`, `ReadBufferLimit` and low-level Synaser settings while
+the port is closed and cleanup has finished. While the buffered receiver is
+active, accessing `SynSer`, changing port settings/device, opening the setup
+dialog or setting RTS/DTR raises `EInvalidOperation`. Previously saved
+`SynSer` references must remain unused too. Changing `RcvLineCRLF` through
+the component preserves unread bytes and recalculates readiness. Both write
+APIs remain usable, subject to the one-pending-write rule; synchronous writes
+retain their blocking contract.
+
+`Close` in buffered mode cancels input and any pending write, sets
+`Active = False` and returns without waiting for native cancellation.
+Cleanup purges queued input and output; data accepted into an output queue
+is not a guarantee of transmission before closing.
+`ClosePending` remains true while shared native resources are being released;
+it also reports background cleanup after a write in legacy receive mode.
+Wait for both `ClosePending = False` and `WritePending = False` before
+reopening, using a later LCL event or timer callback. `Open` raises
+`EInvalidOperation` during cleanup. A terminal `OnError` may be delivered
+while cleanup is still pending. Closing or a terminal error discards unread
+input; old data and notifications never enter the next session. Destruction
+detaches callbacks while the operations retain the resources they need.
+
+The built-in native transport supports buffered input. Existing custom
+transport classes continue to compile; enabling buffered input on a transport
+without `CreateReadOperation` support fails and rolls back opening.
 
 ## Asynchronous writes
 
@@ -127,14 +214,16 @@ performs that wait outside the LCL thread.
 `Close` during an asynchronous write sets `Active = False`, suppresses that
 operation's public completion event and starts cancellation and port cleanup.
 `WritePending` remains true until cleanup completes; `Open` raises
-`EInvalidOperation` during that interval. Once pending becomes false, the port
-can be reopened. Old-session notifications are discarded. Destroying the
+`EInvalidOperation` during that interval. With buffered reads enabled, shared
+receive cleanup may outlast the write; also wait for `ClosePending = False`.
+Old-session notifications are discarded. Destroying the
 component detaches its callbacks while cleanup retains the resources it needs.
 When reopening after cancellation, let the LCL event loop continue and check
 `WritePending` from a later UI event or timer callback.
 
 Existing synchronous write signatures and behavior remain available when no
-asynchronous write is pending. Normal close waits for queued output up to
+asynchronous write is pending. In the default receive mode, normal close waits
+for queued output up to
 `SynSer.DeadlockTimeout`. After a failed write, close purges pending output
 immediately and preserves the original write error.
 
@@ -145,14 +234,17 @@ thread. This includes opening and closing the port, reading and writing data,
 changing serial settings and accessing the low-level `SynSer` object. Calls to
 the transport API from another thread raise `ELazSerialThreadError`.
 
-The reader thread only waits for data. Asynchronous writes use a separate
-internal worker with operation-local state. Their callbacks are delivered on
-the main thread. Application worker threads that need to use `TLazSerial`
-must queue their work to the main thread.
+In the default mode the reader thread only waits for data. In buffered mode
+it performs native reads into the single receive ring; the existing parser
+and result extraction run on the main thread under short memory locks.
+Asynchronous writes use a separate internal worker with operation-local
+state. No I/O or cancellation wait holds the receive-buffer lock. Application
+worker threads that need to use `TLazSerial` must queue their work to the
+main thread.
 
 `SynSer` is read-only as a `TLazSerial` property: its settings remain available,
 but the owned `TBlockSerial` instance cannot be replaced. Access is unavailable
-while an asynchronous write or its cleanup is pending.
+while an asynchronous write, buffered receiver or their cleanup is pending.
 
 ## Structured device enumeration
 

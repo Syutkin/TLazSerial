@@ -2,7 +2,7 @@ unit LazSerialBufferedPtyTests;
 {$mode ObjFPC}{$H+}
 interface
 {$IFDEF UNIX}
-uses Classes, SysUtils, FpcUnit, TestRegistry, LazSerial;
+uses Classes, SysUtils, FpcUnit, TestRegistry, LazSerial, LazSynaSer;
 type
   TLazSerialBufferedPtyTests = class(TTestCase)
   private
@@ -10,6 +10,9 @@ type
     FMaster, FSlave, FAction, FCalls, FParseErrors, FTerminalError: Integer;
     FValues: TStringList;
     FCallbackOwner: TComponent;
+    FReadStatusCount: Integer;
+    procedure ReadStatus(Sender: TObject; Reason: THookSerialReason; const Value: string);
+    procedure DestroyOwnerOnReadStatus(Sender: TObject; Reason: THookSerialReason; const Value: string);
     procedure RaiseFirstReceive(Sender: TObject);
     procedure DestroyOwnerOnReceive(Sender: TObject);
     procedure DestroyOwnerOnError(Sender: TObject; Code: Integer; const Message: string);
@@ -35,11 +38,13 @@ type
     procedure TerminalErrorCanDestroyOwner;
     procedure ReopenNeverDeliversOldInput;
     procedure SynchronousBackpressureHonorsDeadline;
+    procedure ReadStatusIsDeliveredOnMainThread;
+    procedure ReadStatusCanDestroyOwner;
   end;
 {$ENDIF}
 implementation
 {$IFDEF UNIX}
-uses BaseUnix, ctypes, LazSynaSer;
+uses BaseUnix, ctypes;
 function OpenBufferedPty(AMaster, ASlave: pcint; AName: PChar;
   ATermios, AWindowSize: Pointer): cint; cdecl; external 'util' name 'openpty';
 procedure TLazSerialBufferedPtyTests.SetUp;
@@ -321,6 +326,40 @@ begin
   AssertEquals('Backpressure eventually reaches the synchronous timeout', -1, Written);
   AssertTrue('Synchronous timeout must not become an unbounded native wait', GetTickCount64 - Started < 2000);
   AssertTrue(FSerial.Active);
+end;
+procedure TLazSerialBufferedPtyTests.ReadStatus(Sender: TObject;
+  Reason: THookSerialReason; const Value: string);
+begin
+  if Reason <> HR_ReadCount then Exit;
+  AssertEquals(Int64(MainThreadID), Int64(GetCurrentThreadID));
+  Inc(FReadStatusCount, StrToInt(Value));
+end;
+procedure TLazSerialBufferedPtyTests.ReadStatusIsDeliveredOnMainThread;
+begin
+  FSerial.OnStatus := @ReadStatus;
+  FSerial.Open; Send('status');
+  AwaitValues(1);
+  AssertEquals(6, FReadStatusCount);
+end;
+procedure TLazSerialBufferedPtyTests.DestroyOwnerOnReadStatus(Sender: TObject;
+  Reason: THookSerialReason; const Value: string);
+begin
+  if Reason <> HR_ReadCount then Exit;
+  FreeAndNil(FCallbackOwner); FSerial := nil;
+end;
+procedure TLazSerialBufferedPtyTests.ReadStatusCanDestroyOwner;
+var Deadline: QWord;
+begin
+  FCallbackOwner := TComponent.Create(nil);
+  FCallbackOwner.InsertComponent(FSerial);
+  try
+    FSerial.OnStatus := @DestroyOwnerOnReadStatus;
+    FSerial.Open; Send('status destroys');
+    Deadline := GetTickCount64 + 2000;
+    while (FSerial <> nil) and (GetTickCount64 < Deadline) do CheckSynchronize(1);
+    AssertTrue(FSerial = nil);
+    AssertEquals(0, FCalls);
+  finally FreeAndNil(FCallbackOwner); FSerial := nil; end;
 end;
 initialization RegisterTest(TLazSerialBufferedPtyTests);
 {$ENDIF}

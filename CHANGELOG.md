@@ -12,6 +12,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Add `OnError` to report terminal reader failures after closing the port.
 - Add cancellable asynchronous serial writes with completion results on the
   main thread and nonblocking cleanup when closing during a write.
+- Add opt-in buffered reads with bounded storage, memory-only result access
+  and background cancellation and cleanup shared with asynchronous writes.
 
 ### Changed
 

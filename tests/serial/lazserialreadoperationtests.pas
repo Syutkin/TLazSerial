@@ -16,6 +16,7 @@ type
     {$IFDEF UNIX}
     procedure NativeReceivePreservesBinaryBytes;
     procedure CancelRestoresDescriptorFlags;
+    procedure FailedNativeSetupReleasesItsLease;
     {$ENDIF}
   end;
 implementation
@@ -240,6 +241,26 @@ begin
   finally
     if Operation <> nil then begin Operation.ClosePort; AwaitCleanup(Operation); Operation.Detach; end;
     Operation := nil; Port := nil; fpClose(Slave); fpClose(Master);
+  end;
+end;
+procedure TLazSerialReadOperationTests.FailedNativeSetupReleasesItsLease;
+var Port: ISerialWritePort; Operation: ISerialReadOperation; Raised: Boolean;
+begin
+  Port := TSerialWritePort.Create(TBlockSerial.Create);
+  // The handle is deliberately invalid, but differs from the closed sentinel,
+  // so native setup fails before a worker can start.
+  Port.GetSerial.Handle := High(LongInt);
+  Operation := TNativeSerialReadOperation.Create(Port, 32, @Changed);
+  try
+    Raised := False;
+    try Operation.Start; except on E: EOSError do Raised := True; end;
+    AssertTrue(Raised);
+    Operation.ClosePort;
+    AwaitCleanup(Operation);
+    AssertTrue(Port.GetSerial.Handle = INVALID_HANDLE_VALUE);
+  finally
+    Operation.Detach;
+    Operation := nil; Port := nil;
   end;
 end;
 {$ENDIF}

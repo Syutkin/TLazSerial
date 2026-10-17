@@ -32,6 +32,7 @@ type
     FStarted, FCompleted, FCloseRequested, FLineMode: Boolean;
     FLimit, FMaxBandwidth, FError: Integer;
     FErrorMessage: string;
+    FReceivedForStatus: QWord;
     FOnChanged: TSerialReadChanged;
     FQueuedReference: ISerialReadOperation;
     procedure Run;
@@ -176,14 +177,34 @@ begin
 end;
 
 procedure TSerialReadOperation.Deliver;
-var KeepAlive: ISerialReadOperation; Callback: TSerialReadChanged;
+var
+  KeepAlive: ISerialReadOperation;
+  Callback: TSerialReadChanged;
+  Status: THookSerialStatus;
+  Received: QWord;
 begin
   KeepAlive := Self;
   FLock.Acquire;
   try
     FQueuedReference := nil;
-    Callback := FOnChanged;
+    Received := FReceivedForStatus;
+    FReceivedForStatus := 0;
+    Status := nil;
+    if Assigned(FOnChanged) and not FCloseRequested then Status := FPort.GetSerial.OnStatus;
   finally FLock.Release; end;
+  try
+    if (Received > 0) and Assigned(Status) then
+      Status(FPort.GetSerial, HR_ReadCount, UIntToStr(Received));
+  except
+    FLock.Acquire;
+    try QueueChanged;
+    finally FLock.Release; end;
+    raise;
+  end;
+  FLock.Acquire;
+  try Callback := FOnChanged;
+  finally FLock.Release; end;
+  // A status handler can destroy the component and detach this operation.
   if Assigned(Callback) then Callback;
 end;
 
@@ -325,6 +346,7 @@ begin
         FLock.Acquire;
         try
           FPort.GetSerial.AppendReadBuffer(Chunk);
+          Inc(FReceivedForStatus, Received);
           QueueChanged;
         finally FLock.Release; end;
         Inc(Total, Received);

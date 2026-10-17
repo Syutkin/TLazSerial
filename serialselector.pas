@@ -7,7 +7,7 @@ interface
 
 uses
   Classes, SysUtils, LResources, Forms, Controls, StdCtrls, Graphics, Types,
-  ExtCtrls, SerialWatcher, LazSerialDevices, SerialDeviceRefresh;
+  ExtCtrls, SerialWatcher, LazSerialDevices;
 
 type
   TSerialSelector = class(TCustomComboBox)
@@ -25,7 +25,6 @@ type
     FShowFriendlyName: Boolean;
     FDisplayOptions: TSerialDeviceDisplayOptions;
     FRefreshTimer: TTimer;
-    FDeviceRefreshThread: TSerialDeviceRefreshThread;
     function GetDevice: string;
     function GetDeviceCount: Integer;
     function GetDeviceInfo(const AIndex: Integer): TSerialDeviceInfo;
@@ -36,7 +35,8 @@ type
     procedure SetShowFriendlyName(const AValue: Boolean);
     function MouseIn: Boolean;
     procedure DoMouseEnter(Sender: TObject);
-    procedure DoUpdateComPorts(Sender: TObject);
+    procedure DevicesRefreshed(Sender: TObject;
+      const ADevices: TSerialDeviceInfoArray);
     procedure DoOnRefreshTimer(Sender: TObject);
     procedure HideHint(Sender: TObject);
     procedure SetSelectorHint(const AValue: string);
@@ -147,6 +147,62 @@ implementation
 
 uses
   LazSerialCommon;
+
+type
+  // Keep the selector's virtual loader hook, but let the watcher own the only
+  // refresh worker, retry policy and hotplug snapshot.
+  TSelectorSerialWatcher = class(TSerialWatcher)
+  private
+    FSelector: TSerialSelector;
+  protected
+    function LoadDevices: TSerialDeviceInfoArray; override;
+  public
+    constructor Create(ASelector: TSerialSelector); reintroduce;
+    function RefreshFinished: Boolean;
+    procedure RefreshSynchronously;
+  end;
+
+constructor TSelectorSerialWatcher.Create(ASelector: TSerialSelector);
+begin
+  inherited Create(ASelector);
+  FSelector := ASelector;
+  RefreshOnLoaded := False;
+end;
+
+function TSelectorSerialWatcher.LoadDevices: TSerialDeviceInfoArray;
+begin
+  Result := FSelector.LoadDevices;
+end;
+
+function TSelectorSerialWatcher.RefreshFinished: Boolean;
+begin
+  Result := BackgroundRefreshFinished;
+end;
+
+procedure TSelectorSerialWatcher.RefreshSynchronously;
+begin
+  StartWatching;
+  PollDevices;
+end;
+
+function SameDevices(const ALeft, ARight: TSerialDeviceInfoArray): Boolean;
+var
+  I: Integer;
+begin
+  if Length(ALeft) <> Length(ARight) then
+    Exit(False);
+  for I := Low(ALeft) to High(ALeft) do
+    if (ALeft[I].Device <> ARight[I].Device) or
+      (ALeft[I].Vendor <> ARight[I].Vendor) or
+      (ALeft[I].Model <> ARight[I].Model) or
+      (ALeft[I].SerialShort <> ARight[I].SerialShort) or
+      (ALeft[I].VendorId <> ARight[I].VendorId) or
+      (ALeft[I].ProductId <> ARight[I].ProductId) or
+      (ALeft[I].PersistentId <> ARight[I].PersistentId) or
+      (ALeft[I].ErrorCode <> ARight[I].ErrorCode) then
+      Exit(False);
+  Result := True;
+end;
 
 function CopyDevices(
   const ADevices: TSerialDeviceInfoArray
@@ -332,7 +388,7 @@ begin
   if UseBackgroundRefresh then
     StartBackgroundRefresh
   else
-    ApplyDevices(LoadDevices);
+    TSelectorSerialWatcher(FSerialWatcher).RefreshSynchronously;
 end;
 
 procedure TSerialSelector.ApplyDevices(
@@ -342,16 +398,22 @@ var
   OldDevices: TSerialDeviceInfoArray;
   SelectedDevice: string;
 begin
-  if (FDeviceRefreshThread <> nil) and
-    FDeviceRefreshThread.Delivering and
-    not FDeviceRefreshThread.LoadSucceeded then
+  // Polling may deliver the same snapshot repeatedly. Leave the editable text
+  // and the last port-change hint alone until the actual records change.
+  if SameDevices(FDevices, ADevices) then
+  begin
+    // A non-editable selector still restores its normal fallback selection
+    // after an unknown Device was assigned, even if the ports did not change.
+    if not FAllowCustomDevice and (Length(FDevices) > 0) and
+      ((ItemIndex < 0) or (ItemIndex >= Length(FDevices))) then
+      RebuildItems(FRequestedDevice);
     Exit;
+  end;
   SelectedDevice := Device;
   if (SelectedDevice = '') and not FAllowCustomDevice then
     SelectedDevice := FRequestedDevice;
   OldDevices := CopyDevices(FDevices);
   FDevices := CopyDevices(ADevices);
-  FSerialWatcher.AdoptSnapshot(FDevices);
   UpdatePortChanges(OldDevices);
   RebuildItems(SelectedDevice);
   if FHintWindow <> nil then
@@ -365,30 +427,18 @@ end;
 
 function TSerialSelector.BackgroundRefreshFinished: Boolean;
 begin
-  Result := (FDeviceRefreshThread = nil) or
-    FDeviceRefreshThread.Finished;
+  Result := TSelectorSerialWatcher(FSerialWatcher).RefreshFinished;
 end;
 
 procedure TSerialSelector.StartBackgroundRefresh;
 begin
-  if FDeviceRefreshThread <> nil then
-  begin
-    if not FDeviceRefreshThread.Finished or
-      FDeviceRefreshThread.Delivering then
-      Exit;
-    CancelSerialDeviceRefresh(FDeviceRefreshThread);
-  end;
-
-  FDeviceRefreshThread := TSerialDeviceRefreshThread.Create(
-    @LoadDevices,
-    @ApplyDevices
-  );
-  FDeviceRefreshThread.Start;
+  FSerialWatcher.Refresh;
 end;
 
-procedure TSerialSelector.DoUpdateComPorts(Sender: TObject);
+procedure TSerialSelector.DevicesRefreshed(Sender: TObject;
+  const ADevices: TSerialDeviceInfoArray);
 begin
-  Refresh;
+  ApplyDevices(ADevices);
 end;
 
 function TSerialSelector.MouseIn: Boolean;
@@ -417,7 +467,6 @@ begin
   FDisplayOptions := DefaultSerialDeviceDisplayOptions;
   FShowHint := True;
   FHint := '';
-  FDeviceRefreshThread := nil;
 
   Sorted := False;
   ItemIndex := -1;
@@ -432,10 +481,8 @@ begin
 
   OnMouseEnter := @DoMouseEnter;
   OnMouseLeave := @HideHint;
-  FSerialWatcher := TSerialWatcher.Create(Self);
-  FSerialWatcher.RefreshOnLoaded := False;
-  FSerialWatcher.OnComConnected := @DoUpdateComPorts;
-  FSerialWatcher.OnComDisconnected := @DoUpdateComPorts;
+  FSerialWatcher := TSelectorSerialWatcher.Create(Self);
+  FSerialWatcher.OnDevicesRefreshed := @DevicesRefreshed;
 end;
 
 function TSerialSelector.TryGetSelectedDevice(
@@ -543,9 +590,13 @@ end;
 
 destructor TSerialSelector.Destroy;
 begin
-  FSerialWatcher.OnComConnected := nil;
-  FSerialWatcher.OnComDisconnected := nil;
-  CancelSerialDeviceRefresh(FDeviceRefreshThread);
+  if FSerialWatcher <> nil then
+  begin
+    FSerialWatcher.OnDevicesRefreshed := nil;
+    // The worker calls the selector's virtual LoadDevices. Join it before
+    // destroying any selector state, including during snapshot delivery.
+    FreeAndNil(FSerialWatcher);
+  end;
   FreeAndNil(FHintWindow);
   inherited Destroy;
 end;

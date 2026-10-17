@@ -315,6 +315,13 @@ independently controls Vendor, Model, SerialShort and ErrorCode output. With
 from the current snapshot. `TryGetSelectedDevice` returns `False` for such a
 manual value because no structured metadata record exists for it.
 
+Standalone watchers expose `OnDevicesRefreshed(Sender, Devices)` on the main
+thread after every successful refresh, including the initial baseline, an
+unchanged snapshot and an empty list. It runs before `OnComConnected` and
+`OnComDisconnected`, which continue to report only additions and removals
+after the baseline. The delivered array is a copy of the watcher's snapshot;
+failed refreshes do not fire this event and keep the previous list.
+
 ## Platform notes
 
 On macOS, set `Serial.SynSer.NonBlock := True` before opening the device when a

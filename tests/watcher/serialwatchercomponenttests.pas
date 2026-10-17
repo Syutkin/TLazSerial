@@ -110,9 +110,15 @@ type
     FConnectedCount: Integer;
     FDisconnectedCount: Integer;
     FWatcher: TTestSerialWatcher;
+    FSnapshotCount: Integer;
+    FLastSnapshot: TSerialDeviceInfoArray;
     function CreateDevice(const ADevice: string): TSerialDeviceInfo;
     procedure DeviceConnected(Sender: TObject);
     procedure DeviceDisconnected(Sender: TObject);
+    procedure DevicesRefreshed(Sender: TObject;
+      const ADevices: TSerialDeviceInfoArray);
+    procedure MutateDeliveredSnapshot(Sender: TObject;
+      const ADevices: TSerialDeviceInfoArray);
     procedure CheckLifetimeInChild(const AMode: string);
   protected
     procedure SetUp; override;
@@ -145,6 +151,11 @@ type
     procedure DestroyFromDisconnectedEventPreservesHeap;
     procedure DestroyDuringReplacementStopsFurtherEvents;
     procedure DestroyOwnerFromEventPreservesHeap;
+    procedure SnapshotEventIncludesBaselineUnchangedAndMetadataChanges;
+    procedure SnapshotEventDoesNotExposeWatcherStorage;
+    procedure FailedRefreshDoesNotPublishSnapshot;
+    procedure DestroyFromSnapshotEventPreservesHeap;
+    procedure DestroyOwnerFromSnapshotEventPreservesHeap;
   end;
 
 procedure RunWatcherLifetimeHelper(const AMode: string);
@@ -171,6 +182,8 @@ type
     CallbackCount: Integer;
     FreeOwner: Boolean;
     procedure DestroyFromEvent(Sender: TObject);
+    procedure DestroyFromSnapshot(Sender: TObject;
+      const ADevices: TSerialDeviceInfoArray);
   end;
 
   TFailureRetryWatcher = class(TFailingRefreshWatcher)
@@ -390,6 +403,12 @@ begin
     ToFree.Free;
 end;
 
+procedure TWatcherLifetimeProbe.DestroyFromSnapshot(Sender: TObject;
+  const ADevices: TSerialDeviceInfoArray);
+begin
+  DestroyFromEvent(Sender);
+end;
+
 procedure RunWatcherLifetimeHelper(const AMode: string);
 var
   DeviceA, DeviceB: TSerialDeviceInfo;
@@ -405,7 +424,9 @@ begin
     DeviceB.Device := '/dev/audit-b';
     Probe.Watcher.OnComConnected := @Probe.DestroyFromEvent;
     Probe.Watcher.OnComDisconnected := @Probe.DestroyFromEvent;
-    Probe.FreeOwner := AMode = 'owner';
+    Probe.FreeOwner := (AMode = 'owner') or (AMode = 'snapshot-owner');
+    if Pos('snapshot', AMode) = 1 then
+      Probe.Watcher.OnDevicesRefreshed := @Probe.DestroyFromSnapshot;
     if AMode = 'connect' then
     begin
       Probe.Watcher.AdoptSnapshot(nil);
@@ -414,7 +435,7 @@ begin
     else
     begin
       Probe.Watcher.AdoptSnapshot([DeviceA]);
-      if AMode = 'replace' then
+      if (AMode = 'replace') or (Pos('snapshot', AMode) = 1) then
         Probe.Watcher.SetSnapshot([DeviceB])
       else
         Probe.Watcher.SetSnapshot([]);
@@ -463,6 +484,45 @@ end;
 procedure TSerialWatcherComponentTests.DestroyOwnerFromEventPreservesHeap;
 begin
   CheckLifetimeInChild('owner');
+end;
+
+procedure TSerialWatcherComponentTests.DestroyFromSnapshotEventPreservesHeap;
+begin
+  CheckLifetimeInChild('snapshot');
+end;
+
+procedure TSerialWatcherComponentTests.DestroyOwnerFromSnapshotEventPreservesHeap;
+begin
+  CheckLifetimeInChild('snapshot-owner');
+end;
+
+procedure TSerialWatcherComponentTests.FailedRefreshDoesNotPublishSnapshot;
+var
+  Watcher: TFailingRefreshWatcher;
+  DeviceA: TSerialDeviceInfo;
+begin
+  Watcher := TFailingRefreshWatcher.Create(nil);
+  try
+    Watcher.OnDevicesRefreshed := @DevicesRefreshed;
+    DeviceA := CreateDevice('COM1');
+    Watcher.SetSnapshot([DeviceA]);
+    Watcher.RefreshAndWait;
+    AssertEquals(1, FSnapshotCount);
+
+    Watcher.FailLoad := True;
+    Watcher.RefreshAndWait;
+    AssertEquals('A failed refresh must not publish an empty list',
+      1, FSnapshotCount);
+    AssertTrue(Watcher.ContainsDevice(DeviceA.Device));
+
+    Watcher.FailLoad := False;
+    Watcher.SetSnapshot([]);
+    Watcher.RefreshAndWait;
+    AssertEquals('A successful empty list must be published', 2, FSnapshotCount);
+    AssertEquals(0, Length(FLastSnapshot));
+  finally
+    Watcher.Free;
+  end;
 end;
 
 procedure TSerialWatcherComponentTests.FailedRefreshPreservesLastSnapshot;
@@ -701,13 +761,75 @@ begin
   Inc(FDisconnectedCount);
 end;
 
+procedure TSerialWatcherComponentTests.DevicesRefreshed(Sender: TObject;
+  const ADevices: TSerialDeviceInfoArray);
+begin
+  AssertEquals('Snapshot callbacks must run on the main thread',
+    Int64(MainThreadID), Int64(GetCurrentThreadID));
+  Inc(FSnapshotCount);
+  FLastSnapshot := Copy(ADevices, 0, Length(ADevices));
+end;
+
+procedure TSerialWatcherComponentTests.MutateDeliveredSnapshot(Sender: TObject;
+  const ADevices: TSerialDeviceInfoArray);
+var
+  Shared: TSerialDeviceInfoArray;
+begin
+  Shared := ADevices;
+  Shared[0].Device := 'changed-by-subscriber';
+end;
+
 procedure TSerialWatcherComponentTests.SetUp;
 begin
   FConnectedCount := 0;
   FDisconnectedCount := 0;
+  FSnapshotCount := 0;
+  FLastSnapshot := nil;
   FWatcher := TTestSerialWatcher.Create(nil);
   FWatcher.OnComConnected := @DeviceConnected;
   FWatcher.OnComDisconnected := @DeviceDisconnected;
+end;
+
+procedure TSerialWatcherComponentTests.SnapshotEventIncludesBaselineUnchangedAndMetadataChanges;
+var
+  DeviceA: TSerialDeviceInfo;
+begin
+  FWatcher.OnDevicesRefreshed := @DevicesRefreshed;
+  FWatcher.SetSnapshot([]);
+  FWatcher.PollNow;
+  AssertEquals(1, FSnapshotCount);
+  AssertEquals(0, Length(FLastSnapshot));
+  AssertEquals(0, FConnectedCount);
+  AssertEquals(0, FDisconnectedCount);
+
+  DeviceA := CreateDevice('COM1');
+  FWatcher.SetSnapshot([DeviceA]);
+  FWatcher.PollNow;
+  AssertEquals(2, FSnapshotCount);
+  AssertEquals('COM1', FLastSnapshot[0].Device);
+  AssertEquals(1, FConnectedCount);
+
+  FWatcher.PollNow;
+  AssertEquals(3, FSnapshotCount);
+  DeviceA.Model := 'Updated model';
+  FWatcher.SetSnapshot([DeviceA]);
+  FWatcher.PollNow;
+  AssertEquals(4, FSnapshotCount);
+  AssertEquals('Updated model', FLastSnapshot[0].Model);
+  AssertEquals(1, FConnectedCount);
+  AssertEquals(0, FDisconnectedCount);
+end;
+
+procedure TSerialWatcherComponentTests.SnapshotEventDoesNotExposeWatcherStorage;
+var
+  DeviceA: TSerialDeviceInfo;
+begin
+  DeviceA := CreateDevice('COM1');
+  FWatcher.OnDevicesRefreshed := @MutateDeliveredSnapshot;
+  FWatcher.SetSnapshot([DeviceA]);
+  FWatcher.PollNow;
+  AssertTrue(FWatcher.ContainsDevice(DeviceA.Device));
+  AssertFalse(FWatcher.ContainsDevice('changed-by-subscriber'));
 end;
 
 procedure TSerialWatcherComponentTests.TearDown;

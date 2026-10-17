@@ -6,7 +6,8 @@ interface
 
 uses
   Classes, SysUtils, SyncObjs, TypInfo, FpcUnit, TestRegistry, StdCtrls,
-  LazSerialCommon, LazSerialDevices, LazSerialSetup, SerialSelector;
+  LazSerialCommon, LazSerialDevices, LazSerialSetup, SerialSelector,
+  SerialWatcherSupport;
 
 type
   TTestSerialSelector = class(TSerialSelector)
@@ -16,6 +17,7 @@ type
     function LoadDevices: TSerialDeviceInfoArray; override;
     function UseBackgroundRefresh: Boolean; override;
   public
+    constructor Create(AOwner: TComponent); override;
     procedure SetSnapshot(const ADevices: array of TSerialDeviceInfo);
     function DisplayItem(const AIndex: Integer): string;
     function HintFirstLine: string;
@@ -31,19 +33,29 @@ type
     FRefreshDuringApply: Boolean;
     FSnapshot: TSerialDeviceInfoArray;
     FSnapshotAssigned: Boolean;
+    FReleaseLoad: TEvent;
+    FChangeSource: TSerialChangeSource;
+    FRefreshScheduler: TSerialRefreshScheduler;
   protected
     procedure ApplyDevices(const ADevices: TSerialDeviceInfoArray); override;
     function LoadDevices: TSerialDeviceInfoArray; override;
   public
+    constructor Create(AOwner: TComponent); override;
     procedure ApplySnapshot(const ADevices: array of TSerialDeviceInfo);
     function RefreshFinished: Boolean;
     procedure SetSnapshot(const ADevices: array of TSerialDeviceInfo);
+    procedure SignalChange;
+    procedure FireScheduledRefresh;
+    function RefreshScheduled: Boolean;
+    function HintCaption: string;
+    procedure WaitForRefresh;
     property ApplyCount: PInteger read FApplyCount write FApplyCount;
     property LoadCount: Integer read FLoadCount;
     property LoadStarted: TEvent read FLoadStarted write FLoadStarted;
     property RaiseOnLoad: Boolean read FRaiseOnLoad write FRaiseOnLoad;
     property RefreshDuringApply: Boolean
       read FRefreshDuringApply write FRefreshDuringApply;
+    property ReleaseLoad: TEvent read FReleaseLoad write FReleaseLoad;
   end;
 
   TSerialSelectorComponentTests = class(TTestCase)
@@ -90,6 +102,9 @@ type
     procedure RepeatedBackgroundRefreshDoesNotOverlapOrReenter;
     procedure DestroyFromBackgroundApplyPreservesHeap;
     procedure DestroyOwnerFromBackgroundApplyPreservesHeap;
+    procedure HotplugUsesOneEnumerationAndUpdatesMetadata;
+    procedure HotplugDuringRefreshPublishesLatestSnapshot;
+    procedure UnchangedPollingSnapshotPreservesTypedTextAndHint;
   end;
 
 procedure RunSelectorLifetimeHelper(const AFreeOwner: Boolean);
@@ -97,9 +112,16 @@ procedure RunSelectorLifetimeHelper(const AFreeOwner: Boolean);
 implementation
 
 uses
-  SerialCommandRunner;
+  SerialCommandRunner, SerialWatcher,
+  SerialWatcherComponentTests;
 
 type
+  TSelectorWatcherAccess = class(TSerialWatcher)
+  public
+    procedure Configure(ASource: TSerialChangeSource;
+      AScheduler: TSerialRefreshScheduler);
+  end;
+
   TDestroyingSerialSelector = class(TBackgroundTestSerialSelector)
   protected
     procedure ApplyDevices(const ADevices: TSerialDeviceInfoArray); override;
@@ -107,6 +129,78 @@ type
     FreeOwner: Boolean;
     Applied: PBoolean;
   end;
+
+procedure TSelectorWatcherAccess.Configure(ASource: TSerialChangeSource;
+  AScheduler: TSerialRefreshScheduler);
+begin
+  SetInfrastructure(ASource, AScheduler, True);
+end;
+
+constructor TBackgroundTestSerialSelector.Create(AOwner: TComponent);
+var
+  I: Integer;
+begin
+  inherited Create(AOwner);
+  // Exercise the real selector/watcher connection with deterministic hotplug
+  // signals and scheduling, without polling the host's serial devices.
+  for I := 0 to ComponentCount - 1 do
+    if Components[I] is TSerialWatcher then
+    begin
+      FChangeSource := TFakeSerialChangeSource.Create;
+      FRefreshScheduler := TFakeSerialRefreshScheduler.Create;
+      TSelectorWatcherAccess(Components[I]).Configure(
+        TFakeSerialChangeSource(FChangeSource),
+        TFakeSerialRefreshScheduler(FRefreshScheduler));
+      Exit;
+    end;
+  raise Exception.Create('Selector watcher not found');
+end;
+
+constructor TTestSerialSelector.Create(AOwner: TComponent);
+var
+  I: Integer;
+begin
+  inherited Create(AOwner);
+  for I := 0 to ComponentCount - 1 do
+    if Components[I] is TSerialWatcher then
+    begin
+      TSelectorWatcherAccess(Components[I]).Configure(
+        TSerialManualChangeSource.Create, TFakeSerialRefreshScheduler.Create);
+      Exit;
+    end;
+  raise Exception.Create('Selector watcher not found');
+end;
+
+procedure TBackgroundTestSerialSelector.SignalChange;
+begin
+  TFakeSerialChangeSource(FChangeSource).Signal;
+end;
+
+procedure TBackgroundTestSerialSelector.FireScheduledRefresh;
+begin
+  TFakeSerialRefreshScheduler(FRefreshScheduler).Fire;
+end;
+
+function TBackgroundTestSerialSelector.RefreshScheduled: Boolean;
+begin
+  Result := TFakeSerialRefreshScheduler(FRefreshScheduler).Scheduled;
+end;
+
+procedure TBackgroundTestSerialSelector.WaitForRefresh;
+var
+  Deadline: QWord;
+begin
+  Deadline := GetTickCount64 + 1000;
+  while not RefreshFinished and (GetTickCount64 < Deadline) do
+    Sleep(1);
+  TAssert.AssertTrue('Selector worker must finish', RefreshFinished);
+  CheckSynchronize(0);
+end;
+
+function TBackgroundTestSerialSelector.HintCaption: string;
+begin
+  Result := BuildHintCaption;
+end;
 
 procedure TDestroyingSerialSelector.ApplyDevices(
   const ADevices: TSerialDeviceInfoArray);
@@ -176,6 +270,8 @@ procedure TBackgroundTestSerialSelector.ApplyDevices(
   const ADevices: TSerialDeviceInfoArray
 );
 begin
+  TAssert.AssertEquals('Snapshots must be applied on the main thread',
+    Int64(MainThreadID), Int64(GetCurrentThreadID));
   if FApplyCount <> nil then
     Inc(FApplyCount^);
   if FRefreshDuringApply then
@@ -188,21 +284,28 @@ var
   I: Integer;
 begin
   Inc(FLoadCount);
-  if FLoadStarted <> nil then
-    FLoadStarted.SetEvent;
-  Sleep(50);
-  if FRaiseOnLoad then
-    raise EInvalidOperation.Create('Simulated selector load failure');
   if not FSnapshotAssigned then
   begin
     Result := nil;
     SetLength(Result, 1);
     Result[0].Device := 'COM1';
-    Exit;
+  end
+  else
+  begin
+    SetLength(Result, Length(FSnapshot));
+    for I := Low(FSnapshot) to High(FSnapshot) do
+      Result[I] := FSnapshot[I];
   end;
-  SetLength(Result, Length(FSnapshot));
-  for I := Low(FSnapshot) to High(FSnapshot) do
-    Result[I] := FSnapshot[I];
+  // Capture the snapshot before signalling: tests can then change the next
+  // snapshot while this worker is still returning the previous one.
+  if FLoadStarted <> nil then
+    FLoadStarted.SetEvent;
+  if FReleaseLoad <> nil then
+    FReleaseLoad.WaitFor(1000)
+  else
+    Sleep(50);
+  if FRaiseOnLoad then
+    raise EInvalidOperation.Create('Simulated selector load failure');
 end;
 
 procedure TBackgroundTestSerialSelector.ApplySnapshot(
@@ -856,7 +959,6 @@ procedure TSerialSelectorComponentTests.
   BackgroundRefreshFailurePreservesKnownAndCustomSelection;
 var
   ApplyCount: Integer;
-  Deadline: QWord;
   DeviceA: TSerialDeviceInfo;
   DeviceB: TSerialDeviceInfo;
   SelectedDevice: TSerialDeviceInfo;
@@ -872,11 +974,9 @@ begin
     Selector.Device := DeviceB.Device;
     Selector.RaiseOnLoad := True;
     Selector.Refresh;
-    Deadline := GetTickCount64 + 1000;
-    repeat
-      CheckSynchronize(10);
-    until (ApplyCount >= 2) or (GetTickCount64 >= Deadline);
+    Selector.WaitForRefresh;
 
+    AssertEquals('Failed loads must not publish an empty snapshot', 1, ApplyCount);
     AssertEquals(DeviceB.Device, Selector.Device);
     AssertEquals(1, Selector.ItemIndex);
     AssertTrue(Selector.TryGetSelectedDevice(SelectedDevice));
@@ -885,11 +985,9 @@ begin
     Selector.AllowCustomDevice := True;
     Selector.Device := 'custom-device';
     Selector.Refresh;
-    Deadline := GetTickCount64 + 1000;
-    repeat
-      CheckSynchronize(10);
-    until (ApplyCount >= 3) or (GetTickCount64 >= Deadline);
+    Selector.WaitForRefresh;
 
+    AssertEquals(1, ApplyCount);
     AssertEquals('custom-device', Selector.Device);
     AssertEquals('custom-device', Selector.Text);
     AssertEquals(-1, Selector.ItemIndex);
@@ -958,6 +1056,131 @@ begin
   finally
     Selector.Free;
     LoadStarted.Free;
+  end;
+end;
+
+procedure TSerialSelectorComponentTests.HotplugUsesOneEnumerationAndUpdatesMetadata;
+var
+  Selector: TBackgroundTestSerialSelector;
+  DeviceA, DeviceB: TSerialDeviceInfo;
+  ApplyCount: Integer;
+begin
+  ApplyCount := 0;
+  DeviceA := CreateDevice('COM1', 'A', 'First', '1');
+  DeviceB := CreateDevice('COM2', 'B', 'Second', '2');
+  Selector := TBackgroundTestSerialSelector.Create(nil);
+  try
+    Selector.ApplyCount := @ApplyCount;
+    Selector.SetSnapshot([DeviceA]);
+    Selector.Refresh;
+    Selector.WaitForRefresh;
+    AssertEquals(1, Selector.LoadCount);
+    AssertEquals(1, ApplyCount);
+    AssertEquals('COM1', Selector.Device);
+
+    // Replacing a port produces both add/remove notifications. The selector
+    // must consume their shared snapshot rather than load the devices again.
+    Selector.SetSnapshot([DeviceB]);
+    Selector.SignalChange;
+    Selector.FireScheduledRefresh;
+    Selector.WaitForRefresh;
+    AssertEquals(2, Selector.LoadCount);
+    AssertEquals(2, ApplyCount);
+    AssertEquals(1, Selector.DeviceCount);
+    AssertEquals('COM2', Selector.Device);
+    AssertTrue(Pos(lngAddedPorts, Selector.HintCaption) > 0);
+    AssertTrue(Pos(lngRemovedPorts, Selector.HintCaption) > 0);
+    AssertFalse(Selector.RefreshScheduled);
+
+    DeviceB.Model := 'Updated metadata';
+    Selector.SetSnapshot([DeviceB]);
+    Selector.SignalChange;
+    Selector.FireScheduledRefresh;
+    Selector.WaitForRefresh;
+    AssertEquals(3, Selector.LoadCount);
+    AssertEquals(3, ApplyCount);
+    AssertEquals('Updated metadata', Selector.Devices[0].Model);
+  finally
+    Selector.Free;
+  end;
+end;
+
+procedure TSerialSelectorComponentTests.HotplugDuringRefreshPublishesLatestSnapshot;
+var
+  Selector: TBackgroundTestSerialSelector;
+  DeviceA, DeviceB: TSerialDeviceInfo;
+  LoadStarted, ReleaseLoad: TEvent;
+begin
+  DeviceA := CreateDevice('COM1', '', '', '');
+  DeviceB := CreateDevice('COM2', '', '', '');
+  LoadStarted := TEvent.Create(nil, True, False, '');
+  ReleaseLoad := TEvent.Create(nil, True, False, '');
+  Selector := TBackgroundTestSerialSelector.Create(nil);
+  try
+    Selector.LoadStarted := LoadStarted;
+    Selector.ReleaseLoad := ReleaseLoad;
+    Selector.SetSnapshot([DeviceA]);
+    Selector.Refresh;
+    AssertEquals(Ord(wrSignaled), Ord(LoadStarted.WaitFor(1000)));
+    Selector.SetSnapshot([DeviceB]);
+    Selector.SignalChange;
+    Selector.SignalChange;
+    AssertEquals('A running enumeration must not overlap another one',
+      1, Selector.LoadCount);
+    ReleaseLoad.SetEvent;
+    Selector.WaitForRefresh;
+    AssertEquals('COM1', Selector.Device);
+    AssertTrue('The watcher must retain the hotplug request',
+      Selector.RefreshScheduled);
+
+    Selector.FireScheduledRefresh;
+    Selector.WaitForRefresh;
+    AssertEquals(2, Selector.LoadCount);
+    AssertEquals('COM2', Selector.Device);
+    AssertFalse(Selector.RefreshScheduled);
+  finally
+    ReleaseLoad.SetEvent;
+    Selector.Free;
+    ReleaseLoad.Free;
+    LoadStarted.Free;
+  end;
+end;
+
+procedure TSerialSelectorComponentTests.UnchangedPollingSnapshotPreservesTypedTextAndHint;
+var
+  Selector: TBackgroundTestSerialSelector;
+  DeviceA, DeviceB: TSerialDeviceInfo;
+  PreviousHint: string;
+begin
+  DeviceA := CreateDevice('COM1', '', '', '');
+  DeviceB := CreateDevice('COM2', '', '', '');
+  Selector := TBackgroundTestSerialSelector.Create(nil);
+  try
+    Selector.SetSnapshot([DeviceA]);
+    Selector.Refresh;
+    Selector.WaitForRefresh;
+    Selector.SetSnapshot([DeviceA, DeviceB]);
+    Selector.SignalChange;
+    Selector.FireScheduledRefresh;
+    Selector.WaitForRefresh;
+
+    Selector.AllowCustomDevice := True;
+    Selector.Device := '/dev/custom-device';
+    Selector.SelStart := 4;
+    Selector.SelLength := 3;
+    PreviousHint := Selector.HintCaption;
+    AssertTrue(Pos(lngAddedPorts, PreviousHint) > 0);
+    Selector.SignalChange;
+    Selector.FireScheduledRefresh;
+    Selector.WaitForRefresh;
+
+    AssertEquals(3, Selector.LoadCount);
+    AssertEquals('/dev/custom-device', Selector.Device);
+    AssertEquals(4, Selector.SelStart);
+    AssertEquals(3, Selector.SelLength);
+    AssertEquals(PreviousHint, Selector.HintCaption);
+  finally
+    Selector.Free;
   end;
 end;
 

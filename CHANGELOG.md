@@ -4,6 +4,13 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- Add `TSerialWatcher.OnDevicesRefreshed` to deliver successful device snapshots
+  on the main thread, including the initial baseline and metadata-only updates.
+
 ## [0.9.0] - 2026-10-17
 
 ### Added

@@ -19,6 +19,9 @@ uses
   SerialWatcherSupport, SerialDeviceRefresh;
 
 type
+  TSerialDevicesRefreshedEvent = procedure(Sender: TObject;
+    const ADevices: TSerialDeviceInfoArray) of object;
+
   TSerialWatcher = class(TComponent)
   private
     FChangeDelayMs: Cardinal;
@@ -27,6 +30,7 @@ type
     FComDisconnected: TNotifyEvent;
     FDeviceRefreshThread: TSerialDeviceRefreshThread;
     FDevices: TSerialDeviceInfoArray;
+    FOnDevicesRefreshed: TSerialDevicesRefreshedEvent;
     FInitialized: Boolean;
     FLastRefreshChanged: Boolean;
     FOwnInfrastructure: Boolean;
@@ -49,7 +53,6 @@ type
     procedure RefreshFinished;
     procedure ScheduledRefresh(Sender: TObject);
     function SettleRetryDelay: Cardinal;
-    procedure StartWatching;
     procedure StartBackgroundRefresh;
   protected
     procedure SetInfrastructure(
@@ -63,9 +66,11 @@ type
       const ASettleRetryCount: Cardinal
     );
     procedure ApplyDevices(const ADevices: TSerialDeviceInfoArray); virtual;
+    function BackgroundRefreshFinished: Boolean;
     function LoadDevices: TSerialDeviceInfoArray; virtual;
     procedure Loaded; override;
     procedure PollDevices;
+    procedure StartWatching;
     procedure StopWatching;
   public
     constructor Create(AOwner: TComponent); override;
@@ -76,6 +81,10 @@ type
     property RefreshOnLoaded: Boolean
       read FRefreshOnLoaded write FRefreshOnLoaded;
   published
+    // Every successful refresh, including the baseline and metadata-only
+    // changes. Delivered on the main thread before connection-change events.
+    property OnDevicesRefreshed: TSerialDevicesRefreshedEvent
+      read FOnDevicesRefreshed write FOnDevicesRefreshed;
     property OnComConnected: TNotifyEvent
       read FComConnected write FComConnected;
     property OnComDisconnected: TNotifyEvent
@@ -184,38 +193,50 @@ var
   AddedDevices: Boolean;
   RemovedDevices: Boolean;
   Guard: TSerialWatcherEventGuard;
+  Snapshot: TSerialDeviceInfoArray;
 begin
   if (FDeviceRefreshThread <> nil) and
     FDeviceRefreshThread.Delivering and
     not FDeviceRefreshThread.LoadSucceeded then
     Exit;
-  if not FInitialized then
-  begin
-    FDevices := CopyDevices(ADevices);
-    FInitialized := True;
-    FLastRefreshChanged := False;
-  end
-  else
+  AddedDevices := False;
+  RemovedDevices := False;
+  if FInitialized then
   begin
     AddedDevices := SnapshotHasAddedDevices(FDevices, ADevices);
     RemovedDevices := SnapshotHasRemovedDevices(FDevices, ADevices);
-    FLastRefreshChanged := AddedDevices or RemovedDevices;
-    FDevices := CopyDevices(ADevices);
-
-    Guard := TSerialWatcherEventGuard.Create(Self);
-    try
-      if AddedDevices and Assigned(FComConnected) then
-        FComConnected(Self);
-      // The first event may destroy this watcher or its owning component.
-      // Consult the independent guard before accessing any more fields.
-      if Guard.Watcher = nil then
-        Exit;
-      if RemovedDevices and Assigned(FComDisconnected) then
-        FComDisconnected(Self);
-    finally
-      Guard.Free;
-    end;
   end;
+  FLastRefreshChanged := AddedDevices or RemovedDevices;
+  FDevices := CopyDevices(ADevices);
+  FInitialized := True;
+
+  Guard := TSerialWatcherEventGuard.Create(Self);
+  try
+    if Assigned(FOnDevicesRefreshed) then
+    begin
+      // Dynamic arrays are shared even through const parameters. Do not expose
+      // the watcher's own storage to an event handler.
+      Snapshot := CopyDevices(FDevices);
+      FOnDevicesRefreshed(Self, Snapshot);
+    end;
+    // Any event may destroy this watcher or its owning component.
+    if Guard.Watcher = nil then
+      Exit;
+    if AddedDevices and Assigned(FComConnected) then
+      FComConnected(Self);
+    if Guard.Watcher = nil then
+      Exit;
+    if RemovedDevices and Assigned(FComDisconnected) then
+      FComDisconnected(Self);
+  finally
+    Guard.Free;
+  end;
+end;
+
+function TSerialWatcher.BackgroundRefreshFinished: Boolean;
+begin
+  // Completion of the worker does not imply delivery of its queued snapshot.
+  Result := (FDeviceRefreshThread = nil) or FDeviceRefreshThread.Finished;
 end;
 
 procedure TSerialWatcher.PollDevices;

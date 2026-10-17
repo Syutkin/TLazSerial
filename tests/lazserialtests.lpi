@@ -25,7 +25,7 @@
         <PackageName Value="IDEIntf"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="32">
+    <Units Count="34">
       <Unit0>
         <Filename Value="lazserialtests.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -185,6 +185,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="LazSerialBufferedPtyTests"/>
       </Unit31>
+      <Unit32>
+        <Filename Value="serial/lazserialbufferedlifecycletests.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="LazSerialBufferedLifecycleTests"/>
+      </Unit32>
+      <Unit33>
+        <Filename Value="serial/lazserialreadwindowsiotests.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="LazSerialReadWindowsIoTests"/>
+      </Unit33>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

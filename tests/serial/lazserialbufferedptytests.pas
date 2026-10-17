@@ -9,6 +9,10 @@ type
     FSerial: TLazSerial;
     FMaster, FSlave, FAction, FCalls, FParseErrors, FTerminalError: Integer;
     FValues: TStringList;
+    FCallbackOwner: TComponent;
+    procedure RaiseFirstReceive(Sender: TObject);
+    procedure DestroyOwnerOnReceive(Sender: TObject);
+    procedure DestroyOwnerOnError(Sender: TObject; Code: Integer; const Message: string);
     procedure Received(Sender: TObject);
     procedure Failed(Sender: TObject; Code: Integer; const Message: string);
     procedure Send(const Data: AnsiString);
@@ -26,6 +30,11 @@ type
     procedure ReceiveContinuesDuringBlockedWrite;
     procedure ReceiveHandlerCanDestroyComponent;
     procedure SynchronousWriteRemainsUsable;
+    procedure ReceiveExceptionKeepsReaderAlive;
+    procedure ReceiveCanDestroyOwner;
+    procedure TerminalErrorCanDestroyOwner;
+    procedure ReopenNeverDeliversOldInput;
+    procedure SynchronousBackpressureHonorsDeadline;
   end;
 {$ENDIF}
 implementation
@@ -210,6 +219,108 @@ begin
   SetLength(Value, Count);
   Move(Bytes[0], Value[1], Count);
   AssertEquals(Payload, Value);
+end;
+procedure TLazSerialBufferedPtyTests.RaiseFirstReceive(Sender: TObject);
+begin
+  if FCalls = 0 then
+  begin
+    Inc(FCalls);
+    raise Exception.Create('Expected buffered receive exception');
+  end;
+  Received(Sender);
+end;
+procedure TLazSerialBufferedPtyTests.ReceiveExceptionKeepsReaderAlive;
+var Deadline: QWord; Raised: Boolean;
+begin
+  FSerial.OnRxData := @RaiseFirstReceive;
+  FSerial.Open;
+  Send('first');
+  Raised := False;
+  Deadline := GetTickCount64 + 2000;
+  while not Raised and (GetTickCount64 < Deadline) do
+    try CheckSynchronize(1);
+    except on E: Exception do begin
+      AssertEquals('Expected buffered receive exception', E.Message);
+      Raised := True;
+    end; end;
+  AssertTrue(Raised);
+  AssertTrue(FSerial.Active);
+  Send('second');
+  AwaitValues(1);
+  AssertEquals('firstsecond', FValues[0]);
+end;
+procedure TLazSerialBufferedPtyTests.DestroyOwnerOnReceive(Sender: TObject);
+begin
+  FreeAndNil(FCallbackOwner);
+  FSerial := nil;
+end;
+procedure TLazSerialBufferedPtyTests.ReceiveCanDestroyOwner;
+var Deadline: QWord;
+begin
+  FCallbackOwner := TComponent.Create(nil);
+  FCallbackOwner.InsertComponent(FSerial);
+  try
+    FSerial.OnRxData := @DestroyOwnerOnReceive;
+    FSerial.Open; Send('destroy owner');
+    Deadline := GetTickCount64 + 2000;
+    while (FSerial <> nil) and (GetTickCount64 < Deadline) do CheckSynchronize(1);
+    AssertTrue(FSerial = nil);
+  finally FreeAndNil(FCallbackOwner); FSerial := nil; end;
+end;
+procedure TLazSerialBufferedPtyTests.DestroyOwnerOnError(Sender: TObject;
+  Code: Integer; const Message: string);
+begin
+  Failed(Sender, Code, Message);
+  FreeAndNil(FCallbackOwner);
+  FSerial := nil;
+end;
+procedure TLazSerialBufferedPtyTests.TerminalErrorCanDestroyOwner;
+var Deadline: QWord;
+begin
+  FCallbackOwner := TComponent.Create(nil);
+  FCallbackOwner.InsertComponent(FSerial);
+  try
+    FSerial.OnError := @DestroyOwnerOnError;
+    FSerial.Open;
+    fpClose(FMaster); FMaster := -1;
+    Deadline := GetTickCount64 + 2000;
+    while (FSerial <> nil) and (GetTickCount64 < Deadline) do CheckSynchronize(1);
+    AssertTrue(FSerial = nil);
+    AssertEquals(ErrNoDeviceAnswer, FTerminalError);
+  finally FreeAndNil(FCallbackOwner); FSerial := nil; end;
+end;
+procedure TLazSerialBufferedPtyTests.ReopenNeverDeliversOldInput;
+var Deadline: QWord;
+begin
+  FSerial.OnRxData := nil;
+  FSerial.Open; Send('old');
+  Deadline := GetTickCount64 + 2000;
+  while not FSerial.DataAvailable and (GetTickCount64 < Deadline) do CheckSynchronize(1);
+  AssertTrue(FSerial.DataAvailable);
+  FSerial.Close; AwaitCleanup;
+  FSerial.OnRxData := @Received;
+  FSerial.Open;
+  AssertFalse(FSerial.DataAvailable);
+  Send('new'); AwaitValues(1);
+  AssertEquals('new', FValues[0]);
+  Pump(20); AssertEquals(1, FCalls);
+end;
+procedure TLazSerialBufferedPtyTests.SynchronousBackpressureHonorsDeadline;
+var Written, Attempt: Integer; Started: QWord; Payload: string;
+begin
+  FSerial.SynSer.DeadlockTimeout := 20;
+  FSerial.Open;
+  Payload := StringOfChar('x', 65536);
+  Written := 0;
+  Started := GetTickCount64;
+  for Attempt := 1 to 100 do
+  begin
+    Written := FSerial.WriteData(Payload);
+    if Written < 0 then Break;
+  end;
+  AssertEquals('Backpressure eventually reaches the synchronous timeout', -1, Written);
+  AssertTrue('Synchronous timeout must not become an unbounded native wait', GetTickCount64 - Started < 2000);
+  AssertTrue(FSerial.Active);
 end;
 initialization RegisterTest(TLazSerialBufferedPtyTests);
 {$ENDIF}

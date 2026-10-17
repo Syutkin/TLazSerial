@@ -5,6 +5,7 @@ unit LazSerialSettingsTests;
 interface
 
 uses
+  {$IFDEF MSWINDOWS}Windows,{$ENDIF}
   Classes, SysUtils, FpcUnit, TestRegistry, LazSerial, LazSerialCommon,
   LazSerialTransportTests, LazSerialTransport, LazSynaSer, LazSerialRead,
   LazSerialWrite, LazSerialSetup, Forms, Controls;

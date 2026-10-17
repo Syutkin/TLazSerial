@@ -126,8 +126,8 @@ begin
   begin
     Dec(FailCreations);
     InterlockedIncrement(InjectedFailures);
-    ThreadId := 0;
-    Exit(0);
+    ThreadId := Default(TThreadID);
+    Exit(Default(TThreadID));
   end;
   Result := OriginalManager.BeginThread(sa, stacksize, ThreadFunction, p,
     creationFlags, ThreadId);
@@ -277,7 +277,7 @@ begin
   FReleased := TEvent.Create(nil, True, False, '');
   FEnded := TEvent.Create(nil, True, False, '');
   WorkerEnded := FEnded;
-  CapturedThread := 0;
+  CapturedThread := Default(TThreadID);
   InjectedFailures := 0;
   FailCreations := 0;
   {$IFDEF UNIX}
@@ -312,7 +312,7 @@ begin
   // A failed assertion must not leave a worker or its native handle behind.
   if FRead <> nil then FRead.ClosePort;
   if FWrite <> nil then FWrite.ClosePort;
-  if CapturedThread <> 0 then WaitForWorker;
+  if CapturedThread <> Default(TThreadID) then WaitForWorker;
   FLifecycle.RequestClose;
   while FLifecycle.GetClosePending do CheckSynchronize(1);
   CheckSynchronize(1);

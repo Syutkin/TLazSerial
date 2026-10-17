@@ -8,6 +8,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Add `TSerialDeviceFilter`, `MatchesSerialDevice` and `FilterSerialDevices`
+  to find devices by VID/PID, serial number and PersistentId in existing
+  snapshots, returning all matches independently of port names.
 - Add `Serial.Statistics` snapshots with native RX/TX byte counts, buffered
   receive usage and peak, retained error diagnostics and the session's close
   reason. Counters survive closing and reset on a successful new opening.

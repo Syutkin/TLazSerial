@@ -21,6 +21,14 @@ type
 
   TSerialDeviceInfoArray = array of TSerialDeviceInfo;
 
+  // Empty fields are unrestricted; all specified fields must match.
+  TSerialDeviceFilter = record
+    VendorId: string;
+    ProductId: string;
+    SerialShort: string;
+    PersistentId: string;
+  end;
+
   TSerialDeviceEnumerationOption = (
     sdeoAccessibleOnly
   );
@@ -57,6 +65,19 @@ function ContainsSerialDevice(
 ): Boolean;
 
 function NormalizeUsbId(const AValue: string): string;
+
+// USB IDs are normalized; invalid specified IDs never match. SerialShort
+// matches exactly; PersistentId ignores case on Windows only.
+function MatchesSerialDevice(
+  const ADevice: TSerialDeviceInfo;
+  const AFilter: TSerialDeviceFilter
+): Boolean;
+
+// Returns an independent array of all matches in snapshot order, without I/O.
+function FilterSerialDevices(
+  const ADevices: TSerialDeviceInfoArray;
+  const AFilter: TSerialDeviceFilter
+): TSerialDeviceInfoArray;
 
 function FormatSerialDeviceFriendlyName(
   const ADevice: TSerialDeviceInfo;
@@ -215,6 +236,54 @@ begin
       Exit('');
 
   Result := StringOfChar('0', 4 - Length(Value)) + Value;
+end;
+
+function MatchesUsbId(const AValue, AFilter: string): Boolean;
+var
+  NormalizedFilter: string;
+begin
+  if AFilter = '' then
+    Exit(True);
+  NormalizedFilter := NormalizeUsbId(AFilter);
+  Result := (NormalizedFilter <> '') and
+    (NormalizeUsbId(AValue) = NormalizedFilter);
+end;
+
+function MatchesSerialDevice(
+  const ADevice: TSerialDeviceInfo;
+  const AFilter: TSerialDeviceFilter
+): Boolean;
+begin
+  Result := MatchesUsbId(ADevice.VendorId, AFilter.VendorId) and
+    MatchesUsbId(ADevice.ProductId, AFilter.ProductId) and
+    ((AFilter.SerialShort = '') or
+      (ADevice.SerialShort = AFilter.SerialShort));
+  if not Result or (AFilter.PersistentId = '') then
+    Exit;
+  {$IFDEF Windows}
+  Result := CompareText(ADevice.PersistentId, AFilter.PersistentId) = 0;
+  {$ELSE}
+  Result := ADevice.PersistentId = AFilter.PersistentId;
+  {$ENDIF}
+end;
+
+function FilterSerialDevices(
+  const ADevices: TSerialDeviceInfoArray;
+  const AFilter: TSerialDeviceFilter
+): TSerialDeviceInfoArray;
+var
+  I, MatchCount: Integer;
+begin
+  Result := nil;
+  SetLength(Result, Length(ADevices));
+  MatchCount := 0;
+  for I := Low(ADevices) to High(ADevices) do
+    if MatchesSerialDevice(ADevices[I], AFilter) then
+    begin
+      Result[MatchCount] := ADevices[I];
+      Inc(MatchCount);
+    end;
+  SetLength(Result, MatchCount);
 end;
 
 function FormatSerialDeviceFriendlyName(

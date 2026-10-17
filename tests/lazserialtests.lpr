@@ -55,6 +55,7 @@ uses
   SerialPlatformChangeSourceSmokeTests,
   SerialCommandRunnerTests,
   SerialDeviceFormatTests,
+  SerialDeviceFilterTests,
   SerialDeviceParserTests,
   SerialDeviceCollectorTests,
   SerialPlatformCollectorSmokeTests,

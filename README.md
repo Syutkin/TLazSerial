@@ -346,6 +346,27 @@ result.
 Pass `[sdeoAccessibleOnly]` to `GetSerialDevices` when only devices that can be
 opened at enumeration time are needed.
 
+Use `MatchesSerialDevice` or `FilterSerialDevices` from `LazSerialDevices`
+to search an existing snapshot without depending on the current port name:
+
+```pascal
+Filter := Default(TSerialDeviceFilter);
+Filter.VendorId := '0403';
+Filter.ProductId := '6001';
+Filter.SerialShort := SavedSerialNumber;
+Matches := FilterSerialDevices(Devices, Filter);
+if Length(Matches) = 1 then
+  Serial.Device := Matches[0].Device;
+```
+
+The filter also accepts `PersistentId`. Empty fields impose no restriction;
+specified fields must all match. USB IDs are normalized with `NormalizeUsbId`;
+invalid IDs and missing required metadata do not match. `SerialShort` matches
+exactly; `PersistentId` ignores case only on Windows. Filtering returns an
+independent array of all matches in snapshot order. Multiple matches require
+an explicit choice; metadata availability and ID stability depend on the device
+and platform.
+
 Platform metadata sources are:
 
 - Linux: `udevadm`, with device-only fallback;

@@ -34,6 +34,7 @@ uses
   LazSerialMemoryReadTests,
   LazSerialReadOperationTests,
   LazSerialBufferedPtyTests,
+  LazSerialPairedPtyTests,
   LazSerialBufferedLifecycleTests,
   LazSerialReadWindowsIoTests,
   LazSynaUtilTimeTests,

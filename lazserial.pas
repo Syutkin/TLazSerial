@@ -67,7 +67,7 @@ const
   { Version of this TLazSerial package, matching LazSerialPort.lpk. It is
     available without creating a serial port or loading a native library.
     Update it together with the package version when releasing TLazSerial. }
-  LazSerialPackageVersion = '0.8.1';
+  LazSerialPackageVersion = '0.9.0';
 
 
 type

@@ -8,6 +8,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Add opt-in `WriteQueueEnabled` for FIFO `WriteDataAsync` calls, bounded by
+  bytes and item count, with per-operation results and cancellation of the
+  remaining sequence on failure, timeout or cancellation. Closing clears it.
 - Add memory-only `TryReadUntil` for buffered raw input with exact arbitrary
   delimiters, retained partial messages and an explicit length limit.
 - Add opt-in `AutoReconnect` for identifiable devices after USB removal,

@@ -308,7 +308,8 @@ a native code reports zero with its exception message. Results are independent
 of `SynSer.LastError` and `RaiseExcept`. `OnError` continues to report reader
 failures. Write completion does not acknowledge receipt by the remote device.
 
-Only one asynchronous write may be pending. `WritePending` stays true through
+By default (`WriteQueueEnabled = False`), only one asynchronous write may be
+pending. `WritePending` stays true through
 native completion and cancellation cleanup. The completion event is always
 queued, even for an empty string or immediate success. Before calling the
 handler, the component clears `WritePending`, allowing the handler to start
@@ -321,7 +322,8 @@ lines and accessing `SynSer` raise `EInvalidOperation`. Previously saved
 `SynSer` references must also remain unused until completion. Reading and
 reader events continue while the port is active.
 
-Call `CancelWrite` to request cancellation without waiting for the driver.
+In the default single-write mode, call `CancelWrite` to request cancellation
+without waiting for the driver.
 It does nothing when no write is pending. If the write has already finished,
 its actual result is retained. The operation keeps its buffer and native I/O
 storage alive until cancellation actually completes. A slow or faulty Windows
@@ -339,6 +341,31 @@ When reopening after cancellation, let the LCL event loop continue and check
 `WritePending` from a later UI event or timer callback.
 The synchronous fallback on cleanup-thread startup failure described above
 also applies when closing during an asynchronous write.
+
+Enable the optional FIFO to accept multiple `WriteDataAsync` calls:
+
+```pascal
+Serial.WriteQueueEnabled := True;
+Id1 := Serial.WriteDataAsync(Command1, 1000);
+Id2 := Serial.WriteDataAsync(Command2, 1000);
+```
+
+Each accepted call copies its bytes and returns its own ID before transmission
+starts. The timeout starts when that entry is launched. Startup failures and
+normal results arrive through `OnWriteCompleted`; the next write starts after
+the handler returns. Handler exceptions do not stop queue processing.
+
+`WriteQueueByteLimit` defaults to 65536 and `WriteQueueItemLimit` to 64;
+overflow rejects the new call without consuming an ID. Limits and the read-only
+`PendingWriteCount`/`PendingWriteBytes` include active and waiting entries, plus
+results awaiting delivery. `WritePending` remains true while any exist. Queue
+settings may change only when idle; synchronous writes cannot bypass the FIFO.
+
+A failed, timed-out or cancelled write cancels the remaining entries. Their
+results retain their IDs and report `swoCancelled` with zero bytes written.
+`CancelWrite` cancels the whole sequence, retaining the actual result of a write
+that already completed. Closing clears the queue and suppresses its pending
+notifications; AutoReconnect never replays it. The queue does not await replies.
 
 Existing synchronous write signatures and behavior remain available when no
 asynchronous write is pending. In the default receive mode, normal close waits

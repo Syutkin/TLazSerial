@@ -37,6 +37,8 @@ uses
   SerialRingBufferTests,
   LazSerialTransportTests,
   LazSerialAsyncWriteTests,
+  LazSerialWriteQueueCoreTests,
+  LazSerialWriteQueueTests,
   LazSerialAsyncWindowsIoTests,
   LazSerialConfigurationTests,
   LazSerialIoLifecycleTests,

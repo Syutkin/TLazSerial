@@ -61,7 +61,7 @@ uses
 {$ENDIF}
   SysUtils, SyncObjs, lazsynaser,  LResources, Forms, Controls, Graphics, Dialogs,
   PropEdits, SerialWatcher, LazSerialCommon, LazSerialStatistics, LazSerialDevices,
-  LazSerialReconnect,
+  LazSerialReconnect, LazSerialWriteQueue,
   LazSerialTransport, LazSerialWrite, LazSerialRead;
 
 const
@@ -222,6 +222,10 @@ type
     FOnWriteCompleted: TSerialWriteCompletedEvent;
     FWriteOperation: ISerialWriteOperation;
     FWriteId: QWord;
+    FLastWriteId: QWord;
+    FWriteSize: Integer;
+    FWriteQueue: TSerialWriteQueue;
+    FWriteQueueScheduled, FWriteQueueDispatching: Boolean;
     FWriteCloseRequested: Boolean;
     FClosing: Boolean;
     FDestroying: Boolean;
@@ -274,6 +278,19 @@ type
     procedure CheckPortConfiguration(const AOperation: string);
     procedure BufferedReadChanged;
     procedure WriteFinished(const AResult: TSerialWriteResult);
+    procedure StartWriteOperation(const AData: AnsiString; AId: QWord;
+      ATimeoutMs: Cardinal);
+    procedure StartQueuedWrite(const ARequest: TSerialQueuedWrite);
+    procedure ScheduleWriteQueue;
+    procedure ProcessWriteQueue;
+    function GetWriteQueueEnabled: Boolean;
+    procedure SetWriteQueueEnabled(AValue: Boolean);
+    function GetWriteQueueByteLimit: Integer;
+    procedure SetWriteQueueByteLimit(AValue: Integer);
+    function GetWriteQueueItemLimit: Integer;
+    procedure SetWriteQueueItemLimit(AValue: Integer);
+    function GetPendingWriteCount: Integer;
+    function GetPendingWriteBytes: SizeInt;
 
   protected
     procedure AdoptWatcherSnapshotForTesting(
@@ -326,9 +343,13 @@ type
     function WriteBuffer(var buf; size: integer): integer;
     function WriteDataAsync(const AData: string;
       const ATimeoutMs: Cardinal): QWord;
-    // Requests cancellation; WritePending stays true until native completion.
+    // Requests cancellation; queue mode also cancels every waiting entry.
+    // WritePending stays true through native cleanup and result delivery.
     procedure CancelWrite;
     property WritePending: Boolean read GetWritePending;
+    // Includes active, waiting and not-yet-delivered queue results.
+    property PendingWriteCount: Integer read GetPendingWriteCount;
+    property PendingWriteBytes: SizeInt read GetPendingWriteBytes;
 
     // read pin states
     function ModemSignals: TModemSignals;
@@ -342,6 +363,10 @@ type
     procedure SetRTS(OnOff: boolean);
 
   published
+    // Optional FIFO for WriteDataAsync. Change queue settings only when idle.
+    property WriteQueueEnabled: Boolean read GetWriteQueueEnabled write SetWriteQueueEnabled default False;
+    property WriteQueueByteLimit: Integer read GetWriteQueueByteLimit write SetWriteQueueByteLimit default DefaultWriteQueueByteLimit;
+    property WriteQueueItemLimit: Integer read GetWriteQueueItemLimit write SetWriteQueueItemLimit default DefaultWriteQueueItemLimit;
     // Restore a previously opened, identifiable device after confirmed removal.
     // Manual Close/Active=False, Device changes and disabling cancel waiting.
     property AutoReconnect: Boolean read GetAutoReconnect write SetAutoReconnect default False;
@@ -764,6 +789,9 @@ var
   Delivery: TSerialReaderEventDelivery;
   TransportLocked: Boolean;
 begin
+  TThread.RemoveQueuedEvents(nil, @ProcessWriteQueue);
+  FWriteQueueScheduled := False;
+  if FWriteQueue <> nil then FWriteQueue.Clear;
   TransportLocked := False;
   if FActive then
     if FDestroying then FStatistics.MarkClosed(scrDestroyed)
@@ -852,6 +880,7 @@ begin
   FStatusSession := TSerialReaderSession.Create(Self);
   FTransport := TLazSynapseSerialTransport.Create;
   FStatistics := CreateSerialStatistics;
+  FWriteQueue := TSerialWriteQueue.Create;
   FFlowControl := fcNone;
   FDtrOnOpen := olsDefault;
   FRtsOnOpen := olsDefault;
@@ -993,6 +1022,7 @@ end;
 destructor TLazSerial.Destroy;
 begin
   FDestroying := True;
+  TThread.RemoveQueuedEvents(nil, @ProcessWriteQueue);
   FreeAndNil(FReconnect);
   FStatusSession.Detach;
   FSerialWatcher.OnComDisconnected := nil;
@@ -1023,6 +1053,7 @@ begin
     finally
       FReaderSession := nil;
       FStatusSession := nil;
+      FWriteQueue.Free;
       FTransportLock.Free;
       inherited;
     end;
@@ -1402,7 +1433,8 @@ end;
 function TLazSerial.GetWritePending: Boolean;
 begin
   CheckMainThread('TLazSerial.WritePending');
-  Result := FWriteOperation <> nil;
+  Result := (FWriteOperation <> nil) or
+    ((FWriteQueue <> nil) and (FWriteQueue.Count > 0));
 end;
 
 procedure TLazSerial.CheckPortConfiguration(const AOperation: string);
@@ -1416,44 +1448,182 @@ procedure TLazSerial.CheckWriteIdle(const AOperation: string);
 begin
   if (FReadOperation <> nil) and FReadOperation.GetClosePending then
     raise EInvalidOperation.CreateFmt('%s: serial cleanup is pending', [AOperation]);
-  if FWriteOperation <> nil then
+  if GetWritePending then
     raise EInvalidOperation.CreateFmt('%s: an asynchronous write is pending',
       [AOperation]);
 end;
 
+function TLazSerial.GetWriteQueueEnabled: Boolean;
+begin CheckMainThread('TLazSerial.WriteQueueEnabled'); Result := FWriteQueue.Enabled; end;
+procedure TLazSerial.SetWriteQueueEnabled(AValue: Boolean);
+begin
+  CheckMainThread('TLazSerial.WriteQueueEnabled');
+  if FWriteQueue.Enabled = AValue then Exit;
+  CheckWriteIdle('TLazSerial.WriteQueueEnabled');
+  FWriteQueue.Enabled := AValue;
+end;
+function TLazSerial.GetWriteQueueByteLimit: Integer;
+begin CheckMainThread('TLazSerial.WriteQueueByteLimit'); Result := FWriteQueue.ByteLimit; end;
+procedure TLazSerial.SetWriteQueueByteLimit(AValue: Integer);
+begin
+  CheckMainThread('TLazSerial.WriteQueueByteLimit');
+  CheckWriteIdle('TLazSerial.WriteQueueByteLimit');
+  FWriteQueue.ByteLimit := AValue;
+end;
+function TLazSerial.GetWriteQueueItemLimit: Integer;
+begin CheckMainThread('TLazSerial.WriteQueueItemLimit'); Result := FWriteQueue.ItemLimit; end;
+procedure TLazSerial.SetWriteQueueItemLimit(AValue: Integer);
+begin
+  CheckMainThread('TLazSerial.WriteQueueItemLimit');
+  CheckWriteIdle('TLazSerial.WriteQueueItemLimit');
+  FWriteQueue.ItemLimit := AValue;
+end;
+function TLazSerial.GetPendingWriteCount: Integer;
+begin
+  CheckMainThread('TLazSerial.PendingWriteCount');
+  Result := FWriteQueue.Count;
+  if (Result = 0) and (FWriteOperation <> nil) then Result := 1;
+end;
+function TLazSerial.GetPendingWriteBytes: SizeInt;
+begin
+  CheckMainThread('TLazSerial.PendingWriteBytes');
+  if FWriteQueue.Count > 0 then Result := FWriteQueue.Bytes
+  else Result := FWriteSize;
+end;
+procedure TLazSerial.StartWriteOperation(const AData: AnsiString; AId: QWord;
+  ATimeoutMs: Cardinal);
+var Operation: ISerialWriteOperation;
+begin
+  Operation := FTransport.CreateWriteOperation(AData, AId, ATimeoutMs, @WriteFinished);
+  if Operation = nil then
+    raise EInvalidOperation.Create('Transport returned no write operation');
+  FWriteOperation := Operation;
+  FWriteCloseRequested := False;
+  FWriteId := AId;
+  FWriteSize := Length(AData);
+  try
+    Operation.Start;
+  except
+    Operation.Detach;
+    FWriteOperation := nil;
+    FWriteSize := 0;
+    raise;
+  end;
+end;
+procedure TLazSerial.StartQueuedWrite(const ARequest: TSerialQueuedWrite);
+var Failure: TSerialWriteResult;
+begin
+  BeginTransport;
+  try
+    try
+      if not FTransport.IsOpen then ComException('can not write to a closed port.');
+      StartWriteOperation(ARequest.Data, ARequest.OperationId, ARequest.TimeoutMs);
+    except
+      on E: Exception do
+      begin
+        Failure := Default(TSerialWriteResult);
+        Failure.OperationId := ARequest.OperationId;
+        Failure.BytesRequested := Length(ARequest.Data);
+        Failure.Outcome := swoFailed;
+        Failure.ErrorMessage := E.Message;
+        if E is ESynaSerError then
+        begin
+          Failure.ErrorCode := ESynaSerError(E).ErrorCode;
+          if ESynaSerError(E).ErrorMessage <> '' then
+            Failure.ErrorMessage := ESynaSerError(E).ErrorMessage;
+        end;
+        FStatistics.RecordError(Failure.ErrorCode, Failure.ErrorMessage);
+        FTransport.CompleteWrite(Failure);
+        FWriteQueue.Complete(Failure);
+      end;
+    end;
+  finally
+    // Status callbacks may destroy the component or raise. They are not
+    // transport failures and must stay outside the startup exception handler.
+    EndTransport;
+  end;
+end;
+procedure TLazSerial.ScheduleWriteQueue;
+begin
+  if FDestroying or FWriteQueueScheduled or FWriteQueueDispatching or
+    (FWriteQueue.Count = 0) or (FWriteOperation <> nil) or FClosing or
+    GetClosePending then Exit;
+  FWriteQueueScheduled := True;
+  try
+    TThread.ForceQueue(nil, @ProcessWriteQueue);
+  except
+    FWriteQueueScheduled := False;
+    raise;
+  end;
+end;
+procedure TLazSerial.ProcessWriteQueue;
+var
+  Lifetime: ISerialReaderSession;
+  Serial: TLazSerial;
+  Request: TSerialQueuedWrite;
+  WriteResult: TSerialWriteResult;
+  Handler: TSerialWriteCompletedEvent;
+begin
+  FWriteQueueScheduled := False;
+  if FDestroying or FWriteQueueDispatching or (FWriteOperation <> nil) or
+    FClosing or GetClosePending then Exit;
+  Lifetime := FStatusSession;
+  FWriteQueueDispatching := True;
+  try
+    if FWriteQueue.PopResult(WriteResult) then
+    begin
+      Handler := FOnWriteCompleted;
+      if Assigned(Handler) then Handler(Self, WriteResult);
+    end
+    else if FWriteQueue.BeginNext(Request) then StartQueuedWrite(Request);
+  finally
+    // Only local lifetime state is safe after a completion or status callback.
+    // Schedule after leaving the handler, including when it raises, so nested
+    // CheckSynchronize cannot launch the next write inside user code.
+    Serial := (Lifetime as TSerialReaderSession).FOwner;
+    if Serial <> nil then
+    begin
+      Serial.FWriteQueueDispatching := False;
+      Serial.ScheduleWriteQueue;
+    end;
+  end;
+end;
+
 function TLazSerial.WriteDataAsync(const AData: string;
   const ATimeoutMs: Cardinal): QWord;
-var
-  Operation: ISerialWriteOperation;
-  NextId: QWord;
+var NextId: QWord;
 begin
   CheckMainThread('TLazSerial.WriteDataAsync');
-  CheckWriteIdle('TLazSerial.WriteDataAsync');
+  if not FWriteQueue.Enabled then CheckWriteIdle('TLazSerial.WriteDataAsync')
+  else if FClosing or FWriteCloseRequested or GetClosePending then
+    raise EInvalidOperation.Create('WriteDataAsync: serial cleanup is pending');
   if ATimeoutMs = 0 then
     raise EArgumentException.Create('Write timeout must be greater than zero');
   if Length(AData) > High(Integer) then
     raise EArgumentException.Create('Write buffer is too large');
   if not FActive then
     ComException('can not write to a closed port.');
-  if FWriteId = High(QWord) then
+  if FLastWriteId = High(QWord) then
     raise EInvalidOperation.Create('Write operation identifiers exhausted');
-  NextId := FWriteId + 1;
+  NextId := FLastWriteId + 1;
+  if FWriteQueue.Enabled then
+  begin
+    FWriteQueue.Push(NextId, AData, ATimeoutMs);
+    try
+      ScheduleWriteQueue;
+    except
+      FWriteQueue.RollbackPush(NextId);
+      raise;
+    end;
+    FLastWriteId := NextId;
+    Exit(NextId);
+  end;
   BeginTransport;
   try
     if not FTransport.IsOpen then
       ComException('can not write to a closed port.');
-    Operation := FTransport.CreateWriteOperation(AData, NextId, ATimeoutMs,
-      @WriteFinished);
-    FWriteOperation := Operation;
-    FWriteCloseRequested := False;
-    try
-      Operation.Start;
-      FWriteId := NextId;
-    except
-      Operation.Detach;
-      FWriteOperation := nil;
-      raise;
-    end;
+    StartWriteOperation(AData, NextId, ATimeoutMs);
+    FLastWriteId := NextId;
   finally
     EndTransport;
   end;
@@ -1463,8 +1633,10 @@ end;
 procedure TLazSerial.CancelWrite;
 begin
   CheckMainThread('TLazSerial.CancelWrite');
+  if FWriteQueue.Enabled then FWriteQueue.CancelWaiting;
   if FWriteOperation <> nil then
-    FWriteOperation.Cancel;
+    FWriteOperation.Cancel
+  else ScheduleWriteQueue;
 end;
 
 procedure TLazSerial.WriteFinished(const AResult: TSerialWriteResult);
@@ -1476,6 +1648,7 @@ begin
     Exit;
   Operation := FWriteOperation;
   FWriteOperation := nil;
+  FWriteSize := 0;
   Operation.Detach;
   if FWriteCloseRequested then
   begin
@@ -1483,6 +1656,12 @@ begin
     Exit;
   end;
   FTransport.CompleteWrite(AResult);
+  if FWriteQueue.ActiveId = AResult.OperationId then
+  begin
+    FWriteQueue.Complete(AResult);
+    ScheduleWriteQueue;
+    Exit;
+  end;
   Handler := FOnWriteCompleted;
   // Do not access component state after calling user code.
   if not FDestroying and Assigned(Handler) then

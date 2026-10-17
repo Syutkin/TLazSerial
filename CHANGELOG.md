@@ -4,7 +4,7 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [0.9.0] - 2026-10-17
 
 ### Added
 
@@ -101,5 +101,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - Legacy string enumeration, friendly-name helpers and selector option lists.
 
+[0.9.0]: https://github.com/Syutkin/TLazSerial/releases/tag/0.9.0
 [0.8.1]: https://github.com/Syutkin/TLazSerial/releases/tag/0.8.1
 [0.8.0]: https://github.com/Syutkin/TLazSerial/releases/tag/0.8.0

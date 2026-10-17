@@ -1,10 +1,20 @@
-# Migrating from TLazSerial 0.7.x to 0.8.0
+# Migration guide
+
+## Migrating from TLazSerial 0.8.x to 0.9.0
+
+### `TBlockSerial` descendants
+
+Protected `FBuffer` is now a string property rather than a field. Descendants
+that pass it as a `var`/`out` argument, take its address or edit its characters
+in place must use a local string and assign the result back to `FBuffer`.
+
+## Migrating from TLazSerial 0.7.x to 0.8.0
 
 Version 0.8.0 replaces string-based serial-device enumeration with
 `TSerialDeviceInfoArray`. Opening, reading and writing through `TLazSerial`
 remain unchanged.
 
-## Enumerating devices
+### Enumerating devices
 
 Before:
 
@@ -28,7 +38,7 @@ Do not parse `FormatSerialDeviceDisplayName` output. Use the individual fields
 of `TSerialDeviceInfo` when Vendor, Model, SerialShort, VID/PID, PersistentId or
 ErrorCode is needed.
 
-## Migrating `TSerialSelector`
+### Migrating `TSerialSelector`
 
 `DeviceList`, `DeviceListFriend` and `Options` no longer exist. The selector
 owns one structured snapshot and exposes:
@@ -60,7 +70,7 @@ The old `ssoAppendFriendlyNames`, `ssoUseWMI`, `ssoHide_tty_usbserial`,
 `sddoErrorCode` display options instead. Platform collector selection is now an
 internal detail.
 
-## Removed symbols
+### Removed symbols
 
 - `GetSerialPortNames` and its overloads;
 - `GetFriendlyName`, `GetFriendlyNameDevID` and platform friendly-name helpers;
@@ -68,10 +78,3 @@ internal detail.
 - `TSerialSelector.DeviceList`, `DeviceListFriend` and `Options`.
 
 `TLazSerial.ShowSetupDialog` no longer accepts legacy enumeration options.
-
-## `TBlockSerial` descendants (unreleased)
-
-Protected `FBuffer` is now a string property rather than a field. Descendants
-that pass it as a `var`/`out` argument, take its address or edit its characters
-in place must use a local string and assign the result back to `FBuffer`.
-Ordinary reads and assignments require no changes.

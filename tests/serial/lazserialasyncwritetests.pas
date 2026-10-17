@@ -825,13 +825,25 @@ begin
 end;
 
 procedure TLazSerialNativeWriteTests.RestoresDescriptorFlags;
+{$IFDEF DARWIN}
+const
+  // Set by the kernel after writing; F_SETFL cannot restore this marker.
+  FWASWRITTEN = $00010000;
+{$ENDIF}
 var
-  Flags: Integer;
+  Flags, RestoredFlags: Integer;
 begin
   Flags := fpFcntl(FNativeHandle, F_GETFL);
+  AssertTrue('Read initial descriptor flags', Flags >= 0);
   TLazSerial(FSerial).WriteDataAsync(StringOfChar('X', 2 * 1024 * 1024), 20);
   AwaitCompletion;
-  AssertEquals(Flags, fpFcntl(FNativeHandle, F_GETFL));
+  RestoredFlags := fpFcntl(FNativeHandle, F_GETFL);
+  AssertTrue('Read restored descriptor flags', RestoredFlags >= 0);
+  {$IFDEF DARWIN}
+  Flags := Flags and not FWASWRITTEN;
+  RestoredFlags := RestoredFlags and not FWASWRITTEN;
+  {$ENDIF}
+  AssertEquals(Flags, RestoredFlags);
 end;
 
 procedure TLazSerialNativeWriteTests.Received(Sender: TObject);

@@ -33,6 +33,7 @@ uses
   LazSerialPortSessionTests,
   LazSerialMemoryReadTests,
   LazSerialReadOperationTests,
+  LazSerialBufferedPtyTests,
   LazSynaUtilTimeTests,
   LazSerialWindowsIoTests,
   SerialPlatformChangeSourceSmokeTests,

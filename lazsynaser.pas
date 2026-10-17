@@ -1355,6 +1355,12 @@ end;
 {$ENDIF}
 
 function TBlockSerial.SendBuffer(buffer: pointer; length: integer): integer;
+{$IFNDEF MSWINDOWS}
+var
+  Started: QWord;
+  Error, Ready, Remaining: Integer;
+  Descriptor: TPollFD;
+{$ENDIF}
 begin
   Result := 0;
   if PreTestFailing then   {HGJ}
@@ -1366,8 +1372,52 @@ begin
     RTS := True;
   end;
 {$IFNDEF MSWINDOWS}
-  result := FileWrite(Fhandle, Buffer^, Length);
-  serialcheck(result);
+  Started := GetTickCount64;
+  repeat
+    Result := FileWrite(FHandle, Buffer^, Length);
+    if (Result >= 0) or not FMemoryReadMode then
+    begin
+      SerialCheck(Result);
+      Break;
+    end;
+    Error := fpGetErrno;
+    if Error = ESysEINTR then Continue;
+    if Error <> ESysEAGAIN then
+    begin
+      SetSynaError(Error);
+      Break;
+    end;
+    // Buffered receive keeps the descriptor nonblocking. A deliberately
+    // synchronous write still waits for writable space, within its deadline.
+    if (FDeadlockTimeout <= 0) or
+      (GetTickCount64 - Started >= QWord(FDeadlockTimeout)) then
+    begin
+      SetSynaError(ErrTimeout);
+      Break;
+    end;
+    Remaining := FDeadlockTimeout - Integer(GetTickCount64 - Started);
+    FillChar(Descriptor, SizeOf(Descriptor), 0);
+    Descriptor.fd := FHandle;
+    Descriptor.events := POLLOUT;
+    Ready := fpPoll(@Descriptor, 1, Remaining);
+    if Ready < 0 then
+    begin
+      Error := fpGetErrno;
+      if Error = ESysEINTR then Continue;
+      SetSynaError(Error);
+      Break;
+    end;
+    if Ready = 0 then
+    begin
+      SetSynaError(ErrTimeout);
+      Break;
+    end;
+    if (Descriptor.revents and (POLLERR or POLLHUP or POLLNVAL)) <> 0 then
+    begin
+      SetSynaError(ErrNoDeviceAnswer);
+      Break;
+    end;
+  until False;
 {$ELSE}
   Result := TransferBuffer(False, Buffer, Length);
 {$ENDIF}

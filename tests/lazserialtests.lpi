@@ -25,7 +25,7 @@
         <PackageName Value="IDEIntf"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="31">
+    <Units Count="32">
       <Unit0>
         <Filename Value="lazserialtests.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -180,6 +180,11 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="LazSerialReadOperationTests"/>
       </Unit30>
+      <Unit31>
+        <Filename Value="serial/lazserialbufferedptytests.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="LazSerialBufferedPtyTests"/>
+      </Unit31>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

@@ -268,6 +268,7 @@ begin
   begin
     FWriteError := 0;
     FSkipDrain := False;
+    FSerial.ConfigureReadBuffer(0);
   end;
   FSerial.Connect(ADevice);
 end;

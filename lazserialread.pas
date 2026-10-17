@@ -29,7 +29,7 @@ type
     FLock: TCriticalSection;
     FCancel: TEvent;
     FStopping: LongInt;
-    FStarted, FCompleted, FCloseRequested: Boolean;
+    FStarted, FCompleted, FCloseRequested, FLineMode: Boolean;
     FLimit, FMaxBandwidth, FError: Integer;
     FErrorMessage: string;
     FOnChanged: TSerialReadChanged;
@@ -201,7 +201,9 @@ procedure TSerialReadOperation.ClosePort;
 begin
   Cancel;
   FLock.Acquire;
-  try FCloseRequested := True;
+  try
+    FCloseRequested := True;
+    if not FStarted then FCompleted := True;
   finally FLock.Release; end;
   FLifecycle.RequestClose;
 end;
@@ -218,6 +220,11 @@ function TSerialReadOperation.DataAvailable(ALineMode: Boolean): Boolean;
 begin
   FLock.Acquire;
   try
+    if FLineMode <> ALineMode then
+    begin
+      FLineMode := ALineMode;
+      QueueChanged;
+    end;
     Result := not FCloseRequested and (FError = 0) and (FErrorMessage = '') and
       FPort.GetSerial.BufferedDataAvailable(ALineMode);
   finally FLock.Release; end;
@@ -229,7 +236,7 @@ begin
   AData := '';
   FLock.Acquire;
   try
-    if FCloseRequested then Exit(False);
+    if FCloseRequested or (FError <> 0) or (FErrorMessage <> '') then Exit(False);
     try
       Result := FPort.GetSerial.TryReadBuffered(ALineMode, AData);
     finally

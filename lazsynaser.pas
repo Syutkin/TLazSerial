@@ -308,6 +308,15 @@ type
     FPacketReadLimit: Integer;
     FDiscardLine: Boolean;
     FDiscardPrefix: AnsiString;
+    // Logical offsets survive appends and ring growth. Removing or replacing
+    // bytes invalidates the probe; parser settings are checked on each use.
+    FLineScan: record
+      Valid, Ready, Discarding, SkipComplement: Boolean;
+      ConvertLineEnd, LastCR, LastLF: Boolean;
+      MaxLineLength: Integer;
+      Offset, Start: SizeInt;
+      Previous: AnsiChar;
+    end;
     function GetLineBuffer: AnsiString;
     procedure SetLineBuffer(const AValue: AnsiString);
     function SendBufferFully(Buffer: Pointer; Count: Integer): Boolean;
@@ -854,6 +863,7 @@ end;
 
 procedure TBlockSerial.SetLineBuffer(const AValue: AnsiString);
 begin
+  FLineScan.Valid := False;
   FReadBuffer.Assign(AValue);
 end;
 
@@ -876,6 +886,7 @@ begin
   end;
   FReadBuffer.Free;
   FReadBuffer := Buffer;
+  FLineScan.Valid := False;
   FMemoryReadMode := ALimit > 0;
 end;
 
@@ -889,51 +900,70 @@ end;
 
 function TBlockSerial.BufferedDataAvailable(ALineMode: Boolean): Boolean;
 var
-  I, Start: SizeInt;
-  Discarding, SkipComplement: Boolean;
-  Previous, Current: AnsiChar;
-  Prefix: AnsiString;
+  I: SizeInt;
+  Current: AnsiChar;
 begin
   if not ALineMode then Exit(FReadBuffer.Count > 0);
-  Result := False;
-  Discarding := FDiscardLine;
-  Prefix := '';
-  if Discarding then Prefix := FDiscardPrefix;
-  Start := -Length(Prefix);
-  Previous := #0;
-  SkipComplement := False;
-  if FConvertLineEnd then
+  if not FLineScan.Valid or
+    (FLineScan.ConvertLineEnd <> FConvertLineEnd) or
+    (FLineScan.MaxLineLength <> FMaxLineLength) or
+    (FLineScan.LastCR <> FLastCR) or (FLineScan.LastLF <> FLastLF) then
   begin
-    if FLastCR then Previous := CR else if FLastLF then Previous := LF;
-    SkipComplement := Previous <> #0;
+    FLineScan.Valid := True;
+    FLineScan.Ready := False;
+    FLineScan.ConvertLineEnd := FConvertLineEnd;
+    FLineScan.MaxLineLength := FMaxLineLength;
+    FLineScan.LastCR := FLastCR;
+    FLineScan.LastLF := FLastLF;
+    FLineScan.Discarding := FDiscardLine;
+    FLineScan.Offset := 0;
+    if FDiscardLine then FLineScan.Offset := -Length(FDiscardPrefix);
+    FLineScan.Start := FLineScan.Offset;
+    FLineScan.Previous := #0;
+    if FConvertLineEnd then
+      if FLastCR then FLineScan.Previous := CR
+      else if FLastLF then FLineScan.Previous := LF;
+    FLineScan.SkipComplement := FLineScan.Previous <> #0;
   end;
-  for I := Start to FReadBuffer.Count - 1 do
+  if FLineScan.Ready then Exit(True);
+  while FLineScan.Offset < FReadBuffer.Count do
   begin
-    if I < 0 then Current := Prefix[Length(Prefix) + I + 1]
+    I := FLineScan.Offset;
+    Inc(FLineScan.Offset);
+    if I < 0 then Current := FDiscardPrefix[Length(FDiscardPrefix) + I + 1]
     else Current := AnsiChar(FReadBuffer.PeekByte(I));
-    if SkipComplement then
+    if FLineScan.SkipComplement then
     begin
-      SkipComplement := False;
-      if ((Previous = CR) and (Current = LF)) or
-        ((Previous = LF) and (Current = CR)) then
+      FLineScan.SkipComplement := False;
+      if ((FLineScan.Previous = CR) and (Current = LF)) or
+        ((FLineScan.Previous = LF) and (Current = CR)) then
       begin
-        Start := I + 1;
-        Previous := #0;
+        FLineScan.Start := I + 1;
+        FLineScan.Previous := #0;
         Continue;
       end;
     end;
     if (FConvertLineEnd and (Current in [CR, LF])) or
-      (not FConvertLineEnd and (Previous = CR) and (Current = LF)) then
+      (not FConvertLineEnd and (FLineScan.Previous = CR) and (Current = LF)) then
     begin
-      if not Discarding then Exit(True);
-      Discarding := False;
-      Start := I + 1;
-      SkipComplement := FConvertLineEnd;
+      if not FLineScan.Discarding then
+      begin
+        FLineScan.Ready := True;
+        Exit(True);
+      end;
+      FLineScan.Discarding := False;
+      FLineScan.Start := I + 1;
+      FLineScan.SkipComplement := FConvertLineEnd;
     end;
-    if not Discarding and (FMaxLineLength > 0) and
-      (I - Start + 1 >= FMaxLineLength) then Exit(True);
-    Previous := Current;
+    if not FLineScan.Discarding and (FMaxLineLength > 0) and
+      (I - FLineScan.Start + 1 >= FMaxLineLength) then
+    begin
+      FLineScan.Ready := True;
+      Exit(True);
+    end;
+    FLineScan.Previous := Current;
   end;
+  Result := False;
 end;
 
 function TBlockSerial.TryReadBuffered(ALineMode: Boolean;
@@ -1157,6 +1187,7 @@ begin
     RaiseSynaError(ErrAlreadyInUse);
     Exit;                          {HGJ}
   end;                             {HGJ}
+  FLineScan.Valid := False;
   FReadBuffer.Clear;
   FDiscardLine := False;
   FDiscardPrefix := '';
@@ -1571,6 +1602,7 @@ begin
     end;
   until False;
   delete(s, 1, l);
+  FLineScan.Valid := False;
   FReadBuffer.Assign(s);
   Result := rl;
 end;
@@ -1609,6 +1641,7 @@ var
     except
       // RecvBuffer may have received bytes before reporting an I/O error.
       SetLength(Result, FLastReadCount);
+      FLineScan.Valid := False;
       FReadBuffer.Prepend(Result);
       raise;
     end;
@@ -1625,6 +1658,7 @@ begin
   SetSynaError(sOK);
   if FReadBuffer.Count > 0 then
   begin
+    FLineScan.Valid := False;
     if FPacketReadLimit > 0 then
       Result := FReadBuffer.Read(FPacketReadLimit)
     else
@@ -1656,6 +1690,7 @@ begin
   try
     ExceptCheck;
   except
+    FLineScan.Valid := False;
     FReadBuffer.Prepend(Result);
     raise;
   end;
@@ -1668,6 +1703,7 @@ begin
   if PreTestFailing then   {HGJ}
     Exit;                  {HGJ}
   SetSynaError(sOK);
+  FLineScan.Valid := False;
   if FReadBuffer.Count = 0 then
     FReadBuffer.Prepend(RecvPacket(Timeout));
   if (FLastError = sOK) and (FReadBuffer.Count > 0) then
@@ -1699,6 +1735,25 @@ begin
     Exit;
   tl := l;
   CorCRLF := FConvertLineEnd and (Terminator = CRLF);
+  if FMemoryReadMode and (Terminator = CRLF) and not FDiscardLine and
+    not BufferedDataAvailable(True) then
+  begin
+    // Leave an incomplete line in the ring. Only a complementary CR/LF
+    // belongs to the already returned line and must still be consumed.
+    if CorCRLF and (FReadBuffer.Count > 0) and (FLastCR or FLastLF) then
+    begin
+      FLineScan.Valid := False;
+      if (FLastCR and (FReadBuffer.PeekByte(0) = Ord(LF))) or
+        (FLastLF and (FReadBuffer.PeekByte(0) = Ord(CR))) then
+        FReadBuffer.Discard(1);
+      FLastCR := False;
+      FLastLF := False;
+    end;
+    SetSynaError(ErrTimeout);
+    ExceptCheck;
+    Exit;
+  end;
+  FLineScan.Valid := False;
   s := '';
   x := 0;
   Overflow := False;
@@ -1715,6 +1770,7 @@ begin
         FPacketReadLimit := SavedLimit;
       end;
     except
+      FLineScan.Valid := False;
       FReadBuffer.Prepend(s);
       raise;
     end;
@@ -1807,6 +1863,7 @@ begin
     Result := Copy(s, 1, x - 1);
     System.Delete(s, 1, x + tl - 1);
   end;
+  FLineScan.Valid := False;
   FReadBuffer.Prepend(s);
   ExceptCheck;
 end;
@@ -2464,6 +2521,7 @@ begin
     SerialCheck(fpioctl(FHandle, TCFLSH, Pointer(PtrInt(TCIOFLUSH))));
     {$ENDIF}
   {$ENDIF}
+  FLineScan.Valid := False;
   FReadBuffer.Clear;
   FDiscardLine := False;
   FDiscardPrefix := '';
@@ -2480,6 +2538,7 @@ begin
   x := PURGE_TXABORT or PURGE_TXCLEAR or PURGE_RXABORT or PURGE_RXCLEAR;
   if not PurgeComm(FHandle, x) then
     SerialCheck(sErr);
+  FLineScan.Valid := False;
   FReadBuffer.Clear;
   FDiscardLine := False;
   FDiscardPrefix := '';

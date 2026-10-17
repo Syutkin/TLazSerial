@@ -25,7 +25,7 @@
         <PackageName Value="IDEIntf"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="43">
+    <Units Count="44">
       <Unit0>
         <Filename Value="lazserialtests.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -240,6 +240,11 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="LazSerialCleanupFailureTests"/>
       </Unit42>
+      <Unit43>
+        <Filename Value="serial/lazserialincrementallinetests.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="LazSerialIncrementalLineTests"/>
+      </Unit43>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

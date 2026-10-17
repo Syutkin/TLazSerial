@@ -8,7 +8,7 @@ permissions:
 
 jobs:
   linux:
-    name: Ubuntu 24.04
+    name: Ubuntu 24.04 (Qt6)
     runs-on: ubuntu-24.04
     timeout-minutes: 45
 
@@ -36,7 +36,7 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install --yes xvfb libgtk2.0-dev
+          sudo apt-get install --yes xvfb
 
       - name: Install Lazarus 4.8
         if: steps.toolchain-cache.outputs.cache-hit != 'true'
@@ -67,6 +67,27 @@ jobs:
             "$fpc_package" \
             "$fpc_sources" \
             "$lazarus_package"
+
+      - name: Install Qt6 Pascal bindings
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Ubuntu 24.04 has no Qt6Pas package; pin matching prebuilt bindings.
+          base_url='https://github.com/davidbannon/libqt6pas/releases/download/v6.2.10'
+          qt6pas_runtime="$RUNNER_TEMP/libqt6pas6_6.2.10-1_amd64.deb"
+          qt6pas_devel="$RUNNER_TEMP/libqt6pas6-dev_6.2.10-1_amd64.deb"
+
+          curl --fail --location --retry 3 \
+            "$base_url/libqt6pas6_6.2.10-1_amd64.deb" \
+            --output "$qt6pas_runtime"
+          curl --fail --location --retry 3 \
+            "$base_url/libqt6pas6-dev_6.2.10-1_amd64.deb" \
+            --output "$qt6pas_devel"
+
+          echo "d56329b52898c2bfe4522d6a59ebf305e44ee8a2935bbe7bcd43d825e88293a3  $qt6pas_runtime" | sha256sum --check
+          echo "dd27020c463e39f9ffa89b245db05f729ffdd7323a788acc4a1b10572433ebec  $qt6pas_devel" | sha256sum --check
+
+          sudo apt-get install --yes "$qt6pas_runtime" "$qt6pas_devel"
 
       - name: Snapshot Lazarus toolchain
         if: steps.toolchain-cache.outputs.cache-hit != 'true'
@@ -127,21 +148,33 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p ci-artifacts
+          fpc_options="-k-lQt6DBus"
 
           lazbuild --lazarusdir="$LAZARUS_DIR" \
-            --build-all --ws=gtk2 LazSerialPort.lpk \
+            --build-all --ws=qt6 --opt="$fpc_options" LazSerialPort.lpk \
             2>&1 | tee ci-artifacts/build-package.log
-          lazbuild --lazarusdir="$LAZARUS_DIR" --build-all --ws=gtk2 \
+          lazbuild --lazarusdir="$LAZARUS_DIR" --build-all --ws=qt6 --opt="$fpc_options" \
             tests/lazserialtests.lpi \
             2>&1 | tee ci-artifacts/build-lazserial-tests.log
-          lazbuild --lazarusdir="$LAZARUS_DIR" --build-all --ws=gtk2 \
+          lazbuild --lazarusdir="$LAZARUS_DIR" --build-all --ws=qt6 --opt="$fpc_options" \
             examples/serial-selector/serialselectorexample.lpi \
             2>&1 | tee ci-artifacts/build-serial-selector-example.log
-          lazbuild --lazarusdir="$LAZARUS_DIR" --build-all --ws=gtk2 \
+          lazbuild --lazarusdir="$LAZARUS_DIR" --build-all --ws=qt6 --opt="$fpc_options" \
             examples/serial-gps/serialgpsexample.lpi \
             2>&1 | tee ci-artifacts/build-serial-gps-example.log
+          lazbuild --lazarusdir="$LAZARUS_DIR" --build-all --ws=qt6 --opt="$fpc_options" \
+            examples/serial-terminal/serialterminal.lpi \
+            2>&1 | tee ci-artifacts/build-serial-terminal-example.log
+          lazbuild --lazarusdir="$LAZARUS_DIR" --build-all --ws=qt6 --opt="$fpc_options" \
+            examples/console/legacy.lpi \
+            2>&1 | tee ci-artifacts/build-console-legacy-example.log
+          lazbuild --lazarusdir="$LAZARUS_DIR" --build-all --ws=qt6 --opt="$fpc_options" \
+            examples/console/buffered.lpi \
+            2>&1 | tee ci-artifacts/build-console-buffered-example.log
 
       - name: Run tests
+        env:
+          QT_QPA_PLATFORM: xcb
         shell: bash
         run: |
           set -euo pipefail
@@ -325,6 +358,12 @@ jobs:
             'examples/serial-selector/serialselectorexample.lpi'
           Invoke-LazBuild 'ci-artifacts/build-serial-gps-example.log' `
             'examples/serial-gps/serialgpsexample.lpi'
+          Invoke-LazBuild 'ci-artifacts/build-serial-terminal-example.log' `
+            'examples/serial-terminal/serialterminal.lpi'
+          Invoke-LazBuild 'ci-artifacts/build-console-legacy-example.log' `
+            'examples/console/legacy.lpi'
+          Invoke-LazBuild 'ci-artifacts/build-console-buffered-example.log' `
+            'examples/console/buffered.lpi'
 
       - name: Run tests
         shell: pwsh
@@ -561,6 +600,18 @@ jobs:
             --opt="$fpc_options" \
             examples/serial-gps/serialgpsexample.lpi \
             2>&1 | tee ci-artifacts/build-serial-gps-example.log
+          lazbuild --lazarusdir="$LAZARUS_DIR" --build-all --ws=cocoa \
+            --opt="$fpc_options" \
+            examples/serial-terminal/serialterminal.lpi \
+            2>&1 | tee ci-artifacts/build-serial-terminal-example.log
+          lazbuild --lazarusdir="$LAZARUS_DIR" --build-all --ws=cocoa \
+            --opt="$fpc_options" \
+            examples/console/legacy.lpi \
+            2>&1 | tee ci-artifacts/build-console-legacy-example.log
+          lazbuild --lazarusdir="$LAZARUS_DIR" --build-all --ws=cocoa \
+            --opt="$fpc_options" \
+            examples/console/buffered.lpi \
+            2>&1 | tee ci-artifacts/build-console-buffered-example.log
 
       - name: Run tests
         shell: bash
